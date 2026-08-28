@@ -1,18 +1,34 @@
 # pyGAPIT — Genome Association and Prediction Integrated Tool (Python)
 
-A complete Python reimplementation of the R [GAPIT](https://github.com/jiabowang/GAPIT) package by Jiabo Wang & Zhiwu Zhang.
+**Compatibility target:** pyGAPIT currently targets R **GAPIT 3.5**, using the official [GAPIT3.5 release tag](https://github.com/jiabowang/GAPIT/tree/GAPIT3.5) by Jiabo Wang & Zhiwu Zhang as its upstream reference. That tag currently resolves to commit [`8d6651c`](https://github.com/jiabowang/GAPIT/tree/8d6651c719484c9f6c844144783dca1e4ef85b3e). This identifies the intended upstream baseline; exact numerical and interface parity has not yet been established. GAPIT v4 compatibility is not currently targeted.
 
-Supports **all GWAS models** (GLM, MLM, CMLM, MLMM, FarmCPU, BLINK) and **genomic selection** methods (gBLUP, cBLUP, sBLUP) with the same interface as R GAPIT.
+It provides GAPIT-style inputs for the GWAS models **GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK**, together with **gBLUP, cBLUP, and sBLUP** genomic-selection functions. It is not a drop-in replacement for every R GAPIT parameter.
 
 ---
 
 ## Installation
 
 ```bash
-pip install -e .           # from source (this repo)
+# Recommended for development and validation
+pixi install -e full
+pixi shell -e full
+
+# Alternatively, install from source with pip
+pip install -e .             # runtime dependencies only
+pip install -e ".[bigdata]" # include HDF5, Zarr, and Dask support
+pip install -e ".[dev]"     # include test, lint, and typing dependencies
 ```
 
 **Dependencies** are automatically installed: `numpy`, `scipy`, `pandas`, `matplotlib`, `seaborn`, `plotly`, `scikit-learn`, `joblib`, `biopython`, `jinja2`.
+
+Run the repository checks in the full Pixi environment:
+
+```bash
+pixi run -e full ruff check .
+pixi run -e full pyrefly check -p all
+pixi run -e full basedpyright
+pixi run -e full pytest
+```
 
 ---
 
@@ -22,21 +38,28 @@ pip install -e .           # from source (this repo)
 import pandas as pd
 from pygapit import GAPIT
 
-# Load data (same format as R GAPIT)
+# Load GAPIT-style tabular data
 Y  = pd.read_csv("mdp_traits.txt",         sep="\t")  # phenotype
 GD = pd.read_csv("mdp_numeric.txt",         sep="\t")  # numeric genotype
 GM = pd.read_csv("mdp_SNP_information.txt", sep="\t")  # SNP map
 
-# Run GWAS (BLINK = default, highest power)
-result = GAPIT(Y=Y, GD=GD, GM=GM, model="BLINK", PCA_total=3)
+# Select one trait so GAPIT returns one GAPITResult instead of a result dict
+result = GAPIT(
+    Y=Y,
+    GD=GD,
+    GM=GM,
+    model="BLINK",
+    trait="EarHT",
+    PCA_total=3,
+)
 
 print(result.GWAS.head())          # full GWAS results table
 print(f"h²    = {result.h2:.3f}")  # heritability
 print(f"λ     = {result.lambda_gc:.3f}")  # genomic inflation factor
-print(f"QTNs  = {len(result.QTNs)}")     # multi-locus hits
+print(f"QTNs  = {0 if result.QTNs is None else len(result.QTNs)}")
 ```
 
-**Equivalent R code:**
+**Comparable R GAPIT call when `Y` contains the selected trait:**
 ```r
 myGAPIT <- GAPIT(Y=myY, GD=myGD, GM=myGM, model="Blink", PCA.total=3)
 ```
@@ -45,7 +68,7 @@ myGAPIT <- GAPIT(Y=myY, GD=myGD, GM=myGM, model="Blink", PCA.total=3)
 
 ## Input data formats
 
-pyGAPIT accepts the same file formats as R GAPIT:
+pyGAPIT accepts GAPIT-style phenotype, numeric-genotype/map, and HapMap inputs:
 
 ### Phenotype file (`Y`)
 Tab-delimited. First column = Taxa names, remaining columns = trait values.
@@ -87,12 +110,13 @@ result = GAPIT(Y=Y, G=hapmap_df, model="BLINK")
 | `CMLM`   | Single-locus | Compressed  | No        | Medium+ | Fast     |
 | `MLMM`   | Multi-locus  | Yes (global) | Yes       | High    | Moderate |
 | `FarmCPU`| Multi-locus  | Pseudo-QTN  | Yes       | High    | Moderate |
-| `BLINK`  | Multi-locus  | No          | Yes       | Highest | Fast     |
+| `BLINK`  | Multi-locus  | No          | Yes       | High    | Fast     |
 
 ```python
 # Run multiple models simultaneously
 result = GAPIT(Y=Y, GD=GD, GM=GM,
-               model=["GLM", "MLM", "FarmCPU", "BLINK"])
+               model=["GLM", "MLM", "FarmCPU", "BLINK"],
+               trait="EarHT")
 # Returns a dict keyed by "EarHT_GLM", "EarHT_MLM", etc.
 ```
 
@@ -102,10 +126,21 @@ result = GAPIT(Y=Y, GD=GD, GM=GM,
 
 ```python
 # gBLUP — best for polygenic traits
-result = GAPIT(Y=Y, GD=GD, GM=GM, model="gBLUP")
+result = GAPIT(Y=Y, GD=GD, GM=GM, model="gBLUP", trait="EarHT")
 
-# sBLUP — best for oligogenic traits (uses GWAS-identified QTNs)
-result = GAPIT(Y=Y, GD=GD, GM=GM, model="BLINK", buspred=True)
+# cBLUP — compressed-kinship prediction
+result = GAPIT(Y=Y, GD=GD, GM=GM, model="cBLUP", trait="EarHT")
+
+# Run gBLUP prediction after BLINK
+result = GAPIT(
+    Y=Y, GD=GD, GM=GM, model="BLINK", trait="EarHT", buspred=True
+)
+
+# FarmCPU + buspred uses sBLUP when FarmCPU identifies QTNs;
+# otherwise prediction falls back to gBLUP
+result = GAPIT(
+    Y=Y, GD=GD, GM=GM, model="FarmCPU", trait="EarHT", buspred=True
+)
 
 # Access prediction results
 print(result.Pred)
@@ -122,7 +157,7 @@ When `file_output=True` (default), pyGAPIT writes to `output_dir`:
 | File | Content |
 |------|---------|
 | `GAPIT.BLINK.EarHT.GWAS.Results.csv` | Full GWAS table: SNP, Chr, Pos, P.value, maf, effect, FDR |
-| `GAPIT.BLINK.EarHT.Prediction.csv` | BLUE, BLUP, PEV, GEBV per individual |
+| `GAPIT.BLINK.EarHT.Prediction.csv` | BLUE, BLUP, PEV, GEBV per individual; written only when `buspred=True` and prediction succeeds |
 | `GAPIT.Kinship.csv` | VanRaden kinship matrix |
 | `GAPIT.PCA.csv` | PC scores per individual |
 | `GAPIT.BLINK.EarHT.Manhattan.pdf` | Manhattan plot |
@@ -134,7 +169,7 @@ When `file_output=True` (default), pyGAPIT writes to `output_dir`:
 
 ## Parameter reference
 
-All R GAPIT parameters are supported with underscores replacing dots:
+The main supported GAPIT-style parameters are:
 
 | R parameter | Python parameter | Default | Description |
 |-------------|-----------------|---------|-------------|
@@ -230,8 +265,8 @@ spectral decomposition of K → grid search + Brent's method for optimal δ = σ
 ### VanRaden Kinship (2009)
 ```
 K = ZZ' / [2 · Σⱼ pⱼ(1-pⱼ)]
-Z = GD - 1 - P       (centered 0/1/2 coding)
-p = allele frequencies
+Z = GD - 2p          (column-centered 0/1/2 coding)
+p = alternate-allele frequencies
 ```
 
 ### BLINK iteration

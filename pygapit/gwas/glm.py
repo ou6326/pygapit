@@ -10,22 +10,25 @@ Fast OLS per SNP via vectorized numpy operations.
 """
 
 from __future__ import annotations
-import numpy as np
-from scipy.stats import t as t_dist, f as f_dist
+
 from dataclasses import dataclass
-from typing import Optional
+
+import numpy as np
+from scipy.stats import t as t_dist
 
 
 @dataclass
 class GLMResult:
-    p_values: np.ndarray     # (m,) p-values for each SNP
-    effects: np.ndarray      # (m,) effect size estimates
-    se: np.ndarray           # (m,) standard errors
-    t_stats: np.ndarray      # (m,) t-statistics
-    r2_full: float           # R² of null model
+    p_values: np.ndarray  # (m,) p-values for each SNP
+    effects: np.ndarray  # (m,) effect size estimates
+    se: np.ndarray  # (m,) standard errors
+    t_stats: np.ndarray  # (m,) t-statistics
+    r2_full: float  # R² of null model
 
 
-def _ols_vectorized(y: np.ndarray, X0: np.ndarray, GD: np.ndarray) -> tuple:
+def _ols_vectorized(
+    y: np.ndarray, X0: np.ndarray, GD: np.ndarray
+) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
     """
     Vectorized OLS test for all m SNPs simultaneously.
     Uses the partitioned regression trick:
@@ -46,13 +49,13 @@ def _ols_vectorized(y: np.ndarray, X0: np.ndarray, GD: np.ndarray) -> tuple:
     except np.linalg.LinAlgError:
         XtX_inv = np.linalg.pinv(X0.T @ X0 + np.eye(q0) * 1e-10)
 
-    H = X0 @ XtX_inv @ X0.T          # hat matrix for X0
-    y_res = y - H @ y                  # (n,) residual of y after X0
-    G_res = GD - H @ GD               # (n, m) residual of each SNP after X0
+    H = X0 @ XtX_inv @ X0.T  # hat matrix for X0
+    y_res = y - H @ y  # (n,) residual of y after X0
+    G_res = GD - H @ GD  # (n, m) residual of each SNP after X0
 
     # ── SNP effect: alpha = (g_res' y_res) / (g_res' g_res) ──────────────
-    g_ss = np.sum(G_res ** 2, axis=0)                    # (m,) sum of squares
-    valid = g_ss > 1e-10                                  # skip monomorphic
+    g_ss = np.sum(G_res**2, axis=0)  # (m,) sum of squares
+    valid = g_ss > 1e-10  # skip monomorphic
 
     effects = np.zeros(m)
     se = np.ones(m)
@@ -60,21 +63,21 @@ def _ols_vectorized(y: np.ndarray, X0: np.ndarray, GD: np.ndarray) -> tuple:
     p_values = np.ones(m)
 
     if valid.any():
-        g_valid = G_res[:, valid]                         # (n, m_valid)
-        g_ss_v = g_ss[valid]                              # (m_valid,)
+        g_valid = G_res[:, valid]  # (n, m_valid)
+        g_ss_v = g_ss[valid]  # (m_valid,)
 
-        alpha = (g_valid.T @ y_res) / g_ss_v             # (m_valid,)
+        alpha = (g_valid.T @ y_res) / g_ss_v  # (m_valid,)
 
         # Residuals of full model
-        y_hat_snp = g_valid * alpha[np.newaxis, :]        # (n, m_valid)
-        e_full = y_res[:, np.newaxis] - y_hat_snp         # (n, m_valid)
-        sse = np.sum(e_full ** 2, axis=0)                 # (m_valid,)
+        y_hat_snp = g_valid * alpha[np.newaxis, :]  # (n, m_valid)
+        e_full = y_res[:, np.newaxis] - y_hat_snp  # (n, m_valid)
+        sse = np.sum(e_full**2, axis=0)  # (m_valid,)
 
         sigma2 = sse / df
-        se_v = np.sqrt(sigma2 / g_ss_v)                   # (m_valid,)
+        se_v = np.sqrt(sigma2 / g_ss_v)  # (m_valid,)
         se_v = np.where(se_v < 1e-12, 1e-12, se_v)
 
-        t_v = alpha / se_v                                 # (m_valid,)
+        t_v = alpha / se_v  # (m_valid,)
         p_v = 2.0 * t_dist.sf(np.abs(t_v), df)
         p_v = np.clip(p_v, 0.0, 1.0)
 
@@ -109,7 +112,7 @@ def glm_gwas(
     X0 = np.asarray(X0, dtype=float)
     GD = np.asarray(GD, dtype=float)
 
-    n, m = GD.shape
+    _n, _m = GD.shape
 
     # Null model R²
     y_mean = y.mean()
@@ -119,7 +122,7 @@ def glm_gwas(
         y_hat0 = X0 @ beta0
         ss_res0 = np.sum((y - y_hat0) ** 2)
         r2_null = 1.0 - ss_res0 / ss_tot if ss_tot > 0 else 0.0
-    except Exception:
+    except np.linalg.LinAlgError:
         r2_null = 0.0
 
     effects, se, t_stats, p_values = _ols_vectorized(y, X0, GD)
@@ -137,7 +140,7 @@ def glm_scan_with_cofactors(
     y: np.ndarray,
     X0: np.ndarray,
     GD: np.ndarray,
-    cofactor_indices: np.ndarray,
+    cofactor_indices: np.ndarray | None,
 ) -> GLMResult:
     """
     GLM scan including pseudo-QTN cofactors as additional fixed effects.

@@ -13,27 +13,30 @@ for all SNP tests using spectral decomposition for speed.
 """
 
 from __future__ import annotations
-import numpy as np
-from scipy.linalg import eigh
-from scipy.optimize import brentq
-from scipy.stats import f as f_dist, t as t_dist
+
+import math
 from dataclasses import dataclass
-from typing import Optional
+
+import numpy as np
+from scipy.optimize import brentq
+from scipy.stats import t as t_dist
 
 
 @dataclass
 class EMMAResult:
     """Output from variance component estimation."""
+
     reml: float
-    delta: float       # sigma2_e / sigma2_g
-    ve: float          # residual variance
-    vg: float          # genetic variance
-    h2: float          # narrow-sense heritability
+    delta: float  # sigma2_e / sigma2_g
+    ve: float  # residual variance
+    vg: float  # genetic variance
+    h2: float  # narrow-sense heritability
 
 
 @dataclass
 class GWASResult:
     """Per-SNP GWAS output."""
+
     p_values: np.ndarray
     effects: np.ndarray
     se: np.ndarray
@@ -43,7 +46,7 @@ class GWASResult:
     h2: float
 
 
-def _eigen_R_wo_Z(K: np.ndarray, X: np.ndarray):
+def _eigen_R_wo_Z(K: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Spectral decomposition of the residual projection matrix (no Z).
     Equivalent to emma.eigen.R.wo.Z in R.
@@ -55,19 +58,19 @@ def _eigen_R_wo_Z(K: np.ndarray, X: np.ndarray):
     S = np.eye(n) - X @ XtX_inv @ X.T
     # Symmetric matrix for eigen: S(K + I)S
     SHS = S @ (K + np.eye(n)) @ S
-    eigvals, eigvecs = eigh(SHS)
+    eigvals, eigvecs = np.linalg.eigh(SHS)
     # Keep n-q non-trivial components (remove q near-zero eigenvalues)
     eigvals = eigvals[q:][::-1]
     eigvecs = eigvecs[:, q:][:, ::-1]
     return eigvals - 1.0, eigvecs  # subtract 1 added by I
 
 
-def _eigen_L_wo_Z(K: np.ndarray):
+def _eigen_L_wo_Z(K: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     """
     Eigendecomposition of K for the full log-likelihood.
     Equivalent to emma.eigen.L.wo.Z in R.
     """
-    eigvals, eigvecs = eigh(K)
+    eigvals, eigvecs = np.linalg.eigh(K)
     return eigvals[::-1], eigvecs[:, ::-1]
 
 
@@ -76,20 +79,29 @@ def _reml_ll(log_delta: float, lambda_R: np.ndarray, etas: np.ndarray) -> float:
     REML log-likelihood as a function of log(delta).
     Equation from Kang et al. (2008) Genetics.
     """
+    lambda_R = np.asarray(lambda_R, dtype=float)
+    etas = np.asarray(etas, dtype=float)
     nq = len(etas)
-    delta = np.exp(log_delta)
-    denom = lambda_R + delta
-    sse = np.sum(etas ** 2 / denom)
-    return 0.5 * (nq * (np.log(nq / (2 * np.pi)) - 1 - np.log(sse)) - np.sum(np.log(denom)))
+    delta = math.exp(log_delta)
+    denom = np.asarray(lambda_R + delta, dtype=float)
+    sse = float(np.sum(etas**2 / denom))
+    log_scale = math.log(nq / (2 * math.pi)) - 1.0 - math.log(sse)
+    log_denom = float(np.sum(np.log(denom)))
+    return 0.5 * (nq * log_scale - log_denom)
 
 
 def _reml_dll(log_delta: float, lambda_R: np.ndarray, etas: np.ndarray) -> float:
     """Derivative of REML log-likelihood w.r.t. log(delta)."""
+    lambda_R = np.asarray(lambda_R, dtype=float)
+    etas = np.asarray(etas, dtype=float)
     nq = len(etas)
-    delta = np.exp(log_delta)
-    etasq = etas ** 2
-    denom = lambda_R + delta
-    return 0.5 * delta * (nq * np.sum(etasq / denom ** 2) / np.sum(etasq / denom) - np.sum(1.0 / denom))
+    delta = math.exp(log_delta)
+    etasq = np.asarray(etas**2, dtype=float)
+    denom = np.asarray(lambda_R + delta, dtype=float)
+    weighted_sq = float(np.sum(etasq / denom**2))
+    weighted = float(np.sum(etasq / denom))
+    inv_sum = float(np.sum(1.0 / denom))
+    return 0.5 * delta * (nq * weighted_sq / weighted - inv_sum)
 
 
 def emma_remle(
@@ -134,8 +146,8 @@ def emma_remle(
     log_deltas = np.linspace(llim, ulim, ngrids + 1)
     dlls = np.array([_reml_dll(ld, lambda_R, etas) for ld in log_deltas])
 
-    opt_log_deltas = []
-    opt_lls = []
+    opt_log_deltas: list[float] = []
+    opt_lls: list[float] = []
 
     # Boundary cases
     if dlls[0] < esp:
@@ -149,12 +161,18 @@ def emma_remle(
     for i in range(len(log_deltas) - 1):
         if dlls[i] * dlls[i + 1] < 0 and dlls[i] > 0 and dlls[i + 1] < 0:
             try:
-                root = brentq(_reml_dll, log_deltas[i], log_deltas[i + 1],
-                               args=(lambda_R, etas), xtol=esp)
+                root = brentq(
+                    _reml_dll,
+                    log_deltas[i],
+                    log_deltas[i + 1],
+                    args=(lambda_R, etas),
+                    xtol=esp,
+                    full_output=False,
+                )
                 opt_log_deltas.append(root)
                 opt_lls.append(_reml_ll(root, lambda_R, etas))
-            except Exception:
-                pass
+            except (ValueError, RuntimeError, FloatingPointError):
+                root = None
 
     if not opt_log_deltas:
         # Fallback: take grid maximum
@@ -163,14 +181,14 @@ def emma_remle(
         opt_lls = [_reml_ll(log_deltas[best_idx], lambda_R, etas)]
 
     best_idx = int(np.argmax(opt_lls))
-    best_delta = np.exp(opt_log_deltas[best_idx])
+    best_delta = float(np.exp(opt_log_deltas[best_idx]))
     best_ll = opt_lls[best_idx]
 
     # Recover variance components
     nq = n - q
     denom = lambda_R + best_delta
-    sse = np.sum(etas ** 2 / denom)
-    vg = sse / nq
+    sse = float(np.sum(etas**2 / denom))
+    vg = float(sse / nq)
     ve = vg * best_delta
     h2 = vg / (vg + ve) if (vg + ve) > 0 else 0.0
 
@@ -223,9 +241,9 @@ def emmax_p3d(
     # Rotation matrix: U * diag(1/sqrt(lambda + delta))
     scale = 1.0 / np.sqrt(lambda_L + delta)
     # Apply transformation: yt = scale * U' * y,  Xt0 = scale * U' * X0
-    Uty = (U_L * scale).T @ y      # (n,)
-    UtX0 = (U_L * scale).T @ X0   # (n, q0)
-    UtGD = (U_L * scale).T @ GD   # (n, m)
+    Uty = (U_L * scale).T @ y  # (n,)
+    UtX0 = (U_L * scale).T @ X0  # (n, q0)
+    UtGD = (U_L * scale).T @ GD  # (n, m)
 
     # ── Step 3: Test each SNP ─────────────────────────────────────────────
     q1 = q0 + 1
@@ -243,7 +261,7 @@ def emmax_p3d(
             continue
 
         # Build design matrix with SNP
-        Xt = np.column_stack([UtX0, snp])   # (n, q1)
+        Xt = np.column_stack([UtX0, snp])  # (n, q1)
         # OLS in transformed space: beta = (Xt'Xt)^-1 Xt'yt
         try:
             XtX = Xt.T @ Xt
@@ -253,9 +271,7 @@ def emmax_p3d(
             p_values[i] = 1.0
             continue
 
-        # Residuals and t-statistic for SNP coefficient (last element)
-        resid = Uty - Xt @ beta
-        sigma2 = np.sum(resid ** 2) / df
+        # Standard error and t-statistic for the SNP coefficient (last element)
         try:
             iXX = np.linalg.inv(XtX)
         except np.linalg.LinAlgError:

@@ -8,16 +8,18 @@ GWAS/GS model (Q matrix approach, Price et al. 2006).
 """
 
 from __future__ import annotations
-import numpy as np
+
 from dataclasses import dataclass
+
+import numpy as np
 
 
 @dataclass
 class PCAResult:
-    scores: np.ndarray         # (n, k) PC scores per individual
-    loadings: np.ndarray       # (m, k) SNP loadings
+    scores: np.ndarray  # (n, k) PC scores per individual
+    loadings: np.ndarray  # (m, k) SNP loadings
     var_explained: np.ndarray  # (k,) proportion variance explained
-    eigenvalues: np.ndarray    # (k,) eigenvalues
+    eigenvalues: np.ndarray  # (k,) eigenvalues
 
 
 def compute_pca(
@@ -40,7 +42,7 @@ def compute_pca(
     PCAResult with scores, loadings, variance explained
     """
     GD = np.asarray(GD, dtype=float)
-    n, m = GD.shape
+    n, _m = GD.shape
 
     # ── MAF filter ────────────────────────────────────────────────────────
     freq = GD.sum(axis=0) / (2 * n)
@@ -66,11 +68,13 @@ def compute_pca(
     S = S[:k]
     Vt = Vt[:k, :]
 
-    scores = U * S              # (n, k) — PC scores (same as R's prcomp$x)
-    loadings = Vt.T             # (m, k)
-    eigenvalues = S ** 2 / (n - 1)
+    scores = U * S  # (n, k) — PC scores (same as R's prcomp$x)
+    loadings = Vt.T  # (m, k)
+    eigenvalues = S**2 / (n - 1)
     total_var = np.sum(GD_std.var(axis=0))
-    var_explained = eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum()
+    var_explained = (
+        eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum()
+    )
 
     return PCAResult(
         scores=scores,
@@ -83,7 +87,7 @@ def compute_pca(
 def build_covariate_matrix(
     pca_result: PCAResult,
     n_pcs: int,
-    extra_covariates: np.ndarray = None,
+    extra_covariates: np.ndarray | None = None,
 ) -> np.ndarray:
     """
     Build the fixed-effect design matrix X0 = [1 | PC1 | ... | PCk | CVs].

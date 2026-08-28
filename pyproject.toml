@@ -10,15 +10,25 @@ readme      = "README.md"
 license     = { text = "GPL-3.0-or-later" }
 requires-python = ">=3.9"
 
-authors = [
-    { name = "PyGAPIT Contributors" },
-]
+authors = [{ name = "PyGAPIT Contributors" }]
 
 keywords = [
-    "GWAS", "genomics", "association-study", "plant-breeding",
-    "mixed-model", "genomic-selection", "BLUP", "EMMA",
-    "FarmCPU", "BLINK", "MLMM", "bioinformatics", "quantitative-genetics",
-    "SNP", "kinship", "heritability",
+    "GWAS",
+    "genomics",
+    "association-study",
+    "plant-breeding",
+    "mixed-model",
+    "genomic-selection",
+    "BLUP",
+    "EMMA",
+    "FarmCPU",
+    "BLINK",
+    "MLMM",
+    "bioinformatics",
+    "quantitative-genetics",
+    "SNP",
+    "kinship",
+    "heritability",
 ]
 
 classifiers = [
@@ -51,19 +61,20 @@ dependencies = [
 dev = [
     "pytest>=7.4.0",
     "pytest-cov>=4.1.0",
+    "rpy2>=3.6.4,<4",
     "black>=23.0.0",
     "ruff>=0.1.0",
+    "pandas-stubs>=3.0.5.260730,<4",
+    "scipy-stubs>=1.18.1.0,<2",
+    "pyrefly>=1.2.0,<2",
+    "basedpyright>=1.39.10,<2",
 ]
-bigdata = [
-    "h5py>=3.9.0",
-    "zarr>=2.16.0",
-    "dask[array]>=2023.1.0",
-]
+bigdata = ["h5py>=3.9.0", "zarr>=2.16.0", "dask[array]>=2023.1.0"]
 
 [project.urls]
-Homepage           = "https://github.com/Lalitgis/pygapit"
-Documentation      = "https://github.com/Lalitgis/pygapit#readme"
-"Bug Tracker"      = "https://github.com/Lalitgis/pygapit/issues"
+Homepage = "https://github.com/ou6326/pygapit"
+Documentation = "https://github.com/ou6326/pygapit#readme"
+"Bug Tracker" = "https://github.com/ou6326/pygapit/issues"
 
 [project.scripts]
 pygapit = "pygapit.cli:main"
@@ -76,10 +87,64 @@ include = ["pygapit*"]
 pygapit = ["py.typed"]
 
 [tool.pytest.ini_options]
-testpaths    = ["tests"]
-addopts      = "-v --tb=short"
+testpaths      = ["tests"]
+addopts        = "-v --tb=short"
 filterwarnings = ["ignore::UserWarning"]
 
 [tool.black]
 line-length    = 100
-target-version = ["py39"]
+target-version = ["py39", "py310", "py311", "py312"]
+
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["win-64"]
+
+[tool.pixi.pypi-dependencies]
+pygapit = { path = ".", editable = true }
+
+[tool.pixi.environments]
+default = { solve-group = "default" }
+bigdata = { features = ["bigdata"], solve-group = "default" }
+dev = { features = ["dev"], solve-group = "default" }
+full = { features = ["dev", "bigdata"], solve-group = "default" }
+
+[tool.pixi.dependencies]
+python = "3.12.*"
+
+[tool.pyrefly]
+project-includes = ["pygapit/**/*.py", "tests/**/*.py", "examples/**/*.py"]
+python-version = "3.12"
+
+[tool.pyrefly.errors]
+# NumPy, pandas, matplotlib, and argparse expose intentionally dynamic APIs.
+# Keep Pyrefly's compatibility checks strict while avoiding diagnostics that
+# only demand exhaustive annotations or discarded-result assignments.
+explicit-any = false
+unknown-argument-type = false
+unknown-variable-type = false
+implicit-any-parameter = false
+unused-call-result = false
+implicit-bool = false
+implicit-any-type-argument = false
+
+[tool.basedpyright]
+include = ["pygapit", "tests", "examples"]
+pythonVersion = "3.12"
+reportUnknownMemberType = true
+reportUnknownArgumentType = true
+reportUnknownVariableType = true
+reportUnknownParameterType = true
+reportMissingParameterType = true
+# Upper-case local names (X, GD, GM, K, …) are the established notation for
+# matrices in statistical genetics; they are variables rather than constants.
+reportConstantRedefinition = false
+# Scientific Python and pytest expose deliberately dynamic APIs. Keep concrete
+# compatibility diagnostics enabled while avoiding annotation-completeness noise.
+reportAny = false
+reportExplicitAny = false
+reportMissingTypeStubs = false
+reportUnusedCallResult = false
+reportUnusedParameter = false
+reportUnnecessaryTypeIgnoreComment = false
+reportPrivateUsage = false
+reportImplicitStringConcatenation = false

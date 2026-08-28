@@ -10,11 +10,12 @@ Usage
 """
 
 import argparse
-import sys
-import os
+from pathlib import Path
+
+from pygapit.gapit import GAPITResult
 
 
-def main():
+def main() -> None:
     parser = argparse.ArgumentParser(
         prog="pygapit",
         description="pyGAPIT: Genome Association and Prediction Integrated Tool (Python)",
@@ -41,82 +42,144 @@ Examples:
 
     # Input files
     io_group = parser.add_argument_group("Input data")
-    io_group.add_argument("--Y",  required=True,
-                          help="Phenotype file (tab-delimited, col1=Taxa)")
-    io_group.add_argument("--GD",
-                          help="Numeric genotype file (col1=taxa, col2+=SNPs 0/1/2)")
-    io_group.add_argument("--GM",
-                          help="SNP map file (3 cols: SNP, Chromosome, Position)")
-    io_group.add_argument("--G",
-                          help="HapMap genotype file (alternative to --GD + --GM)")
-    io_group.add_argument("--KI",
-                          help="Kinship matrix file (optional; computed from GD if absent)")
-    io_group.add_argument("--CV",
-                          help="Covariate file (optional)")
+    io_group.add_argument(
+        "--Y", required=True, help="Phenotype file (tab-delimited, col1=Taxa)"
+    )
+    io_group.add_argument(
+        "--GD", help="Numeric genotype file (col1=taxa, col2+=SNPs 0/1/2)"
+    )
+    io_group.add_argument(
+        "--GM", help="SNP map file (3 cols: SNP, Chromosome, Position)"
+    )
+    io_group.add_argument(
+        "--G", help="HapMap genotype file (alternative to --GD + --GM)"
+    )
+    io_group.add_argument(
+        "--KI", help="Kinship matrix file (optional; computed from GD if absent)"
+    )
+    io_group.add_argument("--CV", help="Covariate file (optional)")
 
     # Model selection
     model_group = parser.add_argument_group("Model")
     model_group.add_argument(
-        "--model", nargs="+", default=["BLINK"],
-        choices=["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "BLINK",
-                 "gBLUP", "cBLUP", "sBLUP"],
+        "--model",
+        nargs="+",
+        default=["BLINK"],
+        choices=[
+            "GLM",
+            "MLM",
+            "CMLM",
+            "MLMM",
+            "FarmCPU",
+            "BLINK",
+            "gBLUP",
+            "cBLUP",
+            "sBLUP",
+        ],
         help="GWAS/GS model(s) to run (default: BLINK)",
     )
-    model_group.add_argument("--trait",
-                             help="Trait name or column index to analyze (default: all traits)")
+    model_group.add_argument(
+        "--trait", help="Trait name or column index to analyze (default: all traits)"
+    )
 
     # PCA / QC
     qc_group = parser.add_argument_group("Quality control & PCA")
-    qc_group.add_argument("--PCA_total",    type=int,   default=3,
-                          help="Number of PCs for population structure control (default: 3)")
-    qc_group.add_argument("--maf_threshold", type=float, default=0.05,
-                          help="Minimum minor allele frequency (default: 0.05)")
-    qc_group.add_argument("--SNP_impute",   default="middle",
-                          choices=["middle", "major", "minor", "mean", "none"],
-                          help="Missing genotype imputation method (default: middle)")
+    qc_group.add_argument(
+        "--PCA_total",
+        type=int,
+        default=3,
+        help="Number of PCs for population structure control (default: 3)",
+    )
+    qc_group.add_argument(
+        "--maf_threshold",
+        type=float,
+        default=0.05,
+        help="Minimum minor allele frequency (default: 0.05)",
+    )
+    qc_group.add_argument(
+        "--SNP_impute",
+        default="middle",
+        choices=["middle", "major", "minor", "mean", "none"],
+        help="Missing genotype imputation method (default: middle)",
+    )
 
     # GWAS thresholds
     thresh_group = parser.add_argument_group("Significance thresholds")
-    thresh_group.add_argument("--cutOff",     type=float, default=None,
-                              help="P-value threshold (default: Bonferroni 0.05/m)")
-    thresh_group.add_argument("--LD",         type=float, default=0.7,
-                              help="LD threshold for BLINK pruning (default: 0.7)")
-    thresh_group.add_argument("--maxLoop",    type=int,   default=10,
-                              help="Max iterations for BLINK/FarmCPU (default: 10)")
+    thresh_group.add_argument(
+        "--cutOff",
+        type=float,
+        default=None,
+        help="P-value threshold (default: Bonferroni 0.05/m)",
+    )
+    thresh_group.add_argument(
+        "--LD",
+        type=float,
+        default=0.7,
+        help="LD threshold for BLINK pruning (default: 0.7)",
+    )
+    thresh_group.add_argument(
+        "--maxLoop",
+        type=int,
+        default=10,
+        help="Max iterations for BLINK/FarmCPU (default: 10)",
+    )
 
     # CMLM parameters
     cmlm_group = parser.add_argument_group("CMLM parameters")
-    cmlm_group.add_argument("--group_from", type=int, default=1,
-                             help="Min groups for CMLM (default: 1)")
-    cmlm_group.add_argument("--group_to",   type=int, default=None,
-                             help="Max groups for CMLM (default: n individuals)")
+    cmlm_group.add_argument(
+        "--group_from", type=int, default=1, help="Min groups for CMLM (default: 1)"
+    )
+    cmlm_group.add_argument(
+        "--group_to",
+        type=int,
+        default=None,
+        help="Max groups for CMLM (default: n individuals)",
+    )
 
     # FarmCPU parameters
     farm_group = parser.add_argument_group("FarmCPU parameters")
-    farm_group.add_argument("--bin_size", type=int, default=5_000_000,
-                             help="Bin size in bp for FarmCPU (default: 5000000)")
+    farm_group.add_argument(
+        "--bin_size",
+        type=int,
+        default=5_000_000,
+        help="Bin size in bp for FarmCPU (default: 5000000)",
+    )
 
     # Simulation
     sim_group = parser.add_argument_group("Phenotype simulation")
-    sim_group.add_argument("--h2",   type=float, default=None,
-                           help="Heritability for phenotype simulation (e.g. 0.7)")
-    sim_group.add_argument("--NQTN", type=int,   default=None,
-                           help="Number of QTNs for simulation (e.g. 20)")
+    sim_group.add_argument(
+        "--h2",
+        type=float,
+        default=None,
+        help="Heritability for phenotype simulation (e.g. 0.7)",
+    )
+    sim_group.add_argument(
+        "--NQTN", type=int, default=None, help="Number of QTNs for simulation (e.g. 20)"
+    )
 
     # Output
     out_group = parser.add_argument_group("Output")
-    out_group.add_argument("--output_dir",  default=".",
-                           help="Output directory for results (default: current dir)")
-    out_group.add_argument("--no_file_output", action="store_true",
-                           help="Suppress file output (only return object)")
-    out_group.add_argument("--buspred",    action="store_true",
-                           help="Run genomic prediction after GWAS")
+    out_group.add_argument(
+        "--output_dir",
+        default=".",
+        help="Output directory for results (default: current dir)",
+    )
+    out_group.add_argument(
+        "--no_file_output",
+        action="store_true",
+        help="Suppress file output (only return object)",
+    )
+    out_group.add_argument(
+        "--buspred", action="store_true", help="Run genomic prediction after GWAS"
+    )
 
     args = parser.parse_args()
 
     # Validate inputs
     if args.G is None and (args.GD is None or args.GM is None):
-        parser.error("Provide either --G (HapMap) or both --GD and --GM (numeric format).")
+        parser.error(
+            "Provide either --G (HapMap) or both --GD and --GM (numeric format)."
+        )
 
     if args.h2 is not None and args.NQTN is None:
         parser.error("--NQTN is required when --h2 is provided for simulation.")
@@ -126,9 +189,11 @@ Examples:
     print("=" * 60)
 
     import warnings
+
     warnings.filterwarnings("ignore")
 
     import pandas as pd
+
     from pygapit import GAPIT
 
     # Load data
@@ -149,11 +214,16 @@ Examples:
     CV = pd.read_csv(args.CV, sep="\t") if args.CV else None
 
     print(f"[CLI] Model(s): {args.model}")
-    print(f"[CLI] Output directory: {os.path.abspath(args.output_dir)}")
+    print(f"[CLI] Output directory: {Path(args.output_dir).resolve()}")
 
     # Run GAPIT
     result = GAPIT(
-        Y=Y, G=G, GD=GD, GM=GM, KI=KI, CV=CV,
+        Y=Y,
+        G=G,
+        GD=GD,
+        GM=GM,
+        KI=KI,
+        CV=CV,
         model=args.model,
         trait=args.trait,
         PCA_total=args.PCA_total,
@@ -186,7 +256,7 @@ Examples:
     print("\n[CLI] Done.")
 
 
-def _print_summary(label, result):
+def _print_summary(label: str, result: GAPITResult) -> None:
     print(f"\n  {label}")
     print(f"    h²      = {result.h2:.4f}")
     print(f"    λ (GC)  = {result.lambda_gc:.4f}")
@@ -196,10 +266,12 @@ def _print_summary(label, result):
         print(f"    Sig SNPs = {len(result.significant)} (Bonferroni)")
         top = result.significant.nsmallest(3, "P.value")
         for _, row in top.iterrows():
-            print(f"      {row['SNP']}  chr{row['Chr']}:{int(row['Pos']):,}  "
-                  f"p={row['P.value']:.2e}  effect={row['effect']:.4f}")
+            print(
+                f"      {row['SNP']}  chr{row['Chr']}:{int(float(str(row['Pos']))):,}  "
+                f"p={row['P.value']:.2e}  effect={row['effect']:.4f}"
+            )
     else:
-        print(f"    Sig SNPs = 0 (no Bonferroni-significant hits)")
+        print("    Sig SNPs = 0 (no Bonferroni-significant hits)")
     if result.QTNs is not None and len(result.QTNs) > 0:
         print(f"    QTNs selected = {len(result.QTNs)}")
     if result.runtime_seconds > 0:

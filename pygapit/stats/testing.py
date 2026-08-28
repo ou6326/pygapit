@@ -4,8 +4,11 @@ Translates GAPIT.Perform.BH.FDR.Multiple.Correction.Procedure.R and GAPIT.FDR.Ty
 """
 
 from __future__ import annotations
+
 import numpy as np
 from scipy.stats import chi2
+
+SignificanceResult = dict[str, float | int | np.ndarray]
 
 
 def bonferroni_threshold(n_tests: int, alpha: float = 0.05) -> float:
@@ -60,7 +63,7 @@ def get_significant_snps(
     positions: np.ndarray,
     method: str = "bonferroni",
     alpha: float = 0.05,
-) -> dict:
+) -> SignificanceResult:
     """
     Identify significant SNPs after multiple testing correction.
 

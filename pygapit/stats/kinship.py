@@ -8,8 +8,10 @@ VanRaden (2009) method:
 """
 
 from __future__ import annotations
-import numpy as np
+
 import warnings
+
+import numpy as np
 
 
 def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
@@ -28,10 +30,10 @@ def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
         K[i,j] > 0 = more related than average
     """
     GD = np.asarray(GD, dtype=float)
-    n, m = GD.shape
+    n, _m = GD.shape
 
     # ── Remove monomorphic SNPs ────────────────────────────────────────────
-    fa = GD.sum(axis=0) / (2 * n)           # allele frequency
+    fa = GD.sum(axis=0) / (2 * n)  # allele frequency
     valid = (fa > 0) & (fa < 1)
     if valid.sum() == 0:
         warnings.warn("All SNPs are monomorphic; returning identity matrix.")
@@ -39,32 +41,32 @@ def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
 
     GD = GD[:, valid]
     fa = fa[valid]
-    m = GD.shape[1]
+    GD.shape[1]
 
     # ── Center genotypes ──────────────────────────────────────────────────
     # p = allele frequency of alternate allele
-    p = GD.sum(axis=0) / (2 * n)
+    p = np.asarray(GD.sum(axis=0) / (2 * n), dtype=float)
     # P = deviation vector: 2*(p - 0.5)
     P = 2.0 * (p - 0.5)
     # Shift coding: 0/1/2 -> -1/0/1
     Z = GD - 1.0
     # Z_centered = Z - P  (column-wise subtraction)
-    Z_c = Z - P[np.newaxis, :]   # (n, m)
+    Z_c = Z - P[np.newaxis, :]  # (n, m)
 
     # ── Compute K = Z_c' Z_c / adj ───────────────────────────────────────
     # Note: R uses crossprod(Z, Z) where Z is TRANSPOSED first
     # In Python: Z_c is (n, m), so K = Z_c @ Z_c.T
-    K = Z_c @ Z_c.T             # (n, n)
+    K = Z_c @ Z_c.T  # (n, n)
 
     # Adjustment factor: 2 * sum(p_j * (1 - p_j))
-    adj = 2.0 * np.sum(p * (1.0 - p))
+    adj = float(2.0 * np.sum(p * (1.0 - p)))
     if adj < 1e-12:
         warnings.warn("Adjustment factor near zero; check allele frequencies.")
         adj = 1.0
 
-    K = K / adj
+    K = np.asarray(K / adj, dtype=float)
 
-    return K
+    return np.asarray(K, dtype=float)
 
 
 def zhang_kinship(GD: np.ndarray) -> np.ndarray:
@@ -76,7 +78,7 @@ def zhang_kinship(GD: np.ndarray) -> np.ndarray:
     Faster to compute than VanRaden but less statistically motivated.
     """
     GD = np.asarray(GD, dtype=float)
-    n, m = GD.shape
+    _n, _m = GD.shape
 
     # Remove monomorphic
     fa = GD.mean(axis=0) / 2.0
@@ -95,7 +97,7 @@ def zhang_kinship(GD: np.ndarray) -> np.ndarray:
     if diag_mean > 0:
         K = K / diag_mean
 
-    return K
+    return np.asarray(K, dtype=float)
 
 
 def scale_kinship(K: np.ndarray) -> np.ndarray:
@@ -105,5 +107,5 @@ def scale_kinship(K: np.ndarray) -> np.ndarray:
     """
     d = np.mean(np.diag(K))
     if d > 1e-12:
-        return K / d
-    return K
+        return np.asarray(K / d, dtype=float)
+    return np.asarray(K, dtype=float)

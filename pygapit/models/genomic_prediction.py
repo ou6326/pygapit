@@ -15,43 +15,54 @@ Bug fixes vs v1.0.0:
   - GBLUP: accepts both `kinship=` and `K=` keyword aliases.
 """
 
-import numpy as np
-import pandas as pd
-from typing import Optional, Tuple
-from scipy import linalg, optimize
-import warnings
+from __future__ import annotations
 
+import math
+import warnings
+from typing import cast
+
+import numpy as np
+from numpy import ndarray
+from scipy import optimize
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared REML helper (same math as MLM _EMMA_vc)
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _reml_delta(y: np.ndarray, X: np.ndarray, K: np.ndarray):
+
+def _reml_delta(
+    y: np.ndarray, X: np.ndarray, K: np.ndarray
+) -> tuple[float, float, float]:
     """
     EMMA REML: estimate delta = Ve/Vg via spectral decomposition of K.
     Returns (delta, Vg, Ve).
     Matches GAPIT's EMMA.delta / _EMMA_vc used in MLM.
     """
+    y = np.asarray(y, dtype=float)
+    X = np.asarray(X, dtype=float)
+    K = np.asarray(K, dtype=float)
     n = len(y)
-    eigvals, U = np.linalg.eigh(K)
-    eigvals    = np.maximum(eigvals, 1e-8)
-    Uy = U.T @ y
-    UX = U.T @ X
+    raw_eigvals, raw_U = np.linalg.eigh(K)
+    eigvals = np.asarray(np.maximum(raw_eigvals, 1e-8), dtype=float)
+    U = np.asarray(raw_U, dtype=float)
+    Uy = np.asarray(U.T @ y, dtype=float)
+    UX = np.asarray(U.T @ X, dtype=float)
 
-    def neg_reml(log_delta):
+    def neg_reml(log_delta: float) -> float:
         delta = np.exp(log_delta)
         d = eigvals + delta
-        UXd = UX / d[:, np.newaxis]
-        gram = UX.T @ UXd
-        rhs  = UXd.T @ Uy
+        UXd = np.asarray(UX / d[:, np.newaxis], dtype=float)
+        gram = np.asarray(UX.T @ UXd, dtype=float)
+        rhs = np.asarray(UXd.T @ Uy, dtype=float)
         try:
-            beta = np.linalg.solve(gram, rhs)
+            beta = np.asarray(np.linalg.solve(gram, rhs), dtype=float)
         except np.linalg.LinAlgError:
             return 1e15
-        res  = Uy - UX @ beta
-        df   = n - X.shape[1]
-        s2   = np.sum(res**2 / d) / df
-        ll   = np.sum(np.log(d)) + df * np.log(max(s2, 1e-15)) + n
+        res = Uy - UX @ beta
+        df = n - X.shape[1]
+        s2 = cast(float, np.sum(res**2 / d)) / df
+        sum_log_d: float = cast(float, np.sum(np.log(d)))
+        ll: float = sum_log_d + df * math.log(max(s2, 1e-15)) + n
         return ll
 
     with warnings.catch_warnings():
@@ -60,25 +71,28 @@ def _reml_delta(y: np.ndarray, X: np.ndarray, K: np.ndarray):
 
     delta = np.exp(opt.x)
     d = eigvals + delta
-    UXd  = UX / d[:, np.newaxis]
-    gram = UX.T @ UXd
-    rhs  = UXd.T @ Uy
-    beta = np.linalg.lstsq(gram, rhs, rcond=None)[0]
+    UXd = np.asarray(UX / d[:, np.newaxis], dtype=float)
+    gram = np.asarray(UX.T @ UXd, dtype=float)
+    rhs = np.asarray(UXd.T @ Uy, dtype=float)
+    beta = np.asarray(np.linalg.lstsq(gram, rhs, rcond=None)[0], dtype=float)
     resid = Uy - UX @ beta
-    df    = n - X.shape[1]
-    Vg    = np.sum(resid**2 / d) / df
-    Ve    = delta * Vg
-    return float(delta), float(Vg), float(Ve)
+    df = n - X.shape[1]
+    Vg = cast(float, np.sum(resid**2 / d)) / df
+    Ve = float(delta * Vg)
+    return float(delta), Vg, Ve
 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # RR-BLUP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def RR_BLUP(phenotype: np.ndarray,
-            genotype: np.ndarray,
-            lambda_: Optional[float] = None,
-            n_folds: int = 5) -> Tuple[np.ndarray, float]:
+
+def RR_BLUP(
+    phenotype: np.ndarray,
+    genotype: np.ndarray,
+    lambda_: float | None = None,
+    n_folds: int = 5,
+) -> tuple[np.ndarray, float]:
     """
     Ridge Regression BLUP (RR-BLUP) for genomic prediction.
 
@@ -104,18 +118,21 @@ def RR_BLUP(phenotype: np.ndarray,
 
     if lambda_ is None:
         # Build GRM for REML-based lambda estimation (matches GAPIT)
-        from ..kinship.kinship import VanRaden_kinship
-        K  = VanRaden_kinship(Z)
+        from ..stats.kinship import vanraden_kinship
+
+        K = vanraden_kinship(Z)
         X0 = np.ones((n, 1))
         delta, Vg, Ve = _reml_delta(y, X0, K)
         # RR-BLUP: lambda = Ve/Vg * m  (because K = Z*Z'/m in RR-BLUP parameterisation)
         # delta = Ve/Vg so lambda = delta * m
         lambda_ = float(delta * m)
-        print(f"[PyGAPIT]  REML delta={delta:.4f}, Vg={Vg:.4f}, Ve={Ve:.4f} => lambda={lambda_:.2f}")
+        print(
+            f"[PyGAPIT]  REML delta={delta:.4f}, Vg={Vg:.4f}, Ve={Ve:.4f} => lambda={lambda_:.2f}"
+        )
 
-    A   = Z.T @ Z + lambda_ * np.eye(m)
+    A = Z.T @ Z + lambda_ * np.eye(m)
     rhs = Z.T @ y
-    u   = np.linalg.solve(A, rhs)
+    u = np.linalg.solve(A, rhs)
     gebv = Z @ u
 
     acc = _cross_validate_rrblup(y, Z, lambda_, n_folds)
@@ -127,10 +144,13 @@ def RR_BLUP(phenotype: np.ndarray,
 # G-BLUP
 # ─────────────────────────────────────────────────────────────────────────────
 
-def GBLUP(phenotype: np.ndarray,
-          kinship: np.ndarray = None,
-          n_folds: int = 5,
-          K: np.ndarray = None) -> Tuple[np.ndarray, float]:
+
+def GBLUP(
+    phenotype: np.ndarray,
+    kinship: np.ndarray | None = None,
+    n_folds: int = 5,
+    K: np.ndarray | None = None,
+) -> tuple[np.ndarray, float]:
     """
     Genomic BLUP (G-BLUP) using a pre-computed GRM.
 
@@ -155,43 +175,43 @@ def GBLUP(phenotype: np.ndarray,
         raise ValueError("kinship matrix required (pass as `kinship=` or `K=`).")
 
     print("[PyGAPIT] Running G-BLUP genomic prediction ...")
-    y  = phenotype.astype(float)
-    n  = len(y)
+    y = phenotype.astype(float)
+    n = len(y)
     X0 = np.ones((n, 1))
 
     # ── REML estimate of delta = Ve/Vg ──────────────────────────────────────
     delta, Vg, Ve = _reml_delta(y, X0, kinship)
-    lambda_        = float(delta)            # Ve/Vg
-    print(f"[PyGAPIT]  REML delta={delta:.4f}, h2={Vg/(Vg+Ve):.4f}")
+    lambda_ = delta  # Ve/Vg
+    print(f"[PyGAPIT]  REML delta={delta:.4f}, h2={Vg / (Vg + Ve):.4f}")
 
     # ── Henderson's MME solution ──────────────────────────────────────────────
-    V    = kinship + lambda_ * np.eye(n)
+    V = kinship + lambda_ * np.eye(n)
     Vinv = np.linalg.inv(V)
-    XVi  = X0.T @ Vinv
+    XVi = X0.T @ Vinv
     beta = np.linalg.solve(XVi @ X0, XVi @ y)
     gebv = kinship @ Vinv @ (y - X0 @ beta)
 
     # ── Cross-validation ──────────────────────────────────────────────────────
-    fold_size   = n // n_folds
+    fold_size = n // n_folds
     predictions = np.zeros(n)
     for fold in range(n_folds):
-        test  = np.arange(fold * fold_size, min((fold + 1) * fold_size, n))
-        train = np.setdiff1d(np.arange(n), test)
-        K_tt  = kinship[np.ix_(train, train)]
-        K_pt  = kinship[np.ix_(test,  train)]
-        yt    = y[train]
+        test = np.arange(fold * fold_size, min((fold + 1) * fold_size, n), dtype=int)
+        train = np.asarray(np.setdiff1d(np.arange(n, dtype=int), test), dtype=int)
+        K_tt = kinship[np.ix_(train, train)]
+        K_pt = kinship[np.ix_(test, train)]
+        yt = y[train]
         # Re-estimate lambda on training fold
         try:
             d_t, _, _ = _reml_delta(yt, np.ones((len(train), 1)), K_tt)
-        except Exception:
+        except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             d_t = lambda_
-        V_t    = K_tt + d_t * np.eye(len(train))
+        V_t = K_tt + d_t * np.eye(len(train))
         Vinv_t = np.linalg.inv(V_t)
-        mu_t   = np.mean(yt)
+        mu_t = np.mean(yt)
         predictions[test] = K_pt @ Vinv_t @ (yt - mu_t) + mu_t
 
     valid = ~np.isnan(y)
-    acc   = float(np.corrcoef(y[valid], predictions[valid])[0, 1])
+    acc = float(np.corrcoef(y[valid], predictions[valid])[0, 1])
     print(f"[PyGAPIT]  G-BLUP CV accuracy (r): {acc:.4f}")
     return gebv, acc
 
@@ -200,11 +220,14 @@ def GBLUP(phenotype: np.ndarray,
 # BayesB
 # ─────────────────────────────────────────────────────────────────────────────
 
-def BayesB(phenotype: np.ndarray,
-           genotype: np.ndarray,
-           n_iter: int = 5000,
-           burn_in: int = 1000,
-           pi: float = 0.95) -> Tuple[np.ndarray, np.ndarray]:
+
+def BayesB(
+    phenotype: np.ndarray,
+    genotype: np.ndarray,
+    n_iter: int = 5000,
+    burn_in: int = 1000,
+    pi: float = 0.95,
+) -> tuple[np.ndarray, np.ndarray]:
     """
     Simplified BayesB via Gibbs sampling.
     (pi = prior probability of a SNP having zero effect)
@@ -223,16 +246,16 @@ def BayesB(phenotype: np.ndarray,
     gebv      : np.ndarray (n,) -- genomic estimated breeding values
     """
     print(f"[PyGAPIT] Running BayesB ({n_iter} iterations, burn-in={burn_in}) ...")
-    y  = phenotype.astype(float)
-    Z  = np.nan_to_num(genotype.astype(float))
+    y = phenotype.astype(float)
+    Z = np.nan_to_num(genotype.astype(float))
     n, m = Z.shape
-    mu   = np.mean(y)
-    y   -= mu
+    mu = np.mean(y)
+    y -= mu
 
-    beta   = np.zeros(m)
-    delta  = np.ones(m, dtype=bool)
-    Ve     = np.var(y) * (1 - 0.5)
-    Vb     = np.var(y) * 0.5 / max(m * (1 - pi), 1e-8)
+    beta = np.zeros(m)
+    delta = np.ones(m, dtype=bool)
+    Ve = np.var(y) * (1 - 0.5)
+    Vb = np.var(y) * 0.5 / max(m * (1 - pi), 1e-8)
 
     beta_samples = np.zeros((n_iter - burn_in, m))
 
@@ -242,38 +265,44 @@ def BayesB(phenotype: np.ndarray,
         for j in np.random.permutation(m):
             zj = Z[:, j]
             zz = float(np.dot(zj, zj))
-            residual += zj * beta[j]   # un-residualise this SNP
+            residual += zj * beta[j]  # un-residualise this SNP
 
             mean_j = float(np.dot(zj, residual)) / (zz + Ve / max(Vb, 1e-15))
-            var_j  = Ve / (zz + Ve / max(Vb, 1e-15))
+            var_j = Ve / (zz + Ve / max(Vb, 1e-15))
 
             # Inclusion log-odds
-            log_p1 = (0.5 * mean_j ** 2 / max(var_j, 1e-15)
-                      - 0.5 * np.log(max(Ve / max(Vb, 1e-15) + zz, 1e-15))
-                      + np.log((1 - pi) / max(pi, 1e-15)))
+            log_p1 = (
+                0.5 * mean_j**2 / max(var_j, 1e-15)
+                - 0.5 * np.log(max(Ve / max(Vb, 1e-15) + zz, 1e-15))
+                + np.log((1 - pi) / max(pi, 1e-15))
+            )
             p_incl = 1.0 / (1.0 + np.exp(-np.clip(log_p1, -30, 30)))
 
             if np.random.rand() < p_incl:
                 delta[j] = True
-                beta[j]  = np.random.normal(mean_j, np.sqrt(max(var_j, 0)))
+                beta[j] = np.random.normal(mean_j, np.sqrt(max(var_j, 0)))
             else:
                 delta[j] = False
-                beta[j]  = 0.0
+                beta[j] = 0.0
 
             residual -= zj * beta[j]
 
         Ve = _sample_var(residual, n, a=4, b=float(np.var(y) * 0.5))
-        Vb = _sample_var(beta[delta], max(int(delta.sum()), 1), a=4,
-                         b=float(np.var(y) * 0.5 / max(m * (1 - pi), 1e-8)))
+        Vb = _sample_var(
+            beta[delta],
+            max(int(delta.sum()), 1),
+            a=4,
+            b=float(np.var(y) * 0.5 / max(m * (1 - pi), 1e-8)),
+        )
 
         if it >= burn_in:
             beta_samples[it - burn_in] = beta
 
         if (it + 1) % 500 == 0:
-            print(f"[PyGAPIT]  BayesB iter {it+1}/{n_iter}, Ve={Ve:.4f}")
+            print(f"[PyGAPIT]  BayesB iter {it + 1}/{n_iter}, Ve={Ve:.4f}")
 
     beta_hat = beta_samples.mean(axis=0)
-    gebv     = Z @ beta_hat + mu
+    gebv = Z @ beta_hat + mu
     print(f"[PyGAPIT]  BayesB done. Non-zero loci: {(np.abs(beta_hat) > 1e-6).sum()}")
     return beta_hat, gebv
 
@@ -282,24 +311,30 @@ def BayesB(phenotype: np.ndarray,
 # Helpers
 # ─────────────────────────────────────────────────────────────────────────────
 
-def _sample_var(residuals, n, a=4, b=1):
+
+def _sample_var(residuals: np.ndarray, n: int, a: float = 4, b: float = 1) -> float:
     """Sample from Scaled-Inverse-Chi-Squared distribution."""
     if n < 2:
         return b / a
     shape = (a + n) / 2
-    scale = (a * b + float(np.sum(np.asarray(residuals) ** 2))) / 2
+    scale = (a * b + np.sum(np.asarray(residuals) ** 2)) / 2
     return float(scale / np.random.gamma(shape))
 
 
-def _cross_validate_rrblup(y, Z, lambda_, n_folds):
+def _cross_validate_rrblup(
+    y: ndarray, Z: ndarray, lambda_: float, n_folds: int
+) -> float:
+    y = np.asarray(y, dtype=float)
+    Z = np.asarray(Z, dtype=float)
     n, m = Z.shape
     fold_size = n // n_folds
     preds = np.zeros(n)
     for fold in range(n_folds):
-        test  = np.arange(fold * fold_size, min((fold + 1) * fold_size, n))
-        train = np.setdiff1d(np.arange(n), test)
+        test = list(range(fold * fold_size, min((fold + 1) * fold_size, n)))
+        test_set = set(test)
+        train = [i for i in range(n) if i not in test_set]
         Zt, yt = Z[train], y[train]
-        A  = Zt.T @ Zt + lambda_ * np.eye(m)
-        u  = np.linalg.solve(A, Zt.T @ yt)
+        A = Zt.T @ Zt + lambda_ * np.eye(m)
+        u = np.linalg.solve(A, Zt.T @ yt)
         preds[test] = Z[test] @ u
     return float(np.corrcoef(y, preds)[0, 1])

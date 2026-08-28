@@ -17,10 +17,11 @@ PEV  = diag(C22) where C22 is the (2,2) block of the MME inverse
 """
 
 from __future__ import annotations
+
+from dataclasses import dataclass
+
 import numpy as np
 from scipy.linalg import solve
-from dataclasses import dataclass, field
-from typing import Optional
 
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
@@ -29,15 +30,16 @@ from ..stats.kinship import vanraden_kinship
 @dataclass
 class GBLUPResult:
     """Genomic prediction output per individual."""
+
     taxa: np.ndarray
-    blue: np.ndarray         # BLUE (fixed effects prediction)
-    blup: np.ndarray         # BLUP (total genomic breeding value)
-    pev: np.ndarray          # prediction error variance
-    gebv: np.ndarray         # genomic estimated breeding value
-    prediction: np.ndarray   # blue + blup
-    vg: float                # genetic variance
-    ve: float                # residual variance
-    h2: float                # heritability
+    blue: np.ndarray  # BLUE (fixed effects prediction)
+    blup: np.ndarray  # BLUP (total genomic breeding value)
+    pev: np.ndarray  # prediction error variance
+    gebv: np.ndarray  # genomic estimated breeding value
+    prediction: np.ndarray  # blue + blup
+    vg: float  # genetic variance
+    ve: float  # residual variance
+    h2: float  # heritability
     method: str = "gBLUP"
 
 
@@ -71,20 +73,20 @@ def _henderson_mme(
         K_inv = np.linalg.pinv(K)
 
     # Build MME coefficient matrix (2n+q) × (q+n)
-    XtX = X.T @ X                              # (q, q)
-    XtZ = X.T                                  # (q, n) since Z = I
-    ZtX = X                                    # (n, q)
-    ZtZ_plus = np.eye(n) + delta * K_inv        # (n, n)
+    XtX = X.T @ X  # (q, q)
+    XtZ = X.T  # (q, n) since Z = I
+    ZtX = X  # (n, q)
+    ZtZ_plus = np.eye(n) + delta * K_inv  # (n, n)
 
-    top = np.hstack([XtX, XtZ])               # (q, q+n)
-    bot = np.hstack([ZtX, ZtZ_plus])           # (n, q+n)
-    C = np.vstack([top, bot])                  # (q+n, q+n)
+    top = np.hstack([XtX, XtZ])  # (q, q+n)
+    bot = np.hstack([ZtX, ZtZ_plus])  # (n, q+n)
+    C = np.vstack([top, bot])  # (q+n, q+n)
 
-    rhs = np.concatenate([X.T @ y, y])         # (q+n,)
+    rhs = np.concatenate([X.T @ y, y])  # (q+n,)
 
     try:
-        sol = solve(C, rhs, assume_a='sym')
-    except Exception:
+        sol = solve(C, rhs, assume_a="sym")
+    except (ValueError, np.linalg.LinAlgError):
         sol, _, _, _ = np.linalg.lstsq(C, rhs, rcond=None)
 
     beta = sol[:q]
@@ -95,7 +97,7 @@ def _henderson_mme(
         C_inv = np.linalg.inv(C)
         C_uu = C_inv[q:, q:]
         pev = np.diag(C_uu)
-    except Exception:
+    except np.linalg.LinAlgError:
         pev = np.full(n, np.nan)
 
     return beta, u, pev
@@ -105,7 +107,7 @@ def gblup(
     y: np.ndarray,
     X0: np.ndarray,
     K: np.ndarray,
-    taxa: np.ndarray = None,
+    taxa: np.ndarray | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
     """
@@ -138,10 +140,10 @@ def gblup(
     beta, u, pev = _henderson_mme(y, X0, K, delta)
 
     # ── Compute BLUE and prediction ───────────────────────────────────────
-    blue = X0 @ beta          # BLUE: fixed-effects prediction
-    gebv = u                   # genomic estimated breeding value
-    blup = gebv                # total BLUP = random effects
-    prediction = blue + blup   # phenotype prediction
+    blue = X0 @ beta  # BLUE: fixed-effects prediction
+    gebv = u  # genomic estimated breeding value
+    blup = gebv  # total BLUP = random effects
+    prediction = blue + blup  # phenotype prediction
 
     # Scale PEV by vg
     pev_scaled = pev * vg
@@ -182,20 +184,20 @@ def predict_new(
     try:
         K_inv = np.linalg.solve(
             K_train_train + np.eye(len(K_train_train)) * 1e-8,
-            np.eye(len(K_train_train))
+            np.eye(len(K_train_train)),
         )
     except np.linalg.LinAlgError:
         K_inv = np.linalg.pinv(K_train_train)
 
-    return K_new_train @ K_inv @ blup_train
+    return np.asarray(K_new_train @ K_inv @ blup_train, dtype=float)
 
 
 def cblup(
     y: np.ndarray,
     X0: np.ndarray,
     GD: np.ndarray,
-    taxa: np.ndarray = None,
-    group_to: int = None,
+    taxa: np.ndarray | None = None,
+    group_to: int | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
     """
@@ -205,7 +207,7 @@ def cblup(
 
     Faster than gBLUP for large n. Uses optimal group kinship.
     """
-    from ..gwas.mlm import _compress_kinship, _reml_for_groups
+    from ..gwas.mlm import compress_kinship, reml_for_groups
 
     n = len(y)
     K_full = vanraden_kinship(GD)
@@ -221,14 +223,17 @@ def cblup(
     best_K_eff = K_full.copy()
 
     for g in candidates:
+        compression_failed = False
         try:
-            K_c, Z = _compress_kinship(K_full, int(g))
+            K_c, Z = compress_kinship(K_full, int(g))
             K_eff = Z @ K_c @ Z.T + np.eye(n) * 1e-6
-            reml = _reml_for_groups(y, X0, K_c, Z)
+            reml = reml_for_groups(y, X0, K_c, Z)
             if reml > best_reml:
                 best_reml = reml
                 best_K_eff = K_eff.copy()
-        except Exception:
+        except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+            compression_failed = True
+        if compression_failed:
             continue
 
     result = gblup(y, X0, best_K_eff, taxa=taxa, ngrids=ngrids)
@@ -240,8 +245,8 @@ def sblup(
     y: np.ndarray,
     X0: np.ndarray,
     GD: np.ndarray,
-    qtn_indices: np.ndarray,
-    taxa: np.ndarray = None,
+    qtn_indices: np.ndarray | None,
+    taxa: np.ndarray | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
     """
