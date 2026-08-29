@@ -4,7 +4,7 @@ A complete Python reimplementation of the R GAPIT package.
 """
 
 __version__ = "2.0.0"
-__author__  = "pyGAPIT contributors (based on GAPIT by Jiabo Wang & Zhiwu Zhang)"
+__author__ = "pyGAPIT contributors (based on GAPIT by Jiabo Wang & Zhiwu Zhang)"
 __license__ = "GPL-3.0"
 
 from .gapit import GAPIT, GAPITResult

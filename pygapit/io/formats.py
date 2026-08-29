@@ -218,7 +218,7 @@ def read_hapmap(
     GD = GD_T.T
 
     # Impute missing values
-    GD = _impute_missing(GD, method=impute_method)
+    GD = impute_missing(GD, method=impute_method)
 
     return GenotypeData(GD=GD, GM=snp_info, taxa=taxa)
 
@@ -271,12 +271,12 @@ def read_numeric(
         )
 
     # Impute missing
-    GD = _impute_missing(GD, method=impute_method)
+    GD = impute_missing(GD, method=impute_method)
 
     return GenotypeData(GD=GD, GM=gm_df, taxa=taxa)
 
 
-def _impute_missing(GD: np.ndarray, method: str = "middle") -> np.ndarray:
+def impute_missing(GD: np.ndarray, method: str = "middle") -> np.ndarray:
     """
     Impute missing genotype values.
     Translates GAPIT's SNP.impute options.

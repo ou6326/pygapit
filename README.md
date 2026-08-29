@@ -8,26 +8,82 @@ It provides GAPIT-style inputs for the GWAS models **GLM, MLM, CMLM, MLMM, FarmC
 
 ## Installation
 
-```bash
-# Recommended for development and validation
-pixi install -e full
-pixi shell -e full
+### Regular use
 
-# Alternatively, install from source with pip
-pip install -e .             # runtime dependencies only
-pip install -e ".[bigdata]" # include HDF5, Zarr, and Dask support
-pip install -e ".[dev]"     # include test, lint, and typing dependencies
+Install pyGAPIT from this source checkout. This installs only the Python runtime
+dependencies; R and the GAPIT reference repository are not required.
+
+```bash
+pip install .
+
+pip install ".[bigdata]"  # include HDF5, Zarr, and Dask for larger datasets
 ```
 
-**Dependencies** are automatically installed: `numpy`, `scipy`, `pandas`, `matplotlib`, `seaborn`, `plotly`, `scikit-learn`, `joblib`, `biopython`, `jinja2`.
+**Runtime dependencies** are installed automatically: `numpy`, `scipy`,
+`pandas`, `matplotlib`, `seaborn`, `plotly`, `scikit-learn`, `joblib`,
+`biopython`, and `jinja2`.
 
-Run the repository checks in the full Pixi environment:
+### Development
+
+Use an editable installation when changing pyGAPIT itself. The development
+dependencies provide pytest, Ruff, Pyrefly, BasedPyright, rpy2, and the type
+stubs. The GAPIT reference repository is still not needed for ordinary Python
+development.
 
 ```bash
-pixi run -e full ruff check .
-pixi run -e full pyrefly check -p all
-pixi run -e full basedpyright
-pixi run -e full pytest
+pip install -e ".[dev]"
+
+pip install -e ".[bigdata]"      # editable install with big-data support
+pip install -e ".[dev,bigdata]"  # development tools plus big-data support
+```
+
+The equivalent Pixi environment is:
+
+```bash
+pixi install -e dev
+pixi shell -e dev
+```
+
+Run the ordinary Python checks without the R reference repository:
+
+```bash
+pixi run -e dev ruff check .
+pixi run -e dev ruff format --check .
+pixi run -e dev pyrefly check -p all
+pixi run -e dev basedpyright
+pixi run -e dev pytest tests/test_pygapit.py
+```
+
+### GAPIT 3.5 alignment validation
+
+This level is only for maintainers checking numerical behavior against the
+pinned R GAPIT 3.5 source. It uses the same development environment, but also
+initializes the `GAPIT/` Git submodule. The submodule is not used by the
+installed pyGAPIT package at runtime.
+
+```bash
+# Fetch the pinned GAPIT 3.5 reference only when running alignment tests
+git submodule update --init --recursive
+
+pixi install -e dev
+pixi run -e dev pytest tests/cross_language -q
+```
+
+For one environment containing development and big-data dependencies, use
+`full`:
+
+```bash
+pixi install -e full
+pixi shell -e full
+```
+
+If Pixi is unavailable, development and validation require an existing R
+installation and its `MASS` package before installing the Python development
+dependencies:
+
+```bash
+pip install -e ".[dev]"
+pytest tests/cross_language -q
 ```
 
 ---
@@ -39,8 +95,8 @@ import pandas as pd
 from pygapit import GAPIT
 
 # Load GAPIT-style tabular data
-Y  = pd.read_csv("mdp_traits.txt",         sep="\t")  # phenotype
-GD = pd.read_csv("mdp_numeric.txt",         sep="\t")  # numeric genotype
+Y = pd.read_csv("mdp_traits.txt", sep="\t")  # phenotype
+GD = pd.read_csv("mdp_numeric.txt", sep="\t")  # numeric genotype
 GM = pd.read_csv("mdp_SNP_information.txt", sep="\t")  # SNP map
 
 # Select one trait so GAPIT returns one GAPITResult instead of a result dict
@@ -53,7 +109,7 @@ result = GAPIT(
     PCA_total=3,
 )
 
-print(result.GWAS.head())          # full GWAS results table
+print(result.GWAS.head())  # full GWAS results table
 print(f"h²    = {result.h2:.3f}")  # heritability
 print(f"λ     = {result.lambda_gc:.3f}")  # genomic inflation factor
 print(f"QTNs  = {0 if result.QTNs is None else len(result.QTNs)}")
@@ -114,9 +170,9 @@ result = GAPIT(Y=Y, G=hapmap_df, model="BLINK")
 
 ```python
 # Run multiple models simultaneously
-result = GAPIT(Y=Y, GD=GD, GM=GM,
-               model=["GLM", "MLM", "FarmCPU", "BLINK"],
-               trait="EarHT")
+result = GAPIT(
+    Y=Y, GD=GD, GM=GM, model=["GLM", "MLM", "FarmCPU", "BLINK"], trait="EarHT"
+)
 # Returns a dict keyed by "EarHT_GLM", "EarHT_MLM", etc.
 ```
 
@@ -132,15 +188,16 @@ result = GAPIT(Y=Y, GD=GD, GM=GM, model="gBLUP", trait="EarHT")
 result = GAPIT(Y=Y, GD=GD, GM=GM, model="cBLUP", trait="EarHT")
 
 # Run gBLUP prediction after BLINK
-result = GAPIT(
-    Y=Y, GD=GD, GM=GM, model="BLINK", trait="EarHT", buspred=True
-)
+result = GAPIT(Y=Y, GD=GD, GM=GM, model="BLINK", trait="EarHT", buspred=True)
 
 # FarmCPU + buspred uses sBLUP when FarmCPU identifies QTNs;
 # otherwise prediction falls back to gBLUP
-result = GAPIT(
-    Y=Y, GD=GD, GM=GM, model="FarmCPU", trait="EarHT", buspred=True
-)
+result = GAPIT(Y=Y, GD=GD, GM=GM, model="FarmCPU", trait="EarHT", buspred=True)
+
+# Direct sBLUP requires pseudo-QTN column indices from a prior GWAS
+from pygapit import sblup
+
+prediction = sblup(y, X0, GD_array, qtn_indices=selected_qtns)
 
 # Access prediction results
 print(result.Pred)
@@ -213,20 +270,30 @@ pygapit --Y traits.txt --GD geno.txt --GM map.txt \
 ## Using individual functions
 
 ```python
-from pygapit import (
-    vanraden_kinship, compute_pca, build_covariate_matrix,
-    emma_remle, bonferroni_threshold, genomic_inflation_factor,
-    glm_gwas, mlm_gwas, blink_gwas, farmcpu_gwas,
-    gblup, manhattan_plot, qq_plot,
-)
 import numpy as np
 
+from pygapit import (
+    blink_gwas,
+    bonferroni_threshold,
+    build_covariate_matrix,
+    compute_pca,
+    emma_remle,
+    farmcpu_gwas,
+    gblup,
+    genomic_inflation_factor,
+    glm_gwas,
+    manhattan_plot,
+    mlm_gwas,
+    qq_plot,
+    vanraden_kinship,
+)
+
 # Compute kinship
-K = vanraden_kinship(GD_array)   # (n, n) VanRaden matrix
+K = vanraden_kinship(GD_array)  # (n, n) VanRaden matrix
 
 # PCA for structure control
 pca = compute_pca(GD_array, n_components=3)
-X0  = build_covariate_matrix(pca, n_pcs=3)
+X0 = build_covariate_matrix(pca, n_pcs=3)
 
 # REML variance components
 remle = emma_remle(y, X0, K)
@@ -241,11 +308,12 @@ print(f"λ = {lam:.3f},  {sig} significant SNPs")
 
 # Genomic prediction
 gs = gblup(y, X0, K)
-print(f"Prediction accuracy (r): {np.corrcoef(y, gs.prediction)[0,1]:.3f}")
+print(f"Prediction accuracy (r): {np.corrcoef(y, gs.prediction)[0, 1]:.3f}")
 
 # Plots
-manhattan_plot(snp_names, chromosomes, positions, result.p_values,
-               save_path="manhattan.pdf")
+manhattan_plot(
+    snp_names, chromosomes, positions, result.p_values, save_path="manhattan.pdf"
+)
 qq_plot(result.p_values, save_path="qq.pdf")
 ```
 

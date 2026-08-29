@@ -21,6 +21,8 @@ import numpy as np
 from scipy.optimize import brentq
 from scipy.stats import t as t_dist
 
+from ..io.formats import impute_missing
+
 
 @dataclass
 class EMMAResult:
@@ -203,6 +205,7 @@ def emmax_p3d(
     ngrids: int = 100,
     llim: float = -10.0,
     ulim: float = 10.0,
+    snp_impute: str = "middle",
 ) -> GWASResult:
     """
     EMMAxP3D: genome-wide association using EMMA with P3D approximation.
@@ -218,11 +221,13 @@ def emmax_p3d(
     X0 : (n, q) covariate matrix (intercept + PCs)
     GD : (n, m) genotype matrix, 0/1/2 coded
     K  : (n, n) kinship matrix
+    snp_impute : missing-genotype policy; GAPIT defaults to ``"middle"``
 
     Returns
     -------
     GWASResult with p_values, effects, se, stats, vg, ve, h2
     """
+    GD = impute_missing(GD, method=snp_impute)
     n, m = GD.shape
     q0 = X0.shape[1]
 
@@ -240,25 +245,45 @@ def emmax_p3d(
 
     # Rotation matrix: U * diag(1/sqrt(lambda + delta))
     scale = 1.0 / np.sqrt(lambda_L + delta)
+    transformed_basis = U_L * scale
     # Apply transformation: yt = scale * U' * y,  Xt0 = scale * U' * X0
-    Uty = (U_L * scale).T @ y  # (n,)
-    UtX0 = (U_L * scale).T @ X0  # (n, q0)
-    UtGD = (U_L * scale).T @ GD  # (n, m)
+    Uty = transformed_basis.T @ y  # (n,)
+    UtX0 = transformed_basis.T @ X0  # (n, q0)
+    UtGD = transformed_basis.T @ GD  # (n, m)
 
     # ── Step 3: Test each SNP ─────────────────────────────────────────────
     q1 = q0 + 1
     p_values = np.ones(m)
-    effects = np.zeros(m)
-    se_arr = np.zeros(m)
-    stats_arr = np.zeros(m)
+    effects = np.full(m, np.nan)
+    se_arr = np.full(m, np.nan)
+    stats_arr = np.full(m, np.nan)
     df = n - q1
 
     for i in range(m):
-        snp = UtGD[:, i]
-        # Skip monomorphic SNPs
-        if np.std(snp) < 1e-8:
+        raw_snp = GD[:, i]
+        observed = np.isfinite(raw_snp)
+        if np.count_nonzero(observed) <= q1 or np.nanstd(raw_snp) < 1e-8:
             p_values[i] = 1.0
             continue
+        if not np.all(observed):
+            observed_count = int(np.count_nonzero(observed))
+            covariance = K[np.ix_(observed, observed)] + delta * np.eye(observed_count)
+            precision = np.linalg.pinv(covariance)
+            marker_design = np.column_stack([X0[observed], raw_snp[observed]])
+            information = marker_design.T @ precision @ marker_design
+            information_inverse = np.linalg.pinv(information)
+            beta = information_inverse @ marker_design.T @ precision @ y[observed]
+            se = np.sqrt(information_inverse[q0, q0] * vg)
+            if se < 1e-12:
+                p_values[i] = 1.0
+                continue
+            t_stat = beta[q0] / se
+            p_values[i] = float(2.0 * t_dist.sf(abs(t_stat), observed_count - q1))
+            effects[i] = beta[q0]
+            se_arr[i] = se
+            stats_arr[i] = t_stat
+            continue
+        snp = UtGD[:, i]
 
         # Build design matrix with SNP
         Xt = np.column_stack([UtX0, snp])  # (n, q1)

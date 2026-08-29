@@ -74,7 +74,6 @@ Examples:
             "BLINK",
             "gBLUP",
             "cBLUP",
-            "sBLUP",
         ],
         help="GWAS/GS model(s) to run (default: BLINK)",
     )

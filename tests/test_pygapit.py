@@ -8,6 +8,8 @@ Tests are organized by module and verify:
 4. Integration with real GAPIT demo data
 """
 
+import subprocess
+import sys
 import warnings
 from pathlib import Path
 from typing import TypedDict
@@ -23,10 +25,10 @@ import pytest
 
 from pygapit.gapit import GAPITResult
 
-GAPIT_DOCUMENTS = Path(__file__).resolve().parents[2] / "GAPIT" / "Documents"
-PHENOTYPE_PATH = GAPIT_DOCUMENTS / "mdp_traits.txt"
-GENOTYPE_PATH = GAPIT_DOCUMENTS / "mdp_numeric.txt"
-MAP_PATH = GAPIT_DOCUMENTS / "mdp_SNP_information.txt"
+GAPIT_EXTDATA = Path(__file__).resolve().parents[1] / "GAPIT" / "inst" / "extdata"
+PHENOTYPE_PATH = GAPIT_EXTDATA / "mdp_traits.txt.gz"
+GENOTYPE_PATH = GAPIT_EXTDATA / "mdp_numeric.txt.gz"
+MAP_PATH = GAPIT_EXTDATA / "mdp_SNP_information.txt.gz"
 
 
 class SmallDataset(TypedDict):
@@ -493,6 +495,31 @@ class TestMLM:
         assert np.all(valid >= 0)
         assert np.all(valid <= 1)
 
+    def test_cmlm_fixed_compression_matches_explicit_scan(
+        self, small_dataset: SmallDataset
+    ) -> None:
+        """A fixed CMLM group count must use its explicit compressed kinship."""
+        from pygapit.gwas.mlm import cmlm_gwas, compress_kinship
+        from pygapit.stats.emma import emmax_p3d
+        from pygapit.stats.kinship import vanraden_kinship
+        from pygapit.stats.pca import build_covariate_matrix, compute_pca
+
+        y = small_dataset["y"]
+        genotypes = small_dataset["GD"]
+        design = build_covariate_matrix(compute_pca(genotypes, 3), 3)
+        kinship = vanraden_kinship(genotypes)
+        compressed, incidence = compress_kinship(kinship, 4)
+        effective = incidence @ compressed @ incidence.T
+        effective += np.eye(len(y)) * 1e-6
+
+        actual = cmlm_gwas(y, design, genotypes, kinship, group_from=4, group_to=4)
+        expected = emmax_p3d(y, design, genotypes, effective)
+
+        assert actual.method == "CMLM(g=4)"
+        np.testing.assert_allclose(actual.p_values, expected.p_values)
+        np.testing.assert_allclose(actual.effects, expected.effects)
+        np.testing.assert_allclose(actual.se, expected.se)
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: BLINK
@@ -520,8 +547,8 @@ class TestBLINK:
         y = small_dataset["y"]
         X0 = build_covariate_matrix(compute_pca(GD, 3), 3)
         r = blink_gwas(y, X0, GD, max_iterations=5)
-        # Should detect some QTNs
-        assert len(r.selected_qtns) >= 0  # could be 0 if threshold too strict
+        assert len(r.selected_qtns) > 0
+        assert np.min(np.abs(r.selected_qtns - small_dataset["qtn_idx"])) <= 5
         # Non-QTN p-values should be valid
         non_qtn_mask = np.ones(len(r.p_values), dtype=bool)
         if len(r.selected_qtns) > 0:
@@ -618,6 +645,8 @@ class TestFarmCPU:
         valid = r.p_values[~np.isnan(r.p_values)]
         assert np.all(valid >= 0)
         assert np.all(valid <= 1)
+        assert len(r.selected_qtns) > 0
+        assert np.min(np.abs(r.selected_qtns - small_dataset["qtn_idx"])) <= 5
 
     def test_farmcpu_bin_selection(self, small_dataset: SmallDataset) -> None:
         """Bin selection should respect max_qtns bound."""
@@ -707,12 +736,109 @@ class TestGBLUP:
 
     def test_sblup_uses_qtn_kinship(self, real_data: RealDataset) -> None:
         """sBLUP with QTN indices should produce a valid result."""
-        from pygapit.gs.blup import sblup
+        from pygapit.gs.blup import gblup, sblup
+        from pygapit.stats.kinship import vanraden_kinship
 
         qtn_idx = np.array([0, 10, 50, 100, 200])
         r = sblup(real_data["y"], real_data["X0"], real_data["GD"], qtn_indices=qtn_idx)
+        pseudo_kinship = vanraden_kinship(real_data["GD"][:, qtn_idx])
+        pseudo_kinship += np.eye(len(real_data["y"])) * 1e-6
+        expected = gblup(real_data["y"], real_data["X0"], pseudo_kinship)
+
         assert r.method == "sBLUP"
         assert np.all(np.isfinite(r.blup))
+        np.testing.assert_allclose(r.blup, expected.blup, rtol=1e-12, atol=1e-12)
+        np.testing.assert_allclose(r.pev, expected.pev, rtol=1e-12, atol=1e-12)
+
+    @pytest.mark.parametrize(
+        "qtn_indices",
+        [np.array([], dtype=int), np.array([0.5]), np.array([-1]), np.array([999999])],
+        ids=["empty", "non-integer", "negative", "too-large"],
+    )
+    def test_sblup_rejects_invalid_qtn_indices(
+        self, real_data: RealDataset, qtn_indices: NDArray[np.generic]
+    ) -> None:
+        """sBLUP must not silently fall back to genome-wide gBLUP."""
+        from pygapit.gs.blup import sblup
+
+        with pytest.raises(ValueError, match="sBLUP"):
+            sblup(
+                real_data["y"],
+                real_data["X0"],
+                real_data["GD"],
+                qtn_indices=qtn_indices,
+            )
+
+    def test_cblup_returns_finite_compressed_prediction(
+        self, small_dataset: SmallDataset
+    ) -> None:
+        """cBLUP must return a complete prediction using compressed kinship."""
+        from pygapit.gs.blup import cblup
+        from pygapit.stats.pca import build_covariate_matrix, compute_pca
+
+        genotypes = small_dataset["GD"]
+        design = build_covariate_matrix(compute_pca(genotypes, 3), 3)
+        result = cblup(
+            small_dataset["y"],
+            design,
+            genotypes,
+            taxa=small_dataset["taxa"],
+            group_to=6,
+        )
+
+        assert result.method == "cBLUP"
+        assert result.prediction.shape == small_dataset["y"].shape
+        assert np.all(np.isfinite(result.prediction))
+        assert np.all(np.isfinite(result.pev))
+
+
+class TestModelContracts:
+    def test_top_level_sblup_error_points_to_supported_api(
+        self, small_dataset: SmallDataset
+    ) -> None:
+        """The top-level dispatcher must not advertise an absent SUPER path."""
+        from pygapit.gapit import _run_model
+        from pygapit.stats.kinship import vanraden_kinship
+
+        genotypes = small_dataset["GD"]
+        marker_count = genotypes.shape[1]
+        positions: NDArray[np.float64] = np.arange(marker_count, dtype=np.float64)
+        with pytest.raises(ValueError, match=r"pygapit\.sblup"):
+            _run_model(
+                model_name="SBLUP",
+                y=small_dataset["y"],
+                X0=np.ones((small_dataset["n"], 1)),
+                GD=genotypes,
+                K=vanraden_kinship(genotypes),
+                chromosomes=np.ones(marker_count),
+                positions=positions,
+                p_threshold=None,
+                group_from=1,
+                group_to=None,
+                bin_size=5_000_000,
+                maxLoop=1,
+                LD_threshold=0.7,
+            )
+
+    def test_cli_rejects_unimplemented_top_level_sblup(self) -> None:
+        """CLI choices must match the models accepted by GAPIT()."""
+        completed = subprocess.run(
+            [
+                sys.executable,
+                "-m",
+                "pygapit.cli",
+                "--Y",
+                "unused.txt",
+                "--model",
+                "sBLUP",
+            ],
+            check=False,
+            capture_output=True,
+            text=True,
+        )
+
+        assert completed.returncode == 2
+        assert "invalid choice" in completed.stderr
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -797,6 +923,44 @@ class TestIO:
 
 
 class TestGAPITPipeline:
+    @pytest.mark.parametrize(
+        "model",
+        ["CMLM", "MLMM", "FarmCPU", "gBLUP", "cBLUP"],
+        ids=["cmlm", "mlmm", "farmcpu", "gblup", "cblup"],
+    )
+    def test_remaining_public_models_complete(
+        self, small_dataset: SmallDataset, model: str
+    ) -> None:
+        """Every advertised model must complete through the public GAPIT API."""
+        from pygapit.gapit import GAPIT
+
+        taxa = small_dataset["taxa"]
+        marker_names = small_dataset["GM"]["SNP"].astype(str).tolist()
+        phenotype = pd.DataFrame({"Taxa": taxa, "trait": small_dataset["y"]})
+        genotype = pd.DataFrame(small_dataset["GD"], columns=marker_names)
+        genotype.insert(0, "Taxa", taxa)
+
+        result = GAPIT(
+            Y=phenotype,
+            GD=genotype,
+            GM=small_dataset["GM"],
+            model=model,
+            trait="trait",
+            PCA_total=2,
+            maf_threshold=0.0,
+            group_to=6,
+            maxLoop=3,
+            buspred=model == "FarmCPU",
+            file_output=False,
+        )
+
+        assert isinstance(result, GAPITResult)
+        assert result.model == model.upper()
+        assert result.GWAS is not None
+        assert len(result.GWAS) == small_dataset["m"]
+        if model in {"gBLUP", "cBLUP", "FarmCPU"}:
+            assert result.Pred is not None
+
     def test_gapit_glm_returns_result(
         self, real_data: RealDataset, tmp_path: Path
     ) -> None:

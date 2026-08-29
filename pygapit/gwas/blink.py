@@ -6,7 +6,7 @@ Algorithm (two iterating GLMs):
   Loop until convergence:
     GLM-1 (cofactor selection):
       - Sort markers by p-value
-      - Apply LD pruning: remove markers in LD (r² > LD_threshold) with top marker
+      - Apply LD pruning: remove markers in LD (|r| > LD_threshold) with top marker
       - Apply BIC selection: add cofactors while BIC decreases
     GLM-2 (marker testing):
       - Test all m markers with current cofactor set as fixed effects
@@ -85,13 +85,13 @@ def _ld_prune(
     Translates Blink.LDRemove() from GAPIT.Blink.R
 
     Starting from the most significant marker, removes all markers
-    in LD (r² > threshold) with it. Repeats for next remaining marker.
+    in LD (|r| > threshold) with it. Repeats for next remaining marker.
 
     Parameters
     ----------
     candidate_indices : sorted candidate indices (best first by p-value)
     GD               : genotype matrix
-    ld_threshold     : r² threshold for LD pruning (default 0.7)
+    ld_threshold     : absolute-correlation threshold for LD pruning (default 0.7)
 
     Returns pruned set of indices (still ordered by significance).
     """
@@ -125,8 +125,7 @@ def _ld_prune(
             # Pearson r between ref and candidate
             cov = np.mean((g_ref - g_ref.mean()) * (g_cand - g_cand.mean()))
             r = cov / (g_ref_std * g_cand_std)
-            r2 = r**2
-            if r2 > ld_threshold:
+            if abs(r) > ld_threshold:
                 to_remove.append(idx)
 
         for idx in to_remove:
@@ -181,7 +180,7 @@ def blink_gwas(
     X0             : (n, q) covariate matrix (intercept + PCs)
     GD             : (n, m) genotype matrix, 0/1/2 coded
     max_iterations : maximum number of BLINK iterations (maxLoop in R)
-    ld_threshold   : r² threshold for LD pruning (LD parameter in R)
+    ld_threshold   : absolute-correlation threshold for LD pruning (LD in R)
     p_threshold    : p-value threshold to pre-select candidates
                      (default: Bonferroni = 1/m)
     converge_threshold : Jaccard similarity for convergence check

@@ -1,11 +1,11 @@
 """
-pyGAPIT — Python reimplementation of GAPIT
+pyGAPIT — GAPIT-style analysis tools for Python
 (Genome Association and Prediction Integrated Tool)
 
 Main entry point: GAPIT()
 
-Mirrors the R GAPIT() function signature exactly, so users
-familiar with R GAPIT can switch to Python with minimal changes.
+Uses a GAPIT-style interface while targeting selected GAPIT 3.5 workflows.
+Not every R parameter or model is implemented yet.
 
 R:      myGAPIT <- GAPIT(Y=myY, GD=myGD, GM=myGM, model="BLINK", PCA.total=3)
 Python: myGAPIT  = GAPIT(Y=myY,  GD=myGD, GM=myGM, model="BLINK", PCA_total=3)
@@ -36,6 +36,7 @@ from .io.formats import (
     GenotypeData,
     PhenotypeData,
     align_taxa,
+    impute_missing,
     maf_filter,
     read_hapmap,
     read_numeric,
@@ -129,11 +130,9 @@ def GAPIT(
     """
     GAPIT — Genome Association and Prediction Integrated Tool (Python)
 
-    Complete Python reimplementation of R's GAPIT() function.
-    Supports all GWAS models (GLM, MLM, CMLM, MLMM, FarmCPU, BLINK)
-    and GS methods (gBLUP, cBLUP, sBLUP).
-
-    Parameters match R GAPIT() with underscores instead of dots.
+    GAPIT-style Python pipeline targeting selected GAPIT 3.5 workflows.
+    Currently dispatches GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP,
+    and cBLUP. Top-level sBLUP and SUPER dispatch are not yet available.
 
     Examples
     --------
@@ -397,6 +396,8 @@ def _load_data(
                 GD_vals = np.asarray(GD, dtype=float)
                 taxa_gd = np.array([str(i) for i in range(GD_vals.shape[0])])
 
+            GD_vals = impute_missing(GD_vals, method=snp_impute)
+
             if isinstance(GM, str):
                 gm_df = pd.read_csv(GM, sep="\t")
             else:
@@ -549,7 +550,7 @@ def _run_model(
             "selected_qtns": r.selected_qtns,
         }
 
-    elif model_name in ("BLINK", "BLINK"):
+    elif model_name == "BLINK":
         r = blink_gwas(
             y,
             X0,
@@ -589,7 +590,7 @@ def _run_model(
             "selected_qtns": r.selected_qtns,
         }
 
-    elif model_name in ("GBLUP", "GBLUP"):
+    elif model_name == "GBLUP":
         r = gblup(y, X0, K)
         p_vals = np.ones(GD.shape[1])
         return {
@@ -602,7 +603,7 @@ def _run_model(
             "blup_result": r,
         }
 
-    elif model_name in ("CBLUP", "CBLUP"):
+    elif model_name == "CBLUP":
         r = cblup(y, X0, GD)
         p_vals = np.ones(GD.shape[1])
         return {
@@ -618,7 +619,8 @@ def _run_model(
     else:
         raise ValueError(
             f"Unknown model: {model_name}. "
-            "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, gBLUP, cBLUP, sBLUP"
+            "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, gBLUP, cBLUP. "
+            "Standalone sBLUP is available as pygapit.sblup(...)."
         )
 
 

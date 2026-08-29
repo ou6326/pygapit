@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from numpy.typing import NDArray
 
 
 @dataclass
@@ -53,27 +54,30 @@ def compute_pca(
 
     GD_filtered = GD[:, valid_snps]
 
-    # ── Standardize each SNP (mean 0, unit variance) ─────────────────────
+    # ── Center each SNP as in R's prcomp(scale. = FALSE) ────────────────
     col_means = GD_filtered.mean(axis=0)
-    col_std = GD_filtered.std(axis=0)
-    col_std[col_std < 1e-12] = 1.0  # avoid divide-by-zero
-    GD_std = (GD_filtered - col_means) / col_std
+    GD_centered = GD_filtered - col_means
 
     # ── SVD (efficient for tall matrices) ────────────────────────────────
-    k = min(n_components, min(GD_std.shape) - 1)
+    k = min(n_components, min(GD_centered.shape))
     # Use truncated SVD via numpy
     # G = U * S * V^T, scores = U * S
-    U, S, Vt = np.linalg.svd(GD_std, full_matrices=False)
+    U, singular_values, Vt = np.linalg.svd(GD_centered, full_matrices=False)
+    singular_values_array: NDArray[np.float64] = np.asarray(
+        singular_values, dtype=np.float64
+    )
+    eigenvalues_all: NDArray[np.float64] = singular_values_array**2 / (n - 1)
     U = U[:, :k]
-    S = S[:k]
+    S = singular_values_array[:k]
     Vt = Vt[:k, :]
 
     scores = U * S  # (n, k) — PC scores (same as R's prcomp$x)
     loadings = Vt.T  # (m, k)
     eigenvalues = S**2 / (n - 1)
-    total_var = np.sum(GD_std.var(axis=0))
-    var_explained = (
-        eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum()
+    total_var = float(np.sum(eigenvalues_all))
+    var_explained = np.asarray(
+        eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum(),
+        dtype=float,
     )
 
     return PCAResult(

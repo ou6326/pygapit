@@ -17,7 +17,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
-from scipy.spatial.distance import squareform
+from scipy.spatial.distance import pdist
 
 from ..stats.emma import emma_remle, emmax_p3d
 
@@ -97,18 +97,10 @@ def compress_kinship(
         K_c = np.array([[float(K.mean())]])
         return K_c, Z
 
-    # Convert kinship to distance: d_ij = 1 - K_ij
-    # Clip to valid range for squareform
-    K_clipped = np.clip(K, -1, 1)
-    dist_mat = 1.0 - K_clipped
-    np.fill_diagonal(dist_mat, 0.0)
-    # Ensure symmetry
-    dist_mat = (dist_mat + dist_mat.T) / 2.0
-    # Clip negative distances from numerical errors
-    dist_mat = np.maximum(dist_mat, 0.0)
-
     try:
-        condensed = squareform(dist_mat)
+        # GAPIT.Compress calls R's dist(K), i.e. Euclidean distance between
+        # complete kinship-profile rows rather than 1 - pairwise kinship.
+        condensed = pdist(K, metric="euclidean")
         Z_link = linkage(condensed, method="average")
         labels = fcluster(Z_link, n_groups, criterion="maxclust")
     except (ValueError, np.linalg.LinAlgError, FloatingPointError):

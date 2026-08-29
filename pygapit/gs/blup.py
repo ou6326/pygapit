@@ -21,7 +21,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.linalg import solve
 
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
@@ -43,62 +42,48 @@ class GBLUPResult:
     method: str = "gBLUP"
 
 
-def _henderson_mme(
+def _emma_blup(
     y: np.ndarray,
     X: np.ndarray,
     K: np.ndarray,
     delta: float,
+    vg: float,
+    ve: float,
 ) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
     """
-    Solve Henderson's Mixed Model Equations.
-    Translates the MME solver from GAPIT.EMMAxP3D.R (BLUP computation section)
+    Solve GAPIT's EMMA-transformed mixed model for BLUE, BLUP, and PEV.
 
-    System:
-      [X'X        X'Z      ] [beta]   [X'y]
-      [Z'X   Z'Z + delta*K^-1] [u  ] = [Z'y]
-
-    With Z = I (complete data, no missing), this simplifies to:
-      [X'X      X'  ] [beta]   [X'y]
-      [X    I+delta*K^-1] [u  ] = [y  ]
-
-    Returns (beta, u, C_uu) where C_uu = inverse of (I + delta*K^-1) block
+    The spectral form remains well defined for the singular relationship
+    matrices produced by centered markers, unlike regularizing ``K`` before
+    inversion in a direct Henderson system.
     """
     n = len(y)
-    q = X.shape[1]
-
-    # K^-1: use pseudo-inverse for numerical stability
+    eigenvalues, eigenvectors = np.linalg.eigh(K)
+    eigenvalues = np.maximum(eigenvalues, 0.0)
+    transformed_basis = eigenvectors * (1.0 / np.sqrt(eigenvalues + delta))
+    transformed_y = transformed_basis.T @ y
+    transformed_x = transformed_basis.T @ X
+    information = transformed_x.T @ transformed_x
+    score = transformed_x.T @ transformed_y
     try:
-        K_inv = np.linalg.inv(K + np.eye(n) * 1e-8)
+        information_inverse = np.linalg.inv(information)
     except np.linalg.LinAlgError:
-        K_inv = np.linalg.pinv(K)
+        information_inverse = np.linalg.pinv(information)
+    beta = information_inverse @ score
 
-    # Build MME coefficient matrix (2n+q) × (q+n)
-    XtX = X.T @ X  # (q, q)
-    XtZ = X.T  # (q, n) since Z = I
-    ZtX = X  # (n, q)
-    ZtZ_plus = np.eye(n) + delta * K_inv  # (n, n)
+    residual = y - X @ beta
+    transformed_residual = transformed_basis.T @ residual
+    u = K @ transformed_basis @ transformed_residual
 
-    top = np.hstack([XtX, XtZ])  # (q, q+n)
-    bot = np.hstack([ZtX, ZtZ_plus])  # (n, q+n)
-    C = np.vstack([top, bot])  # (q+n, q+n)
-
-    rhs = np.concatenate([X.T @ y, y])  # (q+n,)
-
+    c11 = vg * information_inverse
+    c21 = -K @ transformed_basis @ transformed_x @ c11
+    k_inverse = np.linalg.pinv(K)
     try:
-        sol = solve(C, rhs, assume_a="sym")
-    except (ValueError, np.linalg.LinAlgError):
-        sol, _, _, _ = np.linalg.lstsq(C, rhs, rcond=None)
-
-    beta = sol[:q]
-    u = sol[q:]
-
-    # PEV = diagonal of C^-1 block for u
-    try:
-        C_inv = np.linalg.inv(C)
-        C_uu = C_inv[q:, q:]
-        pev = np.diag(C_uu)
+        random_block = np.linalg.inv(np.eye(n) / ve + k_inverse / vg)
     except np.linalg.LinAlgError:
-        pev = np.full(n, np.nan)
+        random_block = np.linalg.pinv(np.eye(n) / ve + k_inverse / vg)
+    correction = c21 @ transformed_x.T @ transformed_basis.T @ K
+    pev = np.diag(random_block - correction)
 
     return beta, u, pev
 
@@ -136,8 +121,8 @@ def gblup(
     ve = remle.ve
     h2 = vg / (vg + ve) if (vg + ve) > 0 else 0.0
 
-    # ── Solve Henderson's MME ─────────────────────────────────────────────
-    beta, u, pev = _henderson_mme(y, X0, K, delta)
+    # ── Solve in the same EMMA spectral space used by GAPIT ───────────────
+    beta, u, pev = _emma_blup(y, X0, K, delta, vg, ve)
 
     # ── Compute BLUE and prediction ───────────────────────────────────────
     blue = X0 @ beta  # BLUE: fixed-effects prediction
@@ -145,14 +130,11 @@ def gblup(
     blup = gebv  # total BLUP = random effects
     prediction = blue + blup  # phenotype prediction
 
-    # Scale PEV by vg
-    pev_scaled = pev * vg
-
     return GBLUPResult(
         taxa=taxa,
         blue=blue,
         blup=blup,
-        pev=pev_scaled,
+        pev=pev,
         gebv=gebv,
         prediction=prediction,
         vg=vg,
@@ -245,7 +227,7 @@ def sblup(
     y: np.ndarray,
     X0: np.ndarray,
     GD: np.ndarray,
-    qtn_indices: np.ndarray | None,
+    qtn_indices: np.ndarray,
     taxa: np.ndarray | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
@@ -256,12 +238,19 @@ def sblup(
 
     Parameters
     ----------
-    qtn_indices : indices of QTNs identified by SUPER/FarmCPU/BLINK GWAS
+    qtn_indices : non-empty indices of pseudo-QTNs identified by
+        SUPER/FarmCPU/BLINK GWAS
     """
-    if qtn_indices is not None and len(qtn_indices) > 0:
-        K_pseudo = vanraden_kinship(GD[:, qtn_indices])
-    else:
-        K_pseudo = vanraden_kinship(GD)
+    indices = np.asarray(qtn_indices)
+    if indices.ndim != 1 or len(indices) == 0:
+        raise ValueError("sBLUP requires at least one pseudo-QTN index")
+    if not np.issubdtype(indices.dtype, np.integer):
+        raise ValueError("sBLUP pseudo-QTN indices must be integers")
+    if np.any(indices < 0) or np.any(indices >= GD.shape[1]):
+        raise ValueError("sBLUP pseudo-QTN index is outside the genotype matrix")
+
+    unique_indices = np.unique(indices.astype(np.intp, copy=False))
+    K_pseudo = vanraden_kinship(GD[:, unique_indices])
 
     K_pseudo += np.eye(len(y)) * 1e-6
 
