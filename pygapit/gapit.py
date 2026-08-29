@@ -15,6 +15,7 @@ Python: myGAPIT  = GAPIT(Y=myY,  GD=myGD, GM=myGM, model="BLINK", PCA_total=3)
 
 from __future__ import annotations
 
+import re
 import time
 import warnings
 from dataclasses import dataclass
@@ -48,7 +49,35 @@ from .stats.testing import (
 )
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
+class GAPITOutputFiles:
+    """Paths written for one trait/model analysis."""
+
+    gwas: Path
+    prediction: Path | None
+    kinship: Path
+    pca: Path
+    manhattan: Path | None
+    qq: Path | None
+    kinship_plot: Path | None
+    pca_plot: Path | None
+
+    def paths(self) -> tuple[Path, ...]:
+        """Return all files that were successfully written."""
+        candidates = (
+            self.gwas,
+            self.prediction,
+            self.kinship,
+            self.pca,
+            self.manhattan,
+            self.qq,
+            self.kinship_plot,
+            self.pca_plot,
+        )
+        return tuple(path for path in candidates if path is not None)
+
+
+@dataclass(slots=True)
 class GAPITResult:
     """
     Return object from GAPIT().
@@ -73,8 +102,9 @@ class GAPITResult:
 
     # Intermediate objects (useful for custom downstream analysis)
     kinship: np.ndarray | None = None
-    pca: object | None = None
+    pca: PCAResult | None = None
     taxa: np.ndarray | None = None
+    output_files: GAPITOutputFiles | None = None
 
     # Method used
     model: str = ""
@@ -161,8 +191,6 @@ def GAPIT(
         kinship_algorithm=kinship_algorithm,
     )
     t_start = time.time()
-
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
 
     # ── Normalise model list ─────────────────────────────────────────────
     if isinstance(model, str):
@@ -316,20 +344,14 @@ def GAPIT(
                 )
 
             # ── Save outputs ──────────────────────────────────────────────
+            output_files = None
             if file_output:
-                _save_outputs(
+                output_files = _save_outputs(
                     gwas_df=gwas_df,
-                    sig_df=sig_df,
                     pred_df=pred_df,
                     pca_result=pca_result,
                     K=K,
                     taxa=taxa_y,
-                    snp_names=snp_names,
-                    chromosomes=chromosomes,
-                    positions=positions,
-                    p_values=result["p_values"],
-                    effects=result["effects"],
-                    maf=maf_vals,
                     trait_name=trait_name,
                     model_name=model_name,
                     output_dir=output_dir,
@@ -347,6 +369,7 @@ def GAPIT(
                 kinship=K,
                 pca=pca_result,
                 taxa=taxa_y,
+                output_files=output_files,
                 model=model_name,
                 trait=trait_name,
                 runtime_seconds=time.time() - t_start,
@@ -739,22 +762,17 @@ def _run_gs_and_build_pred(
 
 def _save_outputs(
     gwas_df: pd.DataFrame,
-    sig_df: pd.DataFrame,
     pred_df: pd.DataFrame | None,
     pca_result: PCAResult,
     K: np.ndarray,
     taxa: np.ndarray,
-    snp_names: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
-    p_values: np.ndarray,
-    effects: np.ndarray,
-    maf: np.ndarray,
     trait_name: str,
     model_name: str,
     output_dir: str | Path,
-) -> None:
+) -> GAPITOutputFiles:
     """Save all result files and plots. Translates GAPIT.ID.R output logic."""
+    import matplotlib.pyplot as plt
+
     from .visualization.plots import (
         kinship_heatmap,
         manhattan_plot,
@@ -762,30 +780,40 @@ def _save_outputs(
         qq_plot,
     )
 
-    prefix = f"GAPIT.{model_name}.{trait_name}"
+    prefix = _output_prefix(model_name, trait_name)
     out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
 
     # ── CSV outputs ────────────────────────────────────────────────────
-    gwas_df.to_csv(out / f"{prefix}.GWAS.Results.csv", index=False)
+    gwas_path = out / f"{prefix}.GWAS.Results.csv"
+    gwas_df.to_csv(gwas_path, index=False)
     print(f"[pyGAPIT] Saved: {prefix}.GWAS.Results.csv")
 
+    prediction_path = None
     if pred_df is not None:
-        pred_df.to_csv(out / f"{prefix}.Prediction.csv", index=False)
+        prediction_path = out / f"{prefix}.Prediction.csv"
+        pred_df.to_csv(prediction_path, index=False)
 
     # Kinship
+    kinship_path = out / "GAPIT.Kinship.csv"
     ki_df = pd.DataFrame(K, columns=taxa)
     ki_df.insert(0, "Taxa", taxa)
-    ki_df.to_csv(out / "GAPIT.Kinship.csv", index=False)
+    ki_df.to_csv(kinship_path, index=False)
 
     # PCA scores
+    pca_path = out / "GAPIT.PCA.csv"
     pca_df = pd.DataFrame(
         pca_result.scores,
         columns=[f"PC{i + 1}" for i in range(pca_result.scores.shape[1])],
     )
     pca_df.insert(0, "Taxa", taxa)
-    pca_df.to_csv(out / "GAPIT.PCA.csv", index=False)
+    pca_df.to_csv(pca_path, index=False)
 
     # ── Plots ──────────────────────────────────────────────────────────
+    manhattan_path = out / f"{prefix}.Manhattan.pdf"
+    qq_path = out / f"{prefix}.QQ.pdf"
+    kinship_plot_path = out / "GAPIT.Kinship.pdf"
+    pca_plot_path = out / "GAPIT.PCA.pdf"
     try:
         # Manhattan
         sig_mask = gwas_df["P.value"] <= bonferroni_threshold(len(gwas_df))
@@ -798,7 +826,7 @@ def _save_outputs(
             p_values=np.asarray(gwas_df["P.value"].to_numpy(), dtype=float),
             title=f"Manhattan: {trait_name} ({model_name})",
             highlight_snps=sig_indices if len(sig_indices) > 0 else None,
-            save_path=str(out / f"{prefix}.Manhattan.pdf"),
+            save_path=str(manhattan_path),
         )
         plt.close(fig_man)
 
@@ -806,7 +834,7 @@ def _save_outputs(
         fig_qq = qq_plot(
             p_values=np.asarray(gwas_df["P.value"].to_numpy(), dtype=float),
             title=f"QQ: {trait_name} ({model_name})",
-            save_path=str(out / f"{prefix}.QQ.pdf"),
+            save_path=str(qq_path),
         )
         plt.close(fig_qq)
 
@@ -814,7 +842,7 @@ def _save_outputs(
         fig_k = kinship_heatmap(
             K=K,
             taxa=taxa,
-            save_path=str(out / "GAPIT.Kinship.pdf"),
+            save_path=str(kinship_plot_path),
         )
         plt.close(fig_k)
 
@@ -823,16 +851,37 @@ def _save_outputs(
             scores=pca_result.scores,
             var_explained=pca_result.var_explained,
             title=f"PCA: {trait_name}",
-            save_path=str(out / "GAPIT.PCA.pdf"),
+            save_path=str(pca_plot_path),
         )
         plt.close(fig_pca)
 
     except (ValueError, TypeError, OSError, np.linalg.LinAlgError) as e:
         warnings.warn(f"Plot generation failed: {e}")
 
+    return GAPITOutputFiles(
+        gwas=gwas_path,
+        prediction=prediction_path,
+        kinship=kinship_path,
+        pca=pca_path,
+        manhattan=manhattan_path if manhattan_path.exists() else None,
+        qq=qq_path if qq_path.exists() else None,
+        kinship_plot=kinship_plot_path if kinship_plot_path.exists() else None,
+        pca_plot=pca_plot_path if pca_plot_path.exists() else None,
+    )
 
-# Import matplotlib at module level to allow plt.close calls above
-try:
-    import matplotlib.pyplot as plt
-except ImportError:
-    pass
+
+_INVALID_FILENAME_CHARS = re.compile(r'[<>:"/\\|?*\x00-\x1f]')
+
+
+def _safe_filename_component(value: str) -> str:
+    """Make a user-controlled model or trait name safe for one filename part."""
+    component = _INVALID_FILENAME_CHARS.sub("_", value).strip(" .")
+    return component or "unnamed"
+
+
+def _output_prefix(model_name: str, trait_name: str) -> str:
+    """Build the stable filename prefix for one analysis."""
+    return (
+        f"GAPIT.{_safe_filename_component(model_name)}."
+        f"{_safe_filename_component(trait_name)}"
+    )

@@ -222,6 +222,10 @@ When `file_output=True` (default), pyGAPIT writes to `output_dir`:
 | `GAPIT.Kinship.pdf` | Kinship heatmap |
 | `GAPIT.PCA.pdf` | 2D PCA scatter |
 
+The returned `GAPITResult.output_files` records every file written for that
+analysis. With `file_output=False`, `output_files` is `None` and `output_dir`
+is not created.
+
 ---
 
 ## Parameter reference
