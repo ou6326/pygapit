@@ -244,6 +244,11 @@ The main supported GAPIT-style parameters are:
 | `NQTN` | `NQTN` | `None` | QTNs for simulation |
 | `buspred` | `buspred` | `False` | Run GS after GWAS |
 
+The compatibility parameters `Z`, `FDRcut=True`, `prediction_model`,
+`Multiple_analysis=True`, and non-`VanRaden` `kinship_algorithm` values are not
+implemented yet. Passing them raises `NotImplementedError` instead of silently
+ignoring the requested behavior.
+
 ---
 
 ## Command-line interface

@@ -1,9 +1,11 @@
-"""
-pyGAPIT - Genome Association and Prediction Integrated Tool (Python)
-A complete Python reimplementation of the R GAPIT package.
-"""
+"""GAPIT-style genomic association and prediction tools for Python."""
 
-__version__ = "2.0.0"
+from importlib.metadata import PackageNotFoundError, version
+
+try:
+    __version__ = version("pygapit")
+except PackageNotFoundError:  # source tree imported without installation
+    __version__ = "0+unknown"
 __author__ = "pyGAPIT contributors (based on GAPIT by Jiabo Wang & Zhiwu Zhang)"
 __license__ = "GPL-3.0"
 

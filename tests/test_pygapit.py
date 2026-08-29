@@ -11,8 +11,9 @@ Tests are organized by module and verify:
 import subprocess
 import sys
 import warnings
+from importlib.metadata import version
 from pathlib import Path
-from typing import TypedDict
+from typing import TypedDict, cast
 
 from numpy.random.mtrand import RandomState
 from numpy.typing import NDArray
@@ -793,6 +794,34 @@ class TestGBLUP:
 
 
 class TestModelContracts:
+    def test_package_version_comes_from_installed_metadata(self) -> None:
+        """The runtime and build metadata must expose one package version."""
+        import pygapit
+
+        assert pygapit.__version__ == version("pygapit")
+
+    def test_unimplemented_compatibility_options_fail_explicitly(self) -> None:
+        """Accepted GAPIT-style options must never be ignored silently."""
+        from pygapit import GAPIT
+
+        with pytest.raises(NotImplementedError, match="Z incidence"):
+            GAPIT(Z=np.eye(2))
+        with pytest.raises(NotImplementedError, match="FDR-based"):
+            GAPIT(FDRcut=True)
+        with pytest.raises(NotImplementedError, match="prediction_model"):
+            GAPIT(prediction_model="sBLUP")
+        with pytest.raises(NotImplementedError, match="Multiple_analysis"):
+            GAPIT(Multiple_analysis=True)
+        with pytest.raises(NotImplementedError, match="kinship_algorithm"):
+            GAPIT(kinship_algorithm="Zhang")
+
+    def test_fdr_cut_requires_gapit_boolean_value(self) -> None:
+        """R GAPIT defines FDRcut as a flag rather than a q-value threshold."""
+        from pygapit import GAPIT
+
+        with pytest.raises(TypeError, match="boolean"):
+            GAPIT(FDRcut=cast(bool, 0.05))
+
     def test_top_level_sblup_error_points_to_supported_api(
         self, small_dataset: SmallDataset
     ) -> None:
@@ -847,6 +876,57 @@ class TestModelContracts:
 
 
 class TestIO:
+    def test_read_hapmap_two_bit_genotypes(self) -> None:
+        """Two-bit HapMap homozygotes, heterozygotes, and missing calls load."""
+        from pygapit.io.formats import read_hapmap
+
+        metadata_columns = [
+            "rs",
+            "alleles",
+            "chrom",
+            "pos",
+            "strand",
+            "assembly",
+            "center",
+            "protLSID",
+            "assayLSID",
+            "panelLSID",
+            "QCcode",
+        ]
+        hapmap = pd.DataFrame(
+            [
+                [
+                    "s1",
+                    "A/T",
+                    "1",
+                    100,
+                    "+",
+                    "NA",
+                    "NA",
+                    "NA",
+                    "NA",
+                    "NA",
+                    "NA",
+                    "AA",
+                    "AT",
+                    "TT",
+                    "NN",
+                ]
+            ],
+            columns=[*metadata_columns, "taxon_a", "taxon_b", "taxon_c", "taxon_d"],
+        )
+
+        result = read_hapmap(hapmap, impute_method="none")
+
+        np.testing.assert_array_equal(
+            result.taxa, ["taxon_a", "taxon_b", "taxon_c", "taxon_d"]
+        )
+        np.testing.assert_allclose(
+            result.GD[:, 0],
+            np.array([0.0, 1.0, 2.0, np.nan]),
+            equal_nan=True,
+        )
+
     def test_read_phenotype_real(self) -> None:
         """Real phenotype file loads correctly."""
         if not PHENOTYPE_PATH.exists():

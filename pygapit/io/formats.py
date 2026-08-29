@@ -22,47 +22,12 @@ import pandas as pd
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
 # Based on GAPIT.Numericalization.R lookup table
 
-IUPAC_1BIT = {
-    "A": 0,
-    "C": 0,
-    "G": 0,
-    "T": 0,
-    "R": 1,
-    "Y": 1,
-    "S": 1,
-    "W": 1,
-    "K": 1,
-    "M": 1,  # heterozygotes
-    "N": np.nan,
-    "X": np.nan,
-    "+": np.nan,
-    "/": np.nan,
-}
-
-# 2-bit: homozygous = 0 or 2 depending on allele order, het = 1
-HETEROZYGOUS_2BIT = {
-    "AT",
-    "TA",
-    "AG",
-    "GA",
-    "AC",
-    "CA",
-    "GT",
-    "TG",
-    "GC",
-    "CG",
-    "CT",
-    "TC",
-    "A-",
-    "-A",
-    "C-",
-    "-C",
-    "G-",
-    "-G",
-    "T-",
-    "-T",
-}
-MISSING_2BIT = {"NN", "XX", "++", "//", "00", "N", "--"}
+HETEROZYGOUS_1BIT = frozenset("RYSWKM")
+HETEROZYGOUS_2BIT = frozenset(
+    {"AT", "AG", "AC", "TA", "GA", "CA", "GT", "TG", "GC", "CG", "CT", "TC"}
+)
+MISSING_1BIT = frozenset({"N", "X", "-", "+", "/", "NA", "NAN"})
+MISSING_2BIT = frozenset({"NN", "XX", "--", "++", "//", "00", "N", "NA", "NAN"})
 
 
 @dataclass
@@ -98,65 +63,76 @@ def _numericalize_snp(
 
     Returns 0/1/2 coded array with NaN for missing.
     """
-    alleles = np.array(alleles, dtype=str)
-    bit = (
-        max(len(str(a)) for a in alleles if str(a) not in ("nan", "NA", "N"))
-        if len(alleles) > 0
-        else 2
-    )
+    values = np.char.upper(np.asarray(alleles, dtype=str))
+    nonmissing_lengths = [
+        len(value)
+        for value in values
+        if value not in MISSING_1BIT and value not in MISSING_2BIT
+    ]
+    bit = max(nonmissing_lengths, default=2)
+    missing_codes = MISSING_1BIT if bit == 1 else MISSING_2BIT
 
-    result = np.full(len(alleles), np.nan)
+    normalized = values.copy()
+    if bit == 1:
+        # GAPIT replaces K by Z so the heterozygote sorts after homozygotes.
+        normalized[normalized == "K"] = "Z"
+    normalized[np.isin(normalized, tuple(missing_codes))] = "N"
 
+    levels = sorted(set(normalized) - {"N"})
     if bit == 2:
-        for i, a in enumerate(alleles):
-            s = str(a)
-            if s in MISSING_2BIT or s in ("nan", "NA", "NaN"):
-                result[i] = np.nan
-            elif s in HETEROZYGOUS_2BIT:
-                result[i] = 1.0
-            else:
-                # Homozygous: will be 0 or 2 depending on allele order
-                result[i] = s  # placeholder, resolved below
+        heterozygotes = [level for level in levels if level in HETEROZYGOUS_2BIT]
+        if len(heterozygotes) > 1:
+            normalized[normalized == heterozygotes[1]] = heterozygotes[0]
+            levels = sorted(set(normalized) - {"N"})
+
+    if len(levels) <= 1 or len(levels) > 3:
+        return np.zeros(len(normalized), dtype=float)
+
+    counts = {level: int(np.count_nonzero(normalized == level)) for level in levels}
+    if major_allele_zero:
+        heterozygote_codes = HETEROZYGOUS_1BIT if bit == 1 else HETEROZYGOUS_2BIT
+        if bit == 1 and len(levels) == 3:
+            heterozygote_codes = heterozygote_codes | {"Z"}
+        heterozygotes = [level for level in levels if level in heterozygote_codes]
+        homozygotes = [level for level in levels if level not in heterozygote_codes]
+
+        def major_allele_order(level: str) -> tuple[int, str]:
+            return -counts[level], level
+
+        homozygotes.sort(key=major_allele_order)
+        if len(levels) == 3 and len(heterozygotes) == 1:
+            levels = [homozygotes[0], heterozygotes[0], homozygotes[1]]
+        elif not heterozygotes:
+            levels = homozygotes
+
+    result = np.full(len(normalized), np.nan, dtype=float)
+    observed = normalized != "N"
+    if len(levels) == 2:
+        heterozygotes = [
+            level
+            for level in levels
+            if level in (HETEROZYGOUS_1BIT if bit == 1 else HETEROZYGOUS_2BIT)
+        ]
+        if heterozygotes:
+            result[observed] = 0.0
+            result[normalized == heterozygotes[0]] = 1.0
+        else:
+            result[normalized == levels[0]] = 0.0
+            result[normalized == levels[1]] = 2.0
+    elif bit == 1:
+        result[normalized == levels[0]] = 0.0
+        result[normalized == levels[1]] = 2.0
+        result[normalized == levels[2]] = 1.0
     else:
-        for i, a in enumerate(alleles):
-            s = str(a)
-            if s in ("N", "X", "+", "/", "nan", "NA"):
-                result[i] = np.nan
-            elif s in IUPAC_1BIT:
-                result[i] = float(IUPAC_1BIT[s])
-            else:
-                result[i] = 0.0  # assume homozygous
+        heterozygotes = [level for level in levels if level in HETEROZYGOUS_2BIT]
+        if len(heterozygotes) != 1:
+            raise ValueError("Two-bit SNPs with three states require one heterozygote")
+        homozygotes = [level for level in levels if level != heterozygotes[0]]
+        result[normalized == homozygotes[0]] = 0.0
+        result[normalized == heterozygotes[0]] = 1.0
+        result[normalized == homozygotes[1]] = 2.0
 
-    # For 2-bit: resolve allele coding
-    if bit == 2:
-        # Find unique non-het alleles
-        numeric_result = np.full(len(alleles), np.nan)
-        unique_homos: list[str] = []
-        for i, a in enumerate(alleles):
-            s = str(a)
-            if s in MISSING_2BIT or s in ("nan", "NA", "NaN"):
-                continue
-            if s in HETEROZYGOUS_2BIT:
-                numeric_result[i] = 1.0
-            else:
-                if s not in unique_homos:
-                    unique_homos.append(s)
-
-        # Map to 0 and 2
-        if len(unique_homos) >= 1:
-            for i, a in enumerate(alleles):
-                s = str(a)
-                if s in MISSING_2BIT or s in ("nan", "NA", "NaN"):
-                    numeric_result[i] = np.nan
-                elif s in HETEROZYGOUS_2BIT:
-                    numeric_result[i] = 1.0
-                elif s == unique_homos[0]:
-                    numeric_result[i] = 0.0 if not major_allele_zero else 2.0
-                else:
-                    numeric_result[i] = 2.0 if not major_allele_zero else 0.0
-        result = numeric_result
-
-    return result.astype(float)
+    return result
 
 
 def read_hapmap(

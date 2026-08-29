@@ -6,6 +6,7 @@ The suite is divided by function so a failure identifies the affected layer dire
 
 - `test_source.py`: pinned GAPIT 3.5 reference commit
 - `test_kinship.py`: VanRaden relationship matrix, including invariant markers
+- `test_hapmap.py`: one- and two-bit HapMap genotype numericalization
 - `test_pca.py`: genotype PCA eigenvalues, explained variance, and scores
 - `test_compression.py`: CMLM average-linkage groups and compressed kinship
 - `test_multiple_testing.py`: Benjamini–Hochberg adjustment via `stats::p.adjust`, including boundary p-values

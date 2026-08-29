@@ -104,7 +104,7 @@ def GAPIT(
     # ── GWAS parameters ─────────────────────────────────────────────────
     cutOff: float | None = None,  # significance threshold
     p_threshold: float | None = None,  # R: p.threshold (multi-locus)
-    FDRcut: float = 0.05,  # FDR q-value cutoff
+    FDRcut: bool = False,  # R: filter BLINK pseudo-QTNs by an FDR cutoff
     LD: float = 0.7,  # LD threshold for BLINK
     # ── CMLM parameters ─────────────────────────────────────────────────
     group_from: int = 1,  # R: group.from
@@ -114,7 +114,7 @@ def GAPIT(
     maxLoop: int = 10,  # max iterations
     # ── Genomic Selection ────────────────────────────────────────────────
     buspred: bool = False,  # predict after GWAS
-    prediction_model: str = "gBLUP",
+    prediction_model: str | None = None,
     # ── Simulation parameters ────────────────────────────────────────────
     h2: float | None = None,  # heritability for simulation
     NQTN: int | None = None,  # number of QTNs for simulation
@@ -156,6 +156,13 @@ def GAPIT(
     GAPITResult with GWAS table, significant SNPs, Pred table,
     h2, vg, ve, kinship, pca, QTNs
     """
+    _validate_compatibility_options(
+        Z=Z,
+        FDRcut=FDRcut,
+        prediction_model=prediction_model,
+        Multiple_analysis=Multiple_analysis,
+        kinship_algorithm=kinship_algorithm,
+    )
     t_start = time.time()
 
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -357,6 +364,34 @@ def GAPIT(
 # ─────────────────────────────────────────────────────────────────────────────
 # Internal helper functions
 # ─────────────────────────────────────────────────────────────────────────────
+
+
+def _validate_compatibility_options(
+    *,
+    Z: np.ndarray | None,
+    FDRcut: object,
+    prediction_model: str | None,
+    Multiple_analysis: bool,
+    kinship_algorithm: str,
+) -> None:
+    """Reject accepted GAPIT-style options that are not implemented yet."""
+    unsupported: list[str] = []
+    if Z is not None:
+        unsupported.append("Z incidence matrices")
+    if not isinstance(FDRcut, bool):
+        raise TypeError("FDRcut must be a boolean, matching GAPIT 3.5")
+    if FDRcut is True:
+        unsupported.append("FDR-based BLINK pseudo-QTN filtering")
+    if prediction_model is not None:
+        unsupported.append("prediction_model overrides")
+    if Multiple_analysis:
+        unsupported.append("Multiple_analysis plots")
+    if kinship_algorithm.casefold() != "vanraden":
+        unsupported.append(f"kinship_algorithm={kinship_algorithm!r}")
+    if unsupported:
+        raise NotImplementedError(
+            "Unsupported GAPIT option(s): " + ", ".join(unsupported)
+        )
 
 
 def _load_data(
