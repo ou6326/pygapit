@@ -1,6 +1,8 @@
 from .formats import (
+    AlignedData,
     GenotypeData,
     PhenotypeData,
+    align_inputs,
     align_taxa,
     impute_missing,
     maf_filter,
@@ -10,8 +12,10 @@ from .formats import (
 )
 
 __all__ = [
+    "AlignedData",
     "GenotypeData",
     "PhenotypeData",
+    "align_inputs",
     "align_taxa",
     "impute_missing",
     "maf_filter",

@@ -23,8 +23,6 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from numpy import ndarray
-from pandas.core.frame import DataFrame
 
 from .gs.blup import cblup, gblup, sblup
 from .gwas.blink import blink_gwas
@@ -35,8 +33,7 @@ from .gwas.mlmm import mlmm_gwas
 from .io.formats import (
     GenotypeData,
     PhenotypeData,
-    align_taxa,
-    impute_missing,
+    align_inputs,
     maf_filter,
     read_hapmap,
     read_numeric,
@@ -87,10 +84,10 @@ class GAPITResult:
 
 def GAPIT(
     # ── Input data ──────────────────────────────────────────────────────
-    Y: pd.DataFrame | str | None = None,  # phenotype
-    G: pd.DataFrame | str | None = None,  # HapMap genotype
-    GD: pd.DataFrame | np.ndarray | str | None = None,  # numeric genotype
-    GM: pd.DataFrame | str | None = None,  # SNP map
+    Y: pd.DataFrame | str | Path | None = None,  # phenotype
+    G: pd.DataFrame | str | Path | None = None,  # HapMap genotype
+    GD: pd.DataFrame | np.ndarray | str | Path | None = None,  # numeric genotype
+    GM: pd.DataFrame | str | Path | None = None,  # SNP map
     KI: np.ndarray | pd.DataFrame | None = None,  # kinship
     CV: pd.DataFrame | np.ndarray | None = None,  # covariates
     Z: np.ndarray | None = None,  # incidence matrix
@@ -199,17 +196,17 @@ def GAPIT(
         # ── Align taxa ───────────────────────────────────────────────────
         ki_df = _ki_to_df(KI, pheno.taxa) if KI is not None else None
         cv_df = _cv_to_df(CV, pheno.taxa) if CV is not None else None
-        aligned = align_taxa(pheno, geno, cv_df=cv_df, ki_df=ki_df)
+        aligned = align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df)
 
-        taxa = aligned["taxa"]
-        Y_aligned = aligned["Y"]
-        GD_aligned = aligned["GD"]
-        GM_aligned = aligned["GM"]
-        KI_aligned = aligned.get("KI")
-        CV_aligned = aligned.get("CV")
+        taxa = aligned.taxa
+        Y_aligned = aligned.phenotypes
+        GD_aligned = aligned.genotypes
+        GM_aligned = aligned.markers
+        KI_aligned = aligned.kinship
+        CV_aligned = aligned.covariates
 
         # Extract phenotype vector for this trait
-        y_col = Y_aligned[trait_name].values.astype(float)
+        y_col = np.asarray(Y_aligned[trait_name], dtype=float)
         valid_mask = ~np.isnan(y_col)
         y = y_col[valid_mask]
         GD_y = GD_aligned[valid_mask, :]
@@ -248,9 +245,9 @@ def GAPIT(
         )
 
         # ── Extract SNP annotation ────────────────────────────────────────
-        snp_names = GM_filtered["SNP"].values.astype(str)
-        chromosomes = GM_filtered["Chromosome"].values
-        positions = GM_filtered["Position"].values.astype(float)
+        snp_names = np.asarray(GM_filtered["SNP"], dtype=str)
+        chromosomes = np.asarray(GM_filtered["Chromosome"])
+        positions = np.asarray(GM_filtered["Position"], dtype=float)
 
         # ── Run requested models ─────────────────────────────────────────
         for model_name in models:
@@ -395,56 +392,57 @@ def _validate_compatibility_options(
 
 
 def _load_data(
-    Y: DataFrame | str | None,
-    G: DataFrame | str | None,
-    GD: DataFrame | ndarray | str | None,
-    GM: DataFrame | str | None,
+    Y: pd.DataFrame | str | Path | None,
+    G: pd.DataFrame | str | Path | None,
+    GD: pd.DataFrame | np.ndarray | str | Path | None,
+    GM: pd.DataFrame | str | Path | None,
     snp_impute: str,
 ) -> tuple[PhenotypeData, GenotypeData]:
     """Load and parse all input data."""
     # Phenotype
-    if isinstance(Y, str):
+    if isinstance(Y, (str, Path)):
         pheno = read_phenotype(Y)
     elif isinstance(Y, pd.DataFrame):
-        pheno = PhenotypeData(
-            Y=Y.copy(),
-            taxa=np.asarray(Y.iloc[:, 0].astype(str).values, dtype=str),
-            trait_names=Y.columns[1:].tolist(),
-        )
+        pheno = PhenotypeData.from_frame(Y)
     else:
         raise TypeError("Y must be a file path or pandas DataFrame")
 
     # Genotype
+    if G is not None and (GD is not None or GM is not None):
+        raise ValueError("Provide either G or GD with GM, not both input formats")
     if G is not None:
-        if isinstance(G, str):
-            geno = read_hapmap(G, impute_method=snp_impute)
-        else:
-            geno = read_hapmap(G, impute_method=snp_impute)
-    elif GD is not None and GM is not None:
-        if isinstance(GD, str):
-            geno = read_numeric(GD, GM, impute_method=snp_impute)
-        else:
-            if isinstance(GD, pd.DataFrame):
-                taxa_gd = np.asarray(GD.iloc[:, 0].astype(str).values, dtype=str)
-                GD_vals = GD.iloc[:, 1:].values.astype(float)
-            else:
-                GD_vals = np.asarray(GD, dtype=float)
-                taxa_gd = np.array([str(i) for i in range(GD_vals.shape[0])])
-
-            GD_vals = impute_missing(GD_vals, method=snp_impute)
-
-            if isinstance(GM, str):
-                gm_df = pd.read_csv(GM, sep="\t")
-            else:
-                gm_df = GM.copy()
-
-            if gm_df.shape[1] >= 3:
-                gm_df = gm_df.iloc[:, :3]
-                gm_df.columns = ["SNP", "Chromosome", "Position"]
-
-            geno = GenotypeData(GD=GD_vals, GM=gm_df, taxa=taxa_gd)
+        geno = read_hapmap(G, impute_method=snp_impute)
     else:
-        raise ValueError("Provide either G (HapMap) or both GD and GM (numeric format)")
+        if (GD is None) != (GM is None):
+            raise ValueError("GD and GM must be provided together")
+        if GD is None or GM is None:
+            raise ValueError("Provide either G (HapMap) or both GD and GM")
+
+        if isinstance(GD, (str, Path)):
+            geno = read_numeric(GD, GM, impute_method=snp_impute)
+        elif isinstance(GD, pd.DataFrame):
+            if isinstance(GM, pd.DataFrame):
+                gm_df = GM
+            else:
+                marker_path = Path(GM)
+                if not marker_path.exists():
+                    raise FileNotFoundError(f"Marker map file not found: {marker_path}")
+                gm_df = pd.read_csv(marker_path, sep="\t")
+            geno = GenotypeData.from_numeric_frame(GD, gm_df, snp_impute)
+        else:
+            if isinstance(GM, pd.DataFrame):
+                gm_df = GM
+            else:
+                marker_path = Path(GM)
+                if not marker_path.exists():
+                    raise FileNotFoundError(f"Marker map file not found: {marker_path}")
+                gm_df = pd.read_csv(marker_path, sep="\t")
+            geno = GenotypeData.from_array(
+                GD,
+                gm_df,
+                pheno.taxa,
+                impute_method=snp_impute,
+            )
 
     return pheno, geno
 
@@ -494,27 +492,38 @@ def _simulate_phenotype(
     )
 
 
-def _ki_to_df(KI: DataFrame | ndarray, taxa: ndarray) -> DataFrame | None:
+def _ki_to_df(KI: pd.DataFrame | np.ndarray, taxa: np.ndarray) -> pd.DataFrame:
     """Convert kinship numpy array to DataFrame with taxa column."""
     if isinstance(KI, pd.DataFrame):
         return KI
-    n = KI.shape[0]
-    if len(taxa) == n:
-        df = pd.DataFrame(KI, columns=taxa)
-        df.insert(0, "Taxa", taxa)
-        return df
-    return None
+    values = np.asarray(KI, dtype=float)
+    expected_shape = (len(taxa), len(taxa))
+    if values.ndim != 2 or values.shape != expected_shape:
+        raise ValueError(
+            f"KI must be a square {expected_shape} matrix matching phenotype taxa; "
+            f"got {values.shape}"
+        )
+    df = pd.DataFrame(values, columns=taxa)
+    df.insert(0, "Taxa", taxa)
+    return df
 
 
-def _cv_to_df(CV: DataFrame | ndarray, taxa: ndarray) -> DataFrame | None:
+def _cv_to_df(CV: pd.DataFrame | np.ndarray, taxa: np.ndarray) -> pd.DataFrame:
     """Convert CV numpy array to DataFrame with taxa column."""
     if isinstance(CV, pd.DataFrame):
         return CV
-    n = CV.shape[0] if CV.ndim > 1 else len(CV)
-    cv_df = pd.DataFrame(
-        CV, columns=[f"CV{i + 1}" for i in range(CV.shape[1] if CV.ndim > 1 else 1)]
-    )
-    cv_df.insert(0, "Taxa", taxa[:n])
+    values = np.asarray(CV, dtype=float)
+    if values.ndim == 1:
+        values = values[:, np.newaxis]
+    if values.ndim != 2:
+        raise ValueError(f"CV must be one- or two-dimensional; got {values.ndim}D")
+    if values.shape[0] != len(taxa):
+        raise ValueError(
+            f"CV must have one row per phenotype taxon ({len(taxa)}); "
+            f"got {values.shape[0]}"
+        )
+    cv_df = pd.DataFrame(values, columns=[f"CV{i + 1}" for i in range(values.shape[1])])
+    cv_df.insert(0, "Taxa", taxa)
     return cv_df
 
 

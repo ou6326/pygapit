@@ -17,8 +17,10 @@ from .gwas.glm import GLMResult, glm_gwas
 from .gwas.mlm import MLMResult, cmlm_gwas, mlm_gwas
 from .gwas.mlmm import MLMMResult, mlmm_gwas
 from .io.formats import (
+    AlignedData,
     GenotypeData,
     PhenotypeData,
+    align_inputs,
     align_taxa,
     maf_filter,
     read_hapmap,
@@ -47,6 +49,7 @@ from .visualization.plots import (
 
 __all__ = [
     "GAPIT",
+    "AlignedData",
     "BLINKResult",
     "FarmCPUResult",
     "GAPITResult",
@@ -56,6 +59,7 @@ __all__ = [
     "MLMMResult",
     "MLMResult",
     "PhenotypeData",
+    "align_inputs",
     "align_taxa",
     "benjamini_hochberg",
     "blink_gwas",

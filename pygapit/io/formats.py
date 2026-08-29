@@ -38,6 +38,55 @@ class GenotypeData:
     GM: pd.DataFrame  # columns: SNP, Chromosome, Position
     taxa: np.ndarray  # (n,) individual IDs
 
+    @classmethod
+    def from_numeric_frame(
+        cls,
+        genotype: pd.DataFrame,
+        marker_map: pd.DataFrame,
+        impute_method: str = "middle",
+    ) -> GenotypeData:
+        """Build validated numeric genotype data from labeled tables."""
+        return _numeric_from_frames(
+            genotype, marker_map, impute_method, "Numeric genotype"
+        )
+
+    @classmethod
+    def from_array(
+        cls,
+        genotype: np.ndarray,
+        marker_map: pd.DataFrame,
+        taxa: np.ndarray,
+        impute_method: str = "middle",
+    ) -> GenotypeData:
+        """Build validated numeric genotype data using explicit row taxa."""
+        try:
+            values = np.asarray(genotype, dtype=float)
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Numeric genotype array values must be numeric") from exc
+        if values.ndim != 2 or values.shape[1] == 0:
+            raise ValueError(
+                "Numeric genotype array must be two-dimensional with at least one SNP"
+            )
+        taxa_array = _taxa_array(taxa, "genotype")
+        if values.shape[0] != len(taxa_array):
+            raise ValueError(
+                "Numeric genotype array must have one row per supplied taxon; "
+                f"expected {len(taxa_array)}, got {values.shape[0]}"
+            )
+        if np.isinf(values).any():
+            raise ValueError("Numeric genotype array must not contain infinity")
+        normalized_map = _marker_map_from_frame(marker_map, "Marker map")
+        if values.shape[1] != len(normalized_map):
+            raise ValueError(
+                f"Numeric genotype array has {values.shape[1]} SNPs but marker map "
+                f"has {len(normalized_map)} rows"
+            )
+        return cls(
+            GD=impute_missing(values, method=impute_method),
+            GM=normalized_map,
+            taxa=taxa_array,
+        )
+
 
 @dataclass
 class PhenotypeData:
@@ -46,6 +95,156 @@ class PhenotypeData:
     Y: pd.DataFrame  # col0 = Taxa, col1+ = trait values
     taxa: np.ndarray  # (n,) individual IDs
     trait_names: list[str]
+
+    @classmethod
+    def from_frame(cls, phenotype: pd.DataFrame) -> PhenotypeData:
+        """Build validated phenotype data from a labeled table."""
+        return _phenotype_from_frame(phenotype, "Phenotype data")
+
+
+@dataclass(frozen=True, slots=True)
+class AlignedData:
+    """Typed result of aligning phenotype, genotype, and optional inputs."""
+
+    taxa: np.ndarray
+    phenotypes: pd.DataFrame
+    genotypes: np.ndarray
+    markers: pd.DataFrame
+    kinship: np.ndarray | None = None
+    covariates: np.ndarray | None = None
+
+    def as_legacy_dict(self) -> dict[str, Any]:
+        """Return the historical mapping produced by :func:`align_taxa`."""
+        result: dict[str, Any] = {
+            "taxa": self.taxa,
+            "Y": self.phenotypes,
+            "GD": self.genotypes,
+            "GM": self.markers,
+        }
+        if self.kinship is not None:
+            result["KI"] = self.kinship
+        if self.covariates is not None:
+            result["CV"] = self.covariates
+        return result
+
+
+def _unique_taxa_index(values: np.ndarray, source: str) -> dict[str, int]:
+    """Build a taxa-to-row mapping and reject ambiguous duplicate IDs."""
+    taxa = np.asarray(values, dtype=str)
+    if taxa.ndim != 1:
+        raise ValueError(f"{source} taxa must be one-dimensional")
+
+    index: dict[str, int] = {}
+    duplicates: list[str] = []
+    for row, taxon in enumerate(taxa):
+        name = str(taxon)
+        if name in index:
+            duplicates.append(name)
+        else:
+            index[name] = row
+    if duplicates:
+        duplicate_names = ", ".join(sorted(set(duplicates)))
+        raise ValueError(f"Duplicate taxa in {source}: {duplicate_names}")
+    return index
+
+
+def _taxa_array(values: pd.Series[Any] | np.ndarray, source: str) -> np.ndarray:
+    """Return validated, non-empty string taxa identifiers."""
+    series = pd.Series(values, copy=False)
+    if series.isna().any():
+        raise ValueError(f"{source} taxa must not contain missing values")
+    taxa = np.asarray(series.astype(str), dtype=str)
+    if np.any(np.char.strip(taxa) == ""):
+        raise ValueError(f"{source} taxa must not contain empty values")
+    _unique_taxa_index(taxa, source)
+    return taxa
+
+
+def _phenotype_from_frame(df: pd.DataFrame, source: str) -> PhenotypeData:
+    """Validate and normalize a phenotype DataFrame."""
+    if df.shape[1] < 2:
+        raise ValueError(f"{source} must contain a taxa column and at least one trait")
+    if df.empty:
+        raise ValueError(f"{source} must contain at least one phenotype row")
+
+    result = df.copy()
+    taxa = _taxa_array(result.iloc[:, 0], "phenotype")
+    result.isetitem(0, np.asarray(taxa, dtype=object))
+    trait_names = result.columns[1:].tolist()
+    if len(set(trait_names)) != len(trait_names):
+        raise ValueError(f"{source} contains duplicate trait names")
+    for column in result.columns[1:]:
+        try:
+            result[column] = pd.to_numeric(result[column], errors="raise")
+        except (TypeError, ValueError) as exc:
+            raise ValueError(
+                f"Phenotype trait {column!r} must contain numeric values"
+            ) from exc
+    if np.isinf(result.iloc[:, 1:].to_numpy(dtype=float)).any():
+        raise ValueError(f"{source} trait values must not contain infinity")
+    return PhenotypeData(Y=result, taxa=taxa, trait_names=trait_names)
+
+
+def _marker_map_from_frame(df: pd.DataFrame, source: str) -> pd.DataFrame:
+    """Validate and normalize a GAPIT marker map."""
+    if df.shape[1] < 3:
+        raise ValueError(f"{source} must contain SNP, Chromosome, and Position columns")
+    if df.empty:
+        raise ValueError(f"{source} must contain at least one marker")
+
+    result = df.iloc[:, :3].copy()
+    result.columns = ["SNP", "Chromosome", "Position"]
+    if result[["SNP", "Chromosome", "Position"]].isna().any(axis=None):
+        raise ValueError(f"{source} must not contain missing marker annotations")
+    result["SNP"] = result["SNP"].astype(str)
+    chromosome_labels = result["Chromosome"].astype(str)
+    if (result["SNP"].str.strip() == "").any() or (
+        chromosome_labels.str.strip() == ""
+    ).any():
+        raise ValueError(f"{source} must not contain empty marker annotations")
+    if result["SNP"].duplicated().any():
+        raise ValueError(f"{source} contains duplicate SNP identifiers")
+    try:
+        result["Position"] = pd.to_numeric(result["Position"], errors="raise")
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{source} positions must be numeric") from exc
+    if np.isinf(result["Position"].to_numpy(dtype=float)).any():
+        raise ValueError(f"{source} positions must not contain infinity")
+    return result.reset_index(drop=True)
+
+
+def _numeric_from_frames(
+    gd_df: pd.DataFrame,
+    gm_df: pd.DataFrame,
+    impute_method: str,
+    source: str,
+) -> GenotypeData:
+    """Validate and normalize numeric genotype and marker-map frames."""
+    if gd_df.shape[1] < 2:
+        raise ValueError(f"{source} must contain a taxa column and at least one SNP")
+    if gd_df.empty:
+        raise ValueError(f"{source} must contain at least one genotype row")
+
+    taxa = _taxa_array(gd_df.iloc[:, 0], "genotype")
+    marker_map = _marker_map_from_frame(gm_df, "Marker map")
+    genotype_markers = np.asarray(gd_df.columns[1:], dtype=str).tolist()
+    map_markers = marker_map["SNP"].tolist()
+    if genotype_markers != map_markers:
+        raise ValueError(
+            "Numeric genotype SNP columns must match marker-map rows in order"
+        )
+    try:
+        values = gd_df.iloc[:, 1:].to_numpy(dtype=float)
+    except (TypeError, ValueError) as exc:
+        raise ValueError(f"{source} SNP values must be numeric") from exc
+    if np.isinf(values).any():
+        raise ValueError(f"{source} SNP values must not contain infinity")
+
+    return GenotypeData(
+        GD=impute_missing(values, method=impute_method),
+        GM=marker_map,
+        taxa=taxa,
+    )
 
 
 def _numericalize_snp(
@@ -169,16 +368,16 @@ def read_hapmap(
             raise FileNotFoundError(f"HapMap file not found: {fp}")
         # Read with no header (row 0 is header)
         raw = pd.read_csv(fp, sep="\t", header=None, low_memory=False)
-    raw.shape[1]
     n_meta = 11  # first 11 columns are SNP metadata
+    if raw.shape[1] <= n_meta:
+        raise ValueError("HapMap data must contain 11 metadata columns and taxa")
+    if len(raw) < 2:
+        raise ValueError("HapMap data must contain at least one marker row")
 
     # Extract taxa names from first row, skip first 11 columns
-    taxa = np.asarray(raw.iloc[0, n_meta:].values, dtype=str)
+    taxa = _taxa_array(raw.iloc[0, n_meta:], "HapMap")
     # Extract SNP info: rs (col 0), chrom (col 2), pos (col 3)
-    snp_info = raw.iloc[1:, [0, 2, 3]].copy()
-    snp_info.columns = ["SNP", "Chromosome", "Position"]
-    snp_info["Position"] = pd.to_numeric(snp_info["Position"], errors="coerce")
-    snp_info = snp_info.reset_index(drop=True)
+    snp_info = _marker_map_from_frame(raw.iloc[1:, [0, 2, 3]], "HapMap marker data")
 
     # Genotype block: rows = SNPs, cols = individuals
     geno_block = raw.iloc[1:, n_meta:].values  # (n_snps, n_individuals)
@@ -223,33 +422,22 @@ def read_numeric(
     GenotypeData
     """
     gd_path = Path(gd_path)
+    if not gd_path.exists():
+        raise FileNotFoundError(f"Numeric genotype file not found: {gd_path}")
 
     # Read GD — GAPIT format: col 0 = taxa names, col 1+ = SNP genotypes
     gd_df = pd.read_csv(gd_path, sep="\t", low_memory=False)
-    taxa = np.asarray(gd_df.iloc[:, 0].astype(str).values, dtype=str)
-    GD = gd_df.iloc[:, 1:].values.astype(float)
 
     # Read GM
-    gm_df = (
-        gm_path.copy()
-        if isinstance(gm_path, pd.DataFrame)
-        else pd.read_csv(gm_path, sep="\t", header=0)
-    )
-    if gm_df.shape[1] >= 3:
-        gm_df = gm_df.iloc[:, :3]
-        gm_df.columns = ["SNP", "Chromosome", "Position"]
+    if isinstance(gm_path, pd.DataFrame):
+        gm_df = gm_path
+    else:
+        marker_path = Path(gm_path)
+        if not marker_path.exists():
+            raise FileNotFoundError(f"Marker map file not found: {marker_path}")
+        gm_df = pd.read_csv(marker_path, sep="\t", header=0)
 
-    # Validate column alignment
-    if GD.shape[1] != len(gm_df):
-        raise ValueError(
-            f"GD has {GD.shape[1]} SNPs but GM has {len(gm_df)} rows. "
-            "Ensure GD columns and GM rows are in the same order."
-        )
-
-    # Impute missing
-    GD = impute_missing(GD, method=impute_method)
-
-    return GenotypeData(GD=GD, GM=gm_df, taxa=taxa)
+    return _numeric_from_frames(gd_df, gm_df, impute_method, "Numeric genotype")
 
 
 def impute_missing(GD: np.ndarray, method: str = "middle") -> np.ndarray:
@@ -298,23 +486,20 @@ def read_phenotype(filepath: str | Path) -> PhenotypeData:
     PhenotypeData with Y (DataFrame), taxa, trait_names
     """
     fp = Path(filepath)
+    if not fp.exists():
+        raise FileNotFoundError(f"Phenotype file not found: {fp}")
     df = pd.read_csv(fp, sep="\t", na_values=["NA", "NaN", "nan", "N/A"])
-    df.iloc[:, 0] = df.iloc[:, 0].astype(str)
-
-    taxa = np.asarray(df.iloc[:, 0].values, dtype=str)
-    trait_names = df.columns[1:].tolist()
-
-    return PhenotypeData(Y=df, taxa=taxa, trait_names=trait_names)
+    return _phenotype_from_frame(df, "Phenotype data")
 
 
-def align_taxa(
+def align_inputs(
     pheno: PhenotypeData,
     geno: GenotypeData,
     cv_df: pd.DataFrame | None = None,
     ki_df: pd.DataFrame | None = None,
-) -> dict[str, Any]:
+) -> AlignedData:
     """
-    Align all input datasets to common taxa.
+    Align all input datasets to common taxa in phenotype order.
     Translates GAPIT.IC.R and GAPIT.QC.R taxa-matching logic.
 
     GAPIT rule: only the intersection of taxa across all provided
@@ -322,26 +507,57 @@ def align_taxa(
 
     Returns
     -------
-    dict with 'Y', 'GD', 'GM', 'taxa', 'KI' (optional), 'CV' (optional)
+    :class:`AlignedData`
     """
-    common_taxa = set(pheno.taxa) & set(geno.taxa)
+    if len(pheno.Y) != len(pheno.taxa):
+        raise ValueError("Phenotype rows and phenotype taxa must have equal length")
+    if geno.GD.ndim != 2:
+        raise ValueError("Genotype matrix must be two-dimensional")
+    if geno.GD.shape[0] != len(geno.taxa):
+        raise ValueError("Genotype rows and genotype taxa must have equal length")
+    if geno.GD.shape[1] != len(geno.GM):
+        raise ValueError("Genotype columns and marker-map rows must have equal length")
+
+    phenotype_index = _unique_taxa_index(pheno.taxa, "phenotype")
+    genotype_index = _unique_taxa_index(geno.taxa, "genotype")
+    common = set(phenotype_index) & set(genotype_index)
+
+    covariate_index: dict[str, int] | None = None
+    covariate_values: np.ndarray | None = None
 
     if cv_df is not None:
-        cv_taxa = set(cv_df.iloc[:, 0].astype(str).values)
-        common_taxa &= cv_taxa
+        if cv_df.shape[1] < 2:
+            raise ValueError(
+                "Covariate data must contain taxa and at least one covariate"
+            )
+        covariate_taxa = np.asarray(cv_df.iloc[:, 0].astype(str), dtype=str)
+        covariate_index = _unique_taxa_index(covariate_taxa, "covariates")
+        covariate_values = cv_df.iloc[:, 1:].to_numpy(dtype=float)
+        common &= set(covariate_index)
+
+    kinship_index: dict[str, int] | None = None
+    kinship_values: np.ndarray | None = None
 
     if ki_df is not None:
-        ki_taxa = set(ki_df.iloc[:, 0].astype(str).values)
-        common_taxa &= ki_taxa
+        kinship_taxa = np.asarray(ki_df.iloc[:, 0].astype(str), dtype=str)
+        kinship_index = _unique_taxa_index(kinship_taxa, "kinship")
+        kinship_values = ki_df.iloc[:, 1:].to_numpy(dtype=float)
+        expected_shape = (len(kinship_taxa), len(kinship_taxa))
+        if kinship_values.shape != expected_shape:
+            raise ValueError(
+                "Kinship data must contain one taxa column followed by a square "
+                f"matrix; expected {expected_shape}, got {kinship_values.shape}"
+            )
+        common &= set(kinship_index)
 
-    if len(common_taxa) == 0:
+    if not common:
         raise ValueError(
             "No common taxa found across input files. "
             "Check that taxa names match exactly (case-sensitive) "
             "across phenotype, genotype, and any kinship/covariate files."
         )
 
-    common_taxa = sorted(common_taxa)
+    common_taxa = [str(taxon) for taxon in pheno.taxa if str(taxon) in common]
     n_common = len(common_taxa)
 
     if n_common < len(pheno.taxa):
@@ -350,39 +566,41 @@ def align_taxa(
             f"Dropped {len(pheno.taxa) - n_common} due to missing data."
         )
 
-    taxa_arr = np.array(common_taxa)
+    taxa_arr = np.asarray(common_taxa, dtype=str)
 
-    # Align phenotype
-    pheno_idx = [np.where(pheno.taxa == t)[0][0] for t in common_taxa]
+    pheno_idx = [phenotype_index[taxon] for taxon in common_taxa]
     Y_aligned = pheno.Y.iloc[pheno_idx].reset_index(drop=True)
-
-    # Align genotype
-    geno_idx = [np.where(geno.taxa == t)[0][0] for t in common_taxa]
+    geno_idx = [genotype_index[taxon] for taxon in common_taxa]
     GD_aligned = geno.GD[geno_idx, :]
 
-    result = {
-        "taxa": taxa_arr,
-        "Y": Y_aligned,
-        "GD": GD_aligned,
-        "GM": geno.GM,
-    }
+    KI_aligned = None
+    if kinship_index is not None and kinship_values is not None:
+        ki_idx = [kinship_index[taxon] for taxon in common_taxa]
+        KI_aligned = kinship_values[np.ix_(ki_idx, ki_idx)]
 
-    # Align kinship if provided
-    if ki_df is not None:
-        ki_taxa_col = ki_df.iloc[:, 0].astype(str).values
-        ki_idx = [np.where(ki_taxa_col == t)[0][0] for t in common_taxa]
-        ki_vals = ki_df.iloc[:, 1:].values
-        KI_aligned = ki_vals[np.ix_(ki_idx, ki_idx)].astype(float)
-        result["KI"] = KI_aligned
+    CV_aligned = None
+    if covariate_index is not None and covariate_values is not None:
+        cv_idx = [covariate_index[taxon] for taxon in common_taxa]
+        CV_aligned = covariate_values[cv_idx, :]
 
-    # Align covariates if provided
-    if cv_df is not None:
-        cv_taxa_col = cv_df.iloc[:, 0].astype(str).values
-        cv_idx = [np.where(cv_taxa_col == t)[0][0] for t in common_taxa]
-        CV_aligned = cv_df.iloc[cv_idx, 1:].values.astype(float)
-        result["CV"] = CV_aligned
+    return AlignedData(
+        taxa=taxa_arr,
+        phenotypes=Y_aligned,
+        genotypes=GD_aligned,
+        markers=geno.GM,
+        kinship=KI_aligned,
+        covariates=CV_aligned,
+    )
 
-    return result
+
+def align_taxa(
+    pheno: PhenotypeData,
+    geno: GenotypeData,
+    cv_df: pd.DataFrame | None = None,
+    ki_df: pd.DataFrame | None = None,
+) -> dict[str, Any]:
+    """Return the legacy mapping form of :func:`align_inputs`."""
+    return align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df).as_legacy_dict()
 
 
 def maf_filter(
