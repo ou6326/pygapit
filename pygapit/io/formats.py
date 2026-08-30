@@ -18,7 +18,17 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
-from .._typing import FloatMatrix, FloatVector, IntVector, Matrix, StrVector, Vector
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    IntVector,
+    Matrix,
+    StrVector,
+    Vector,
+    as_float_matrix,
+    as_str_vector,
+    require_length,
+)
 
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
@@ -39,6 +49,17 @@ class GenotypeData:
     GD: FloatMatrix  # (n_individuals, n_snps), 0/1/2 coded
     GM: pd.DataFrame  # columns: SNP, Chromosome, Position
     taxa: StrVector  # individual IDs
+
+    def __post_init__(self) -> None:
+        """Enforce the array contract even for direct construction."""
+        self.GD = as_float_matrix(self.GD, name="genotype matrix")
+        self.taxa = as_str_vector(self.taxa, name="genotype taxa")
+        require_length(self.taxa, self.GD.shape[0], name="genotype taxa")
+        if len(self.GM) != self.GD.shape[1]:
+            raise ValueError(
+                "marker map must have one row per genotype column; "
+                f"expected {self.GD.shape[1]}, got {len(self.GM)}"
+            )
 
     @classmethod
     def from_numeric_frame(
@@ -454,7 +475,7 @@ def impute_missing(GD: FloatMatrix, method: str = "middle") -> FloatMatrix:
       'mean'   : impute with column mean (population allele frequency)
       'none'   : leave as NaN
     """
-    GD = GD.copy()
+    GD = as_float_matrix(GD, name="genotype matrix").copy()
     missing = np.isnan(GD)
 
     if method == "middle":

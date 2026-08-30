@@ -27,7 +27,7 @@ from .._typing import FloatMatrix, FloatVector, IntVector
 from ..stats.emma import emma_remle, emmax_p3d
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class MLMMResult:
     p_values: FloatVector
     effects: FloatVector

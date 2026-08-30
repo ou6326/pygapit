@@ -18,16 +18,27 @@ PEV  = diag(C22) where C22 is the (2,2) block of the MME inverse
 
 from __future__ import annotations
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 
 import numpy as np
 
-from .._typing import FloatMatrix, FloatVector, StrVector, Vector
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    StrVector,
+    Vector,
+    as_float_matrix,
+    as_float_vector,
+    as_str_vector,
+    require_length,
+    require_row_count,
+    require_square,
+)
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class GBLUPResult:
     """Genomic prediction output per individual."""
 
@@ -111,9 +122,17 @@ def gblup(
     -------
     GBLUPResult with BLUP, BLUE, PEV per individual
     """
+    y = as_float_vector(y, name="phenotype")
+    X0 = as_float_matrix(X0, name="covariate matrix")
+    K = as_float_matrix(K, name="kinship matrix")
     n = len(y)
+    require_row_count(X0, n, name="covariate matrix")
+    require_square(K, name="kinship matrix", size=n)
     if taxa is None:
         taxa = np.arange(n).astype(str)
+    else:
+        taxa = as_str_vector(taxa, name="taxa")
+        require_length(taxa, n, name="taxa")
 
     # ── Estimate variance components via REML ────────────────────────────
     remle = emma_remle(y, X0, K, ngrids=ngrids)
@@ -164,6 +183,16 @@ def predict_new(
     -------
     (n_new,) predicted GEBVs for new individuals
     """
+    K_train_train = as_float_matrix(K_train_train, name="training kinship matrix")
+    K_new_train = as_float_matrix(K_new_train, name="new-to-training kinship matrix")
+    blup_train = as_float_vector(blup_train, name="training BLUP")
+    n_train = len(blup_train)
+    require_square(K_train_train, name="training kinship matrix", size=n_train)
+    if K_new_train.shape[1] != n_train:
+        raise ValueError(
+            "new-to-training kinship matrix must have one column per training BLUP"
+        )
+
     try:
         K_inv = np.linalg.solve(
             K_train_train + np.eye(len(K_train_train)) * 1e-8,
@@ -192,7 +221,12 @@ def cblup(
     """
     from ..gwas.mlm import compress_kinship, reml_for_groups
 
+    y = as_float_vector(y, name="phenotype")
+    X0 = as_float_matrix(X0, name="covariate matrix")
+    GD = as_float_matrix(GD, name="genotype matrix")
     n = len(y)
+    require_row_count(X0, n, name="covariate matrix")
+    require_row_count(GD, n, name="genotype matrix")
     K_full = vanraden_kinship(GD)
 
     if group_to is None:
@@ -220,8 +254,7 @@ def cblup(
             continue
 
     result = gblup(y, X0, best_K_eff, taxa=taxa, ngrids=ngrids)
-    result.method = "cBLUP"
-    return result
+    return replace(result, method="cBLUP")
 
 
 def sblup(
@@ -242,6 +275,13 @@ def sblup(
     qtn_indices : non-empty indices of pseudo-QTNs identified by
         SUPER/FarmCPU/BLINK GWAS
     """
+    y = as_float_vector(y, name="phenotype")
+    X0 = as_float_matrix(X0, name="covariate matrix")
+    GD = as_float_matrix(GD, name="genotype matrix")
+    n = len(y)
+    require_row_count(X0, n, name="covariate matrix")
+    require_row_count(GD, n, name="genotype matrix")
+
     indices = np.asarray(qtn_indices)
     if indices.ndim != 1 or len(indices) == 0:
         raise ValueError("sBLUP requires at least one pseudo-QTN index")
@@ -257,5 +297,4 @@ def sblup(
     K_pseudo += np.eye(len(y)) * 1e-6
 
     result = gblup(y, X0, K_pseudo, taxa=taxa, ngrids=ngrids)
-    result.method = "sBLUP"
-    return result
+    return replace(result, method="sBLUP")

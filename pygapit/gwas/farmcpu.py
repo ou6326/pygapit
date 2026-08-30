@@ -33,7 +33,7 @@ from ..stats.kinship import vanraden_kinship
 from .glm import glm_scan_with_cofactors
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class FarmCPUResult:
     p_values: FloatVector
     effects: FloatVector

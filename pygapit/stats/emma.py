@@ -21,11 +21,18 @@ import numpy as np
 from scipy.optimize import brentq
 from scipy.stats import t as t_dist
 
-from .._typing import FloatMatrix, FloatVector
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    as_float_matrix,
+    as_float_vector,
+    require_row_count,
+    require_square,
+)
 from ..io.formats import impute_missing
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class EMMAResult:
     """Output from variance component estimation."""
 
@@ -36,7 +43,7 @@ class EMMAResult:
     h2: float  # narrow-sense heritability
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class GWASResult:
     """Per-SNP GWAS output."""
 
@@ -129,8 +136,17 @@ def emma_remle(
     -------
     EMMAResult with delta, ve, vg, h2, reml
     """
+    y = as_float_vector(y, name="phenotype")
+    X = as_float_matrix(X, name="design matrix")
+    K = as_float_matrix(K, name="kinship matrix")
     n = len(y)
+    require_row_count(X, n, name="design matrix")
+    require_square(K, name="kinship matrix", size=n)
     q = X.shape[1]
+    if q == 0:
+        raise ValueError("design matrix must contain at least one column")
+    if n <= q:
+        raise ValueError("REML requires more observations than fixed effects")
 
     # Check singularity
     if np.linalg.matrix_rank(X.T @ X) < q:
@@ -224,6 +240,14 @@ def emmax_p3d(
     -------
     GWASResult with p_values, effects, se, stats, vg, ve, h2
     """
+    y = as_float_vector(y, name="phenotype")
+    X0 = as_float_matrix(X0, name="covariate matrix")
+    GD = as_float_matrix(GD, name="genotype matrix")
+    K = as_float_matrix(K, name="kinship matrix")
+    n = len(y)
+    require_row_count(X0, n, name="covariate matrix")
+    require_row_count(GD, n, name="genotype matrix")
+    require_square(K, name="kinship matrix", size=n)
     GD = impute_missing(GD, method=snp_impute)
     n, m = GD.shape
     q0 = X0.shape[1]

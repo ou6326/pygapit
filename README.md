@@ -10,8 +10,9 @@ It provides GAPIT-style inputs for the GWAS models **GLM, MLM, CMLM, MLMM, FarmC
 
 ### Regular use
 
-Install pyGAPIT from this source checkout. This installs only the Python runtime
-dependencies; R and the GAPIT reference repository are not required.
+pyGAPIT requires Python 3.10 or newer. Install it from this source checkout.
+This installs only the Python runtime dependencies; R and the GAPIT reference
+repository are not required.
 
 ```bash
 pip install .

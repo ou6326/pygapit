@@ -13,10 +13,10 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .._typing import FloatMatrix, FloatVector
+from .._typing import FloatMatrix, FloatVector, as_float_matrix, require_row_count
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class PCAResult:
     scores: FloatMatrix  # (n, k) PC scores per individual
     loadings: FloatMatrix  # (m, k) SNP loadings
@@ -43,7 +43,12 @@ def compute_pca(
     -------
     PCAResult with scores, loadings, variance explained
     """
+    GD = as_float_matrix(GD, name="genotype matrix")
     n, _m = GD.shape
+    if n < 2:
+        raise ValueError("PCA requires at least two individuals")
+    if n_components < 0:
+        raise ValueError("n_components must be non-negative")
 
     # ── MAF filter ────────────────────────────────────────────────────────
     freq = GD.sum(axis=0) / (2 * n)
@@ -114,9 +119,8 @@ def build_covariate_matrix(
         X0 = np.column_stack([X0, pca_result.scores[:, :k]])
 
     if extra_covariates is not None:
-        cv = np.asarray(extra_covariates, dtype=np.float64)
-        if cv.ndim == 1:
-            cv = cv.reshape(-1, 1)
+        cv = as_float_matrix(extra_covariates, name="extra covariates")
+        require_row_count(cv, n, name="extra covariates")
         X0 = np.column_stack([X0, cv])
 
     return X0

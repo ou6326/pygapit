@@ -28,7 +28,7 @@ from .._typing import FloatMatrix, FloatVector, IntVector
 from .glm import glm_gwas, glm_scan_with_cofactors
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class BLINKResult:
     p_values: FloatVector
     effects: FloatVector

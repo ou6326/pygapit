@@ -13,7 +13,7 @@ import warnings
 
 import numpy as np
 
-from .._typing import FloatMatrix
+from .._typing import FloatMatrix, as_float_matrix, require_square
 
 
 def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
@@ -31,6 +31,7 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
         K[i,i] ~ 1 for outbred, > 1 for inbred
         K[i,j] > 0 = more related than average
     """
+    GD = as_float_matrix(GD, name="genotype matrix")
     n, _m = GD.shape
 
     # ── Remove monomorphic SNPs ────────────────────────────────────────────
@@ -76,6 +77,7 @@ def zhang_kinship(GD: FloatMatrix) -> FloatMatrix:
     K[i,j] = proportion of alleles shared identical-by-state
     Faster to compute than VanRaden but less statistically motivated.
     """
+    GD = as_float_matrix(GD, name="genotype matrix")
     _n, _m = GD.shape
 
     # Remove monomorphic
@@ -103,6 +105,8 @@ def scale_kinship(K: FloatMatrix) -> FloatMatrix:
     Scale kinship matrix so diagonal mean = 1.
     Useful for numerical stability in mixed model solvers.
     """
+    K = as_float_matrix(K, name="kinship matrix")
+    require_square(K, name="kinship matrix")
     d = np.mean(np.diag(K))
     if d > 1e-12:
         return K / d

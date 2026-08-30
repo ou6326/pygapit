@@ -16,10 +16,17 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import t as t_dist
 
-from .._typing import FloatMatrix, FloatVector, IntVector
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    IntVector,
+    as_float_matrix,
+    as_float_vector,
+    require_row_count,
+)
 
 
-@dataclass
+@dataclass(frozen=True, slots=True)
 class GLMResult:
     p_values: FloatVector  # p-values for each SNP
     effects: FloatVector  # effect size estimates
@@ -110,7 +117,16 @@ def glm_gwas(
     -------
     GLMResult with p_values, effects, se, t_stats for all m SNPs
     """
-    _n, _m = GD.shape
+    y = as_float_vector(y, name="phenotype")
+    X0 = as_float_matrix(X0, name="covariate matrix")
+    GD = as_float_matrix(GD, name="genotype matrix")
+    n = len(y)
+    require_row_count(X0, n, name="covariate matrix")
+    require_row_count(GD, n, name="genotype matrix")
+    if X0.shape[1] == 0:
+        raise ValueError("covariate matrix must contain at least one column")
+    if n <= X0.shape[1] + 1:
+        raise ValueError("GLM requires more observations than fitted parameters")
 
     # Null model R²
     y_mean = y.mean()

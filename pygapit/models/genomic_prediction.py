@@ -24,7 +24,16 @@ from typing import cast
 import numpy as np
 from scipy import optimize
 
-from .._typing import FloatMatrix, FloatVector, Matrix, Vector
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    Matrix,
+    Vector,
+    as_float_matrix,
+    as_float_vector,
+    require_row_count,
+    require_square,
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared REML helper (same math as MLM _EMMA_vc)
@@ -110,9 +119,10 @@ def RR_BLUP(
     acc   : float           -- cross-validated accuracy (Pearson r)
     """
     print("[PyGAPIT] Running RR-BLUP genomic prediction ...")
-    y = phenotype.astype(float)
-    Z = np.nan_to_num(genotype.astype(float))
+    y = as_float_vector(phenotype, name="phenotype")
+    Z = np.nan_to_num(as_float_matrix(genotype, name="genotype matrix"))
     n, m = Z.shape
+    require_row_count(Z, len(y), name="genotype matrix")
 
     if lambda_ is None:
         # Build GRM for REML-based lambda estimation (matches GAPIT)
@@ -171,11 +181,12 @@ def GBLUP(
         kinship = K
     if kinship is None:
         raise ValueError("kinship matrix required (pass as `kinship=` or `K=`).")
-    kinship_matrix = np.asarray(kinship, dtype=np.float64)
+    kinship_matrix = as_float_matrix(kinship, name="kinship matrix")
 
     print("[PyGAPIT] Running G-BLUP genomic prediction ...")
-    y = phenotype.astype(float)
+    y = as_float_vector(phenotype, name="phenotype")
     n = len(y)
+    require_square(kinship_matrix, name="kinship matrix", size=n)
     X0 = np.ones((n, 1))
 
     # ── REML estimate of delta = Ve/Vg ──────────────────────────────────────
@@ -245,9 +256,10 @@ def BayesB(
     gebv      : np.ndarray (n,) -- genomic estimated breeding values
     """
     print(f"[PyGAPIT] Running BayesB ({n_iter} iterations, burn-in={burn_in}) ...")
-    y = phenotype.astype(float)
-    Z = np.nan_to_num(genotype.astype(float))
+    y = as_float_vector(phenotype, name="phenotype")
+    Z = np.nan_to_num(as_float_matrix(genotype, name="genotype matrix"))
     n, m = Z.shape
+    require_row_count(Z, len(y), name="genotype matrix")
     mu = np.mean(y)
     y -= mu
 
