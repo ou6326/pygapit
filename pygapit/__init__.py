@@ -9,7 +9,7 @@ except PackageNotFoundError:  # source tree imported without installation
 __author__ = "pyGAPIT contributors (based on GAPIT by Jiabo Wang & Zhiwu Zhang)"
 __license__ = "GPL-3.0"
 
-from .gapit import GAPIT, GAPITOutputFiles, GAPITResult
+from .gapit import GAPIT, GAPITOutputFiles, GAPITResult, ModelRunResult
 from .gs.blup import GBLUPResult, cblup, gblup, predict_new, sblup
 from .gwas.blink import BLINKResult, blink_gwas
 from .gwas.farmcpu import FarmCPUResult, farmcpu_gwas
@@ -59,6 +59,7 @@ __all__ = [
     "GenotypeData",
     "MLMMResult",
     "MLMResult",
+    "ModelRunResult",
     "PhenotypeData",
     "align_inputs",
     "align_taxa",

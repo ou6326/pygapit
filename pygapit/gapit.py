@@ -18,9 +18,9 @@ from __future__ import annotations
 import re
 import time
 import warnings
+from collections.abc import Sequence
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -32,6 +32,7 @@ from .gwas.glm import glm_gwas
 from .gwas.mlm import cmlm_gwas, mlm_gwas
 from .gwas.mlmm import mlmm_gwas
 from .io.formats import (
+    AlignedData,
     GenotypeData,
     PhenotypeData,
     align_inputs,
@@ -75,6 +76,58 @@ class GAPITOutputFiles:
             self.pca_plot,
         )
         return tuple(path for path in candidates if path is not None)
+
+
+@dataclass(frozen=True, slots=True)
+class ModelRunResult:
+    """Normalized output shared by every top-level analysis model."""
+
+    p_values: np.ndarray
+    effects: np.ndarray
+    se: np.ndarray
+    h2: float = 0.0
+    vg: float = 0.0
+    ve: float = 0.0
+    selected_qtns: np.ndarray | None = None
+
+    def __post_init__(self) -> None:
+        marker_count = len(self.p_values)
+        if self.p_values.ndim != 1:
+            raise ValueError("Model p-values must be one-dimensional")
+        if self.effects.shape != (marker_count,) or self.se.shape != (marker_count,):
+            raise ValueError(
+                "Model p-values, effects, and standard errors must have equal length"
+            )
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTrait:
+    """Arrays and annotations shared by every model for one trait."""
+
+    name: str
+    y: np.ndarray
+    genotypes: np.ndarray
+    kinship: np.ndarray
+    design: np.ndarray
+    taxa: np.ndarray
+    pca: PCAResult
+    snp_names: np.ndarray
+    chromosomes: np.ndarray
+    positions: np.ndarray
+    maf: np.ndarray
+
+    @property
+    def n_obs(self) -> int:
+        return len(self.y)
+
+    @property
+    def marker_count(self) -> int:
+        return int(self.genotypes.shape[1])
+
+
+_SUPPORTED_MODELS = frozenset(
+    {"GLM", "MLM", "CMLM", "MLMM", "BLINK", "FARMCPU", "GBLUP", "CBLUP"}
+)
 
 
 @dataclass(slots=True)
@@ -190,92 +243,49 @@ def GAPIT(
         Multiple_analysis=Multiple_analysis,
         kinship_algorithm=kinship_algorithm,
     )
+    models = _normalize_models(model)
+    _validate_analysis_options(
+        PCA_total=PCA_total,
+        maf_threshold=maf_threshold,
+        cutOff=cutOff,
+        p_threshold=p_threshold,
+        LD=LD,
+        group_from=group_from,
+        group_to=group_to,
+        bin_size=bin_size,
+        maxLoop=maxLoop,
+        h2=h2,
+        NQTN=NQTN,
+    )
     t_start = time.time()
-
-    # ── Normalise model list ─────────────────────────────────────────────
-    if isinstance(model, str):
-        models = [model]
-    else:
-        models = list(model)
-    models = [m.upper() for m in models]
 
     # ── Load data ────────────────────────────────────────────────────────
     pheno, geno = _load_data(Y, G, GD, GM, SNP_impute)
 
     # ── Simulation mode ──────────────────────────────────────────────────
     if h2 is not None and NQTN is not None:
+        if NQTN > geno.GD.shape[1]:
+            raise ValueError(
+                f"NQTN ({NQTN}) cannot exceed the marker count ({geno.GD.shape[1]})"
+            )
         print(f"[pyGAPIT] Simulation mode: h²={h2}, NQTN={NQTN}")
         pheno = _simulate_phenotype(pheno, geno, h2=h2, n_qtn=NQTN)
 
     # ── Select trait ─────────────────────────────────────────────────────
-    trait_names = pheno.trait_names
-    if trait is None:
-        traits_to_run = trait_names
-    elif isinstance(trait, int):
-        traits_to_run = [trait_names[trait]]
-    else:
-        traits_to_run = [trait]
+    traits_to_run = _select_traits(pheno.trait_names, trait)
+
+    # Taxa alignment is independent of the selected trait and model.
+    ki_df = _ki_to_df(KI, pheno.taxa) if KI is not None else None
+    cv_df = _cv_to_df(CV, pheno.taxa) if CV is not None else None
+    aligned = align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df)
 
     all_results: dict[str, GAPITResult] = {}
 
     for trait_name in traits_to_run:
         print(f"\n[pyGAPIT] ──── Trait: {trait_name} ────")
-
-        # ── Align taxa ───────────────────────────────────────────────────
-        ki_df = _ki_to_df(KI, pheno.taxa) if KI is not None else None
-        cv_df = _cv_to_df(CV, pheno.taxa) if CV is not None else None
-        aligned = align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df)
-
-        taxa = aligned.taxa
-        Y_aligned = aligned.phenotypes
-        GD_aligned = aligned.genotypes
-        GM_aligned = aligned.markers
-        KI_aligned = aligned.kinship
-        CV_aligned = aligned.covariates
-
-        # Extract phenotype vector for this trait
-        y_col = np.asarray(Y_aligned[trait_name], dtype=float)
-        valid_mask = ~np.isnan(y_col)
-        y = y_col[valid_mask]
-        GD_y = GD_aligned[valid_mask, :]
-        taxa_y = taxa[valid_mask]
-        n = len(y)
-
-        if n < 10:
-            warnings.warn(
-                f"Only {n} individuals with phenotype for {trait_name}. Skipping."
-            )
+        prepared = _prepare_trait(aligned, trait_name, PCA_total, maf_threshold)
+        if prepared is None:
             continue
-
-        print(f"[pyGAPIT] n={n} individuals, m={GD_y.shape[1]} SNPs")
-
-        # ── MAF filter ───────────────────────────────────────────────────
-        GD_filtered, kept_snp_idx = maf_filter(GD_y, threshold=maf_threshold)
-        GM_filtered = GM_aligned.iloc[kept_snp_idx].reset_index(drop=True)
-        m_filtered = GD_filtered.shape[1]
-        print(f"[pyGAPIT] After MAF filter (≥{maf_threshold}): {m_filtered} SNPs")
-
-        # ── Kinship ──────────────────────────────────────────────────────
-        if KI_aligned is not None:
-            K = KI_aligned[np.ix_(valid_mask, valid_mask)]
-            print("[pyGAPIT] Using provided kinship matrix")
-        else:
-            print("[pyGAPIT] Computing VanRaden kinship...")
-            K = vanraden_kinship(GD_filtered)
-
-        # ── PCA ──────────────────────────────────────────────────────────
-        print(f"[pyGAPIT] Computing PCA (k={PCA_total})...")
-        pca_result = compute_pca(GD_filtered, n_components=PCA_total)
-        X0 = build_covariate_matrix(
-            pca_result,
-            PCA_total,
-            CV_aligned[valid_mask] if CV_aligned is not None else None,
-        )
-
-        # ── Extract SNP annotation ────────────────────────────────────────
-        snp_names = np.asarray(GM_filtered["SNP"], dtype=str)
-        chromosomes = np.asarray(GM_filtered["Chromosome"])
-        positions = np.asarray(GM_filtered["Position"], dtype=float)
 
         # ── Run requested models ─────────────────────────────────────────
         for model_name in models:
@@ -284,12 +294,12 @@ def GAPIT(
 
             result = _run_model(
                 model_name=model_name,
-                y=y,
-                X0=X0,
-                GD=GD_filtered,
-                K=K,
-                chromosomes=chromosomes,
-                positions=positions,
+                y=prepared.y,
+                X0=prepared.design,
+                GD=prepared.genotypes,
+                K=prepared.kinship,
+                chromosomes=prepared.chromosomes,
+                positions=prepared.positions,
                 p_threshold=p_threshold,
                 group_from=group_from,
                 group_to=group_to,
@@ -299,81 +309,22 @@ def GAPIT(
             )
 
             elapsed = time.time() - t_model
-            print(
-                f"[pyGAPIT] {model_name} done in {elapsed:.1f}s | h²={result.get('h2', 0):.3f}"
+            print(f"[pyGAPIT] {model_name} done in {elapsed:.1f}s | h²={result.h2:.3f}")
+            all_results[f"{trait_name}_{model_name}"] = _assemble_result(
+                prepared=prepared,
+                model_result=result,
+                model_name=model_name,
+                cut_off=cutOff,
+                buspred=buspred,
+                file_output=file_output,
+                output_dir=output_dir,
+                started_at=t_start,
             )
 
-            # ── Build result table ────────────────────────────────────────
-            maf_vals = _compute_maf(GD_filtered)
-            gwas_df = _build_gwas_table(
-                snp_names=snp_names,
-                chromosomes=chromosomes,
-                positions=positions,
-                p_values=result["p_values"],
-                effects=result["effects"],
-                se=result["se"],
-                maf=maf_vals,
-                n_obs=n,
-                adj_pvalues=benjamini_hochberg(result["p_values"]),
-            )
-
-            # ── Significance ──────────────────────────────────────────────
-            threshold = (
-                cutOff if cutOff is not None else bonferroni_threshold(m_filtered)
-            )
-            lam = genomic_inflation_factor(result["p_values"])
-            sig_mask_final = gwas_df["P.value"] <= threshold
-            sig_df = gwas_df[sig_mask_final].copy()
-
-            print(
-                f"[pyGAPIT] λ={lam:.3f} | {sig_mask_final.sum()} significant SNPs (Bonferroni threshold={threshold:.2e})"
-            )
-
-            # ── Build prediction table ────────────────────────────────────
-            pred_df = None
-            if buspred or model_name in ("GBLUP", "CBLUP", "SBLUP"):
-                qtns = result.get("selected_qtns")
-                pred_df = _run_gs_and_build_pred(
-                    y=y,
-                    X0=X0,
-                    GD=GD_filtered,
-                    K=K,
-                    taxa=taxa_y,
-                    model_name=model_name,
-                    qtn_indices=qtns,
-                )
-
-            # ── Save outputs ──────────────────────────────────────────────
-            output_files = None
-            if file_output:
-                output_files = _save_outputs(
-                    gwas_df=gwas_df,
-                    pred_df=pred_df,
-                    pca_result=pca_result,
-                    K=K,
-                    taxa=taxa_y,
-                    trait_name=trait_name,
-                    model_name=model_name,
-                    output_dir=output_dir,
-                )
-
-            all_results[f"{trait_name}_{model_name}"] = GAPITResult(
-                GWAS=gwas_df,
-                significant=sig_df if len(sig_df) > 0 else None,
-                lambda_gc=lam,
-                Pred=pred_df,
-                h2=result.get("h2", 0.0),
-                vg=result.get("vg", 0.0),
-                ve=result.get("ve", 0.0),
-                QTNs=result.get("selected_qtns"),
-                kinship=K,
-                pca=pca_result,
-                taxa=taxa_y,
-                output_files=output_files,
-                model=model_name,
-                trait=trait_name,
-                runtime_seconds=time.time() - t_start,
-            )
+    if not all_results:
+        raise ValueError(
+            "No analyses completed; each selected trait had fewer than 10 values"
+        )
 
     # Return single result if only one, else dict
     if len(all_results) == 1:
@@ -412,6 +363,94 @@ def _validate_compatibility_options(
         raise NotImplementedError(
             "Unsupported GAPIT option(s): " + ", ".join(unsupported)
         )
+
+
+def _normalize_models(model: str | Sequence[object]) -> tuple[str, ...]:
+    """Normalize and validate the requested top-level models."""
+    requested: list[object] = [model] if isinstance(model, str) else list(model)
+    if not requested:
+        raise ValueError("model must contain at least one analysis model")
+    normalized_names: list[str] = []
+    for name in requested:
+        if not isinstance(name, str) or not name.strip():
+            raise TypeError("Every model name must be a non-empty string")
+        normalized_names.append(name.strip().upper())
+    normalized = tuple(normalized_names)
+    if len(set(normalized)) != len(normalized):
+        raise ValueError("model must not contain duplicate analysis models")
+    unknown = [name for name in normalized if name not in _SUPPORTED_MODELS]
+    if unknown:
+        suffix = (
+            " Standalone sBLUP is available as pygapit.sblup(...)."
+            if "SBLUP" in unknown
+            else ""
+        )
+        raise ValueError(
+            f"Unknown model(s): {', '.join(unknown)}. Choose from: "
+            f"{', '.join(sorted(_SUPPORTED_MODELS))}.{suffix}"
+        )
+    return normalized
+
+
+def _validate_analysis_options(
+    *,
+    PCA_total: int,
+    maf_threshold: float,
+    cutOff: float | None,
+    p_threshold: float | None,
+    LD: float,
+    group_from: int,
+    group_to: int | None,
+    bin_size: int,
+    maxLoop: int,
+    h2: float | None,
+    NQTN: int | None,
+) -> None:
+    """Reject invalid numerical options before loading or analyzing data."""
+    if PCA_total < 0:
+        raise ValueError("PCA_total must be non-negative")
+    if not 0.0 <= maf_threshold <= 0.5:
+        raise ValueError("maf_threshold must be between 0 and 0.5")
+    for name, value in (("cutOff", cutOff), ("p_threshold", p_threshold)):
+        if value is not None and not 0.0 < value <= 1.0:
+            raise ValueError(f"{name} must be between 0 and 1")
+    if not 0.0 <= LD <= 1.0:
+        raise ValueError("LD must be between 0 and 1")
+    if group_from < 1:
+        raise ValueError("group_from must be at least 1")
+    if group_to is not None and group_to < group_from:
+        raise ValueError("group_to must be greater than or equal to group_from")
+    if bin_size <= 0:
+        raise ValueError("bin_size must be positive")
+    if maxLoop < 1:
+        raise ValueError("maxLoop must be at least 1")
+    if (h2 is None) != (NQTN is None):
+        raise ValueError("h2 and NQTN must be provided together for simulation")
+    if h2 is not None and not 0.0 < h2 <= 1.0:
+        raise ValueError("h2 must be greater than 0 and at most 1")
+    if NQTN is not None and NQTN < 1:
+        raise ValueError("NQTN must be at least 1")
+
+
+def _select_traits(trait_names: list[str], trait: str | int | None) -> tuple[str, ...]:
+    """Resolve a trait selector with explicit bounds and membership checks."""
+    if not trait_names:
+        raise ValueError("Phenotype data must contain at least one trait")
+    if trait is None:
+        return tuple(trait_names)
+    if isinstance(trait, bool):
+        raise TypeError("trait must be a column name or integer index, not bool")
+    if isinstance(trait, int):
+        if not -len(trait_names) <= trait < len(trait_names):
+            raise ValueError(
+                f"Trait index {trait} is out of range for {len(trait_names)} traits"
+            )
+        return (trait_names[trait],)
+    if trait not in trait_names:
+        raise ValueError(
+            f"Unknown trait {trait!r}; choose from: {', '.join(trait_names)}"
+        )
+    return (trait,)
 
 
 def _load_data(
@@ -550,6 +589,147 @@ def _cv_to_df(CV: pd.DataFrame | np.ndarray, taxa: np.ndarray) -> pd.DataFrame:
     return cv_df
 
 
+def _prepare_trait(
+    aligned: AlignedData,
+    trait_name: str,
+    pca_total: int,
+    maf_threshold: float,
+) -> PreparedTrait | None:
+    """Prepare the taxa, markers, kinship, PCA, and design for one trait."""
+    y_column = np.asarray(aligned.phenotypes[trait_name], dtype=float)
+    valid_mask = ~np.isnan(y_column)
+    valid_indices = np.flatnonzero(valid_mask)
+    y = y_column[valid_indices]
+    if len(y) < 10:
+        warnings.warn(
+            f"Only {len(y)} individuals with phenotype for {trait_name}. Skipping."
+        )
+        return None
+
+    genotypes = aligned.genotypes[valid_indices, :]
+    taxa = aligned.taxa[valid_indices]
+    print(f"[pyGAPIT] n={len(y)} individuals, m={genotypes.shape[1]} SNPs")
+
+    filtered_genotypes, kept_marker_indices = maf_filter(
+        genotypes, threshold=maf_threshold
+    )
+    marker_map = aligned.markers.iloc[kept_marker_indices].reset_index(drop=True)
+    marker_count = filtered_genotypes.shape[1]
+    print(f"[pyGAPIT] After MAF filter (≥{maf_threshold}): {marker_count} SNPs")
+    if marker_count == 0:
+        raise ValueError(
+            f"No SNPs remain for trait {trait_name!r} after MAF filtering "
+            f"at threshold {maf_threshold}"
+        )
+
+    if aligned.kinship is not None:
+        kinship = aligned.kinship[np.ix_(valid_indices, valid_indices)]
+        print("[pyGAPIT] Using provided kinship matrix")
+    else:
+        print("[pyGAPIT] Computing VanRaden kinship...")
+        kinship = vanraden_kinship(filtered_genotypes)
+
+    print(f"[pyGAPIT] Computing PCA (k={pca_total})...")
+    pca_result = compute_pca(filtered_genotypes, n_components=pca_total)
+    extra_covariates = (
+        aligned.covariates[valid_indices] if aligned.covariates is not None else None
+    )
+    design = build_covariate_matrix(pca_result, pca_total, extra_covariates)
+
+    return PreparedTrait(
+        name=trait_name,
+        y=y,
+        genotypes=filtered_genotypes,
+        kinship=kinship,
+        design=design,
+        taxa=taxa,
+        pca=pca_result,
+        snp_names=np.asarray(marker_map["SNP"], dtype=str),
+        chromosomes=np.asarray(marker_map["Chromosome"]),
+        positions=np.asarray(marker_map["Position"], dtype=float),
+        maf=_compute_maf(filtered_genotypes),
+    )
+
+
+def _assemble_result(
+    *,
+    prepared: PreparedTrait,
+    model_result: ModelRunResult,
+    model_name: str,
+    cut_off: float | None,
+    buspred: bool,
+    file_output: bool,
+    output_dir: str | Path,
+    started_at: float,
+) -> GAPITResult:
+    """Build tables, optional predictions/files, and the public result object."""
+    gwas = _build_gwas_table(
+        snp_names=prepared.snp_names,
+        chromosomes=prepared.chromosomes,
+        positions=prepared.positions,
+        p_values=model_result.p_values,
+        effects=model_result.effects,
+        se=model_result.se,
+        maf=prepared.maf,
+        n_obs=prepared.n_obs,
+        adj_pvalues=benjamini_hochberg(model_result.p_values),
+    )
+    threshold = (
+        cut_off if cut_off is not None else bonferroni_threshold(prepared.marker_count)
+    )
+    lambda_gc = genomic_inflation_factor(model_result.p_values)
+    significant_mask = gwas["P.value"] <= threshold
+    significant = gwas[significant_mask].copy()
+    significant_count = significant_mask.sum()
+    print(
+        f"[pyGAPIT] λ={lambda_gc:.3f} | {significant_count} significant SNPs "
+        f"(threshold={threshold:.2e})"
+    )
+
+    prediction = None
+    if buspred or model_name in ("GBLUP", "CBLUP"):
+        prediction = _run_gs_and_build_pred(
+            y=prepared.y,
+            X0=prepared.design,
+            GD=prepared.genotypes,
+            K=prepared.kinship,
+            taxa=prepared.taxa,
+            model_name=model_name,
+            qtn_indices=model_result.selected_qtns,
+        )
+
+    output_files = None
+    if file_output:
+        output_files = _save_outputs(
+            gwas_df=gwas,
+            pred_df=prediction,
+            pca_result=prepared.pca,
+            K=prepared.kinship,
+            taxa=prepared.taxa,
+            trait_name=prepared.name,
+            model_name=model_name,
+            output_dir=output_dir,
+        )
+
+    return GAPITResult(
+        GWAS=gwas,
+        significant=significant if not significant.empty else None,
+        lambda_gc=lambda_gc,
+        Pred=prediction,
+        h2=model_result.h2,
+        vg=model_result.vg,
+        ve=model_result.ve,
+        QTNs=model_result.selected_qtns,
+        kinship=prepared.kinship,
+        pca=prepared.pca,
+        taxa=prepared.taxa,
+        output_files=output_files,
+        model=model_name,
+        trait=prepared.name,
+        runtime_seconds=time.time() - started_at,
+    )
+
+
 def _run_model(
     model_name: str,
     y: np.ndarray,
@@ -564,58 +744,31 @@ def _run_model(
     bin_size: int,
     maxLoop: int,
     LD_threshold: float,
-) -> dict[str, Any]:
+) -> ModelRunResult:
     """Dispatch to the correct GWAS/GS model."""
     m = GD.shape[1]
     p_thresh = p_threshold or (1.0 / m)
 
     if model_name == "GLM":
         r = glm_gwas(y, X0, GD)
-        return {
-            "p_values": r.p_values,
-            "effects": r.effects,
-            "se": r.se,
-            "h2": 0.0,
-            "vg": 0.0,
-            "ve": 0.0,
-        }
+        return ModelRunResult(r.p_values, r.effects, r.se)
 
     elif model_name == "MLM":
         r = mlm_gwas(y, X0, GD, K)
-        return {
-            "p_values": r.p_values,
-            "effects": r.effects,
-            "se": r.se,
-            "h2": r.h2,
-            "vg": r.vg,
-            "ve": r.ve,
-        }
+        return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
 
     elif model_name == "CMLM":
         n = len(y)
         r = cmlm_gwas(
             y, X0, GD, K, group_from=group_from, group_to=min(group_to or n, n)
         )
-        return {
-            "p_values": r.p_values,
-            "effects": r.effects,
-            "se": r.se,
-            "h2": r.h2,
-            "vg": r.vg,
-            "ve": r.ve,
-        }
+        return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
 
     elif model_name == "MLMM":
         r = mlmm_gwas(y, X0, GD, K, p_threshold=p_thresh)
-        return {
-            "p_values": r.p_values,
-            "effects": r.effects,
-            "se": r.se,
-            "h2": r.h2,
-            "vg": r.vg,
-            "ve": r.ve,
-            "selected_qtns": r.selected_qtns,
-        }
+        return ModelRunResult(
+            r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
+        )
 
     elif model_name == "BLINK":
         r = blink_gwas(
@@ -626,15 +779,9 @@ def _run_model(
             ld_threshold=LD_threshold,
             p_threshold=p_thresh,
         )
-        return {
-            "p_values": r.p_values,
-            "effects": r.effects,
-            "se": r.se,
-            "h2": 0.0,
-            "vg": 0.0,
-            "ve": 0.0,
-            "selected_qtns": r.selected_qtns,
-        }
+        return ModelRunResult(
+            r.p_values, r.effects, r.se, selected_qtns=r.selected_qtns
+        )
 
     elif model_name == "FARMCPU":
         r = farmcpu_gwas(
@@ -647,41 +794,23 @@ def _run_model(
             bin_size=bin_size,
             p_threshold=p_thresh,
         )
-        return {
-            "p_values": r.p_values,
-            "effects": r.effects,
-            "se": r.se,
-            "h2": r.h2,
-            "vg": r.vg,
-            "ve": r.ve,
-            "selected_qtns": r.selected_qtns,
-        }
+        return ModelRunResult(
+            r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
+        )
 
     elif model_name == "GBLUP":
         r = gblup(y, X0, K)
         p_vals = np.ones(GD.shape[1])
-        return {
-            "p_values": p_vals,
-            "effects": np.zeros(GD.shape[1]),
-            "se": np.ones(GD.shape[1]),
-            "h2": r.h2,
-            "vg": r.vg,
-            "ve": r.ve,
-            "blup_result": r,
-        }
+        return ModelRunResult(
+            p_vals, np.zeros(GD.shape[1]), np.ones(GD.shape[1]), r.h2, r.vg, r.ve
+        )
 
     elif model_name == "CBLUP":
         r = cblup(y, X0, GD)
         p_vals = np.ones(GD.shape[1])
-        return {
-            "p_values": p_vals,
-            "effects": np.zeros(GD.shape[1]),
-            "se": np.ones(GD.shape[1]),
-            "h2": r.h2,
-            "vg": r.vg,
-            "ve": r.ve,
-            "blup_result": r,
-        }
+        return ModelRunResult(
+            p_vals, np.zeros(GD.shape[1]), np.ones(GD.shape[1]), r.h2, r.vg, r.ve
+        )
 
     else:
         raise ValueError(
