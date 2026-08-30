@@ -8,7 +8,9 @@ from __future__ import annotations
 import numpy as np
 from scipy.stats import chi2
 
-SignificanceResult = dict[str, float | int | np.ndarray]
+from .._typing import BoolVector, FloatVector, Vector
+
+SignificanceResult = dict[str, float | int | BoolVector | FloatVector]
 
 
 def bonferroni_threshold(n_tests: int, alpha: float = 0.05) -> float:
@@ -16,7 +18,7 @@ def bonferroni_threshold(n_tests: int, alpha: float = 0.05) -> float:
     return alpha / n_tests
 
 
-def benjamini_hochberg(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
+def benjamini_hochberg(p_values: FloatVector, alpha: float = 0.05) -> FloatVector:
     """
     Benjamini-Hochberg FDR correction.
     Translates GAPIT.Perform.BH.FDR.Multiple.Correction.Procedure.R
@@ -41,7 +43,7 @@ def benjamini_hochberg(p_values: np.ndarray, alpha: float = 0.05) -> np.ndarray:
     return result
 
 
-def genomic_inflation_factor(p_values: np.ndarray) -> float:
+def genomic_inflation_factor(p_values: FloatVector) -> float:
     """
     Genomic inflation factor lambda.
     lambda = median(chi2_observed) / 0.4549
@@ -57,10 +59,10 @@ def genomic_inflation_factor(p_values: np.ndarray) -> float:
 
 
 def get_significant_snps(
-    p_values: np.ndarray,
-    snp_names: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
+    p_values: FloatVector,
+    snp_names: Vector,
+    chromosomes: Vector,
+    positions: Vector,
     method: str = "bonferroni",
     alpha: float = 0.05,
 ) -> SignificanceResult:

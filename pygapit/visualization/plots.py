@@ -24,6 +24,16 @@ from importlib.util import find_spec
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
 
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    IntVector,
+    LabelVector,
+    NumericVector,
+    StrVector,
+    Vector,
+)
+
 
 class _Spine(Protocol):
     def set_visible(self, visible: bool) -> None: ...
@@ -117,14 +127,14 @@ SUGGEST_COLOR = "#FF7F00"  # orange for suggestive
 
 
 def manhattan_plot(
-    snp_names: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
-    p_values: np.ndarray,
+    snp_names: StrVector,
+    chromosomes: LabelVector,
+    positions: NumericVector,
+    p_values: NumericVector,
     title: str = "Manhattan Plot",
     significance_threshold: float | None = None,
     suggestive_threshold: float | None = None,
-    highlight_snps: np.ndarray | None = None,
+    highlight_snps: IntVector | None = None,
     save_path: str | None = None,
     figsize: tuple[float, float] = (14, 5),
     point_size: float = 1.5,
@@ -145,8 +155,8 @@ def manhattan_plot(
     save_path            : if provided, save to this path
     """
     # ── Data prep ────────────────────────────────────────────────────────
-    positions = np.asarray(positions, dtype=float)
-    p_values = np.asarray(p_values, dtype=float)
+    positions = np.asarray(positions, dtype=np.float64)
+    p_values = np.asarray(p_values, dtype=np.float64)
     valid = ~np.isnan(p_values) & (p_values > 0) & (p_values <= 1)
     p_vals = np.where(valid, p_values, 1.0)
     log_p = -np.log10(np.where(p_vals > 0, p_vals, 1e-300))
@@ -164,10 +174,11 @@ def manhattan_plot(
     chroms = np.asarray(chromosomes, dtype=str)
     unique_chroms: list[str] = []
     seen: set[str] = set()
-    for c in chroms:
-        if c not in seen:
-            unique_chroms.append(c)
-            seen.add(c)
+    for raw_chromosome in chroms:
+        chromosome = str(raw_chromosome)
+        if chromosome not in seen:
+            unique_chroms.append(chromosome)
+            seen.add(chromosome)
 
     chrom_offset: dict[str, float] = {}
     cumulative = 0.0
@@ -239,7 +250,7 @@ def manhattan_plot(
 
 
 def qq_plot(
-    p_values: np.ndarray,
+    p_values: FloatVector,
     title: str = "QQ Plot",
     save_path: str | None = None,
     figsize: tuple[float, float] = (5, 5),
@@ -311,8 +322,8 @@ def qq_plot(
 
 
 def kinship_heatmap(
-    K: np.ndarray,
-    taxa: np.ndarray | None = None,
+    K: FloatMatrix,
+    taxa: Vector | None = None,
     title: str = "Kinship Matrix",
     save_path: str | None = None,
     figsize: tuple[float, float] = (8, 7),
@@ -366,10 +377,10 @@ def kinship_heatmap(
 
 
 def pca_plot_2d(
-    scores: np.ndarray,
-    var_explained: np.ndarray,
-    taxa: np.ndarray | None = None,
-    groups: np.ndarray | None = None,
+    scores: FloatMatrix,
+    var_explained: FloatVector,
+    taxa: Vector | None = None,
+    groups: Vector | None = None,
     title: str = "PCA Plot",
     save_path: str | None = None,
     figsize: tuple[float, float] = (7, 6),
@@ -419,10 +430,10 @@ def pca_plot_2d(
 
 
 def pca_plot_3d_interactive(
-    scores: np.ndarray,
-    var_explained: np.ndarray,
-    taxa: np.ndarray | None = None,
-    groups: np.ndarray | None = None,
+    scores: FloatMatrix,
+    var_explained: FloatVector,
+    taxa: Vector | None = None,
+    groups: Vector | None = None,
     title: str = "3D PCA",
     save_path: str | None = None,
 ) -> object:
@@ -483,12 +494,12 @@ def pca_plot_3d_interactive(
 
 
 def manhattan_interactive(
-    snp_names: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
-    p_values: np.ndarray,
-    effects: np.ndarray | None = None,
-    maf: np.ndarray | None = None,
+    snp_names: StrVector,
+    chromosomes: LabelVector,
+    positions: NumericVector,
+    p_values: NumericVector,
+    effects: NumericVector | None = None,
+    maf: NumericVector | None = None,
     title: str = "Interactive Manhattan",
     save_path: str | None = None,
 ) -> object:
@@ -504,18 +515,19 @@ def manhattan_interactive(
 
     snp_names = np.asarray(snp_names, dtype=str)
     chromosomes = np.asarray(chromosomes, dtype=str)
-    positions = np.asarray(positions, dtype=float)
-    p_values = np.asarray(p_values, dtype=float)
+    positions = np.asarray(positions, dtype=np.float64)
+    p_values = np.asarray(p_values, dtype=np.float64)
     valid = ~np.isnan(p_values) & (p_values > 0)
     m = len(p_values)
 
     chroms = chromosomes
     unique_chroms: list[str] = []
     seen: set[str] = set()
-    for c in chroms:
-        if c not in seen:
-            unique_chroms.append(c)
-            seen.add(c)
+    for raw_chromosome in chroms:
+        chromosome = str(raw_chromosome)
+        if chromosome not in seen:
+            unique_chroms.append(chromosome)
+            seen.add(chromosome)
 
     chrom_offset: dict[str, float] = {}
     cumulative = 0.0
@@ -590,9 +602,9 @@ def manhattan_interactive(
 
 
 def gs_scatter(
-    observed: np.ndarray,
-    predicted: np.ndarray,
-    taxa: np.ndarray | None = None,
+    observed: NumericVector,
+    predicted: NumericVector,
+    taxa: Vector | None = None,
     trait_name: str = "Trait",
     save_path: str | None = None,
     figsize: tuple[float, float] = (6, 5),
@@ -602,8 +614,8 @@ def gs_scatter(
     Translates GAPIT.GS.Visualization.R
     Pearson r = prediction accuracy.
     """
-    observed = np.asarray(observed, dtype=float)
-    predicted = np.asarray(predicted, dtype=float)
+    observed = np.asarray(observed, dtype=np.float64)
+    predicted = np.asarray(predicted, dtype=np.float64)
     valid = ~(np.isnan(observed) | np.isnan(predicted))
     obs_v = observed[valid]
     pred_v = predicted[valid]
@@ -621,12 +633,12 @@ def gs_scatter(
     ax.scatter(obs_v, pred_v, s=15, alpha=0.6, color="#3C5587", linewidths=0)
 
     # Regression line
-    m_coef = np.asarray(np.polyfit(obs_v, pred_v, 1), dtype=float)
+    m_coef = np.asarray(np.polyfit(obs_v, pred_v, 1), dtype=np.float64)
     x_min, x_max = float(obs_v.min()), float(obs_v.max())
     x_line = np.array(
-        [x_min + (x_max - x_min) * i / 99 for i in range(100)], dtype=float
+        [x_min + (x_max - x_min) * i / 99 for i in range(100)], dtype=np.float64
     )
-    y_line = np.asarray(m_coef[0] * x_line + m_coef[1], dtype=float)
+    y_line = np.asarray(m_coef[0] * x_line + m_coef[1], dtype=np.float64)
     ax.plot(x_line, y_line, "r-", linewidth=1.2, alpha=0.8)
 
     ax.set_xlabel(f"Observed {trait_name}", fontsize=10)
@@ -643,9 +655,9 @@ def gs_scatter(
 
 
 def phenotype_distribution(
-    y: np.ndarray,
+    y: FloatVector,
     trait_name: str = "Trait",
-    significant_snp_geno: np.ndarray | None = None,
+    significant_snp_geno: Vector | None = None,
     save_path: str | None = None,
     figsize: tuple[float, float] = (6, 4),
 ) -> Figure:

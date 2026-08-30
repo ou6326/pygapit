@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .._typing import FloatMatrix, FloatVector, IntVector, LabelVector, NumericVector
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
 from .glm import glm_scan_with_cofactors
@@ -34,11 +35,11 @@ from .glm import glm_scan_with_cofactors
 
 @dataclass
 class FarmCPUResult:
-    p_values: np.ndarray
-    effects: np.ndarray
-    se: np.ndarray
-    t_stats: np.ndarray
-    selected_qtns: np.ndarray  # final pseudo-QTN indices
+    p_values: FloatVector
+    effects: FloatVector
+    se: FloatVector
+    t_stats: FloatVector
+    selected_qtns: IntVector  # final pseudo-QTN indices
     n_iterations: int
     vg: float
     ve: float
@@ -47,13 +48,13 @@ class FarmCPUResult:
 
 
 def _bin_select_qtns(
-    p_values: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
+    p_values: FloatVector,
+    chromosomes: LabelVector,
+    positions: NumericVector,
     bin_size: int = 5_000_000,
     max_qtns: int | None = None,
     p_threshold: float | None = None,
-) -> np.ndarray:
+) -> IntVector:
     """
     Select pseudo-QTNs using bin method.
     Translates FarmCPU.BIN() from GAPIT.FarmCPU.R
@@ -109,9 +110,9 @@ def _bin_select_qtns(
 
 
 def _build_pseudo_kinship(
-    GD: np.ndarray,
-    qtn_indices: np.ndarray | None,
-) -> np.ndarray | None:
+    GD: FloatMatrix,
+    qtn_indices: IntVector | None,
+) -> FloatMatrix | None:
     """
     Build kinship from pseudo-QTN genotypes only.
     Translates FarmCPU.Burger() kinship construction in GAPIT.FarmCPU.R
@@ -131,11 +132,11 @@ def _build_pseudo_kinship(
 
 
 def _rem_select_qtns(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    candidate_qtns: np.ndarray,
-) -> tuple[np.ndarray, float, float]:
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    candidate_qtns: IntVector,
+) -> tuple[IntVector, float, float]:
     """
     Random Effect Model: select pseudo-QTNs by REML.
     Translates FarmCPU.Burger() from GAPIT.FarmCPU.R
@@ -160,11 +161,11 @@ def _rem_select_qtns(
 
 
 def farmcpu_gwas(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    chromosomes: LabelVector,
+    positions: NumericVector,
     max_iterations: int = 10,
     bin_size: int = 5_000_000,
     p_threshold: float | None = None,

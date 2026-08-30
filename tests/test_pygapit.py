@@ -24,6 +24,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pygapit._typing import as_float_vector, as_str_vector
 from pygapit.gapit import GAPITResult
 
 GAPIT_EXTDATA = Path(__file__).resolve().parents[1] / "GAPIT" / "inst" / "extdata"
@@ -617,12 +618,13 @@ class TestFarmCPU:
         GM = small_dataset["GM"]
         m = small_dataset["m"]
         X0 = build_covariate_matrix(compute_pca(GD, 3), 3)
+        positions = as_float_vector(GM["Position"].to_numpy())
         r = farmcpu_gwas(
             y,
             X0,
             GD,
-            chromosomes=np.asarray(GM["Chromosome"].to_numpy()),
-            positions=np.asarray(GM["Position"].to_numpy(), dtype=float),
+            chromosomes=as_str_vector(GM["Chromosome"].to_numpy()),
+            positions=positions,
             max_iterations=3,
         )
         assert r.p_values.shape == (m,)
@@ -635,12 +637,13 @@ class TestFarmCPU:
         y = small_dataset["y"]
         GM = small_dataset["GM"]
         X0 = build_covariate_matrix(compute_pca(GD, 3), 3)
+        positions = as_float_vector(GM["Position"].to_numpy())
         r = farmcpu_gwas(
             y,
             X0,
             GD,
-            chromosomes=np.asarray(GM["Chromosome"].to_numpy()),
-            positions=np.asarray(GM["Position"].to_numpy(), dtype=float),
+            chromosomes=as_str_vector(GM["Chromosome"].to_numpy()),
+            positions=positions,
             max_iterations=3,
         )
         valid = r.p_values[~np.isnan(r.p_values)]
@@ -657,10 +660,11 @@ class TestFarmCPU:
         n = small_dataset["n"]
         p = np.random.uniform(0, 0.001, small_dataset["m"])
         max_qtns = int(np.sqrt(n) / np.sqrt(max(1, np.log10(n))))
+        positions = as_float_vector(GM["Position"].to_numpy())
         qtns = _bin_select_qtns(
             p,
-            np.asarray(GM["Chromosome"].to_numpy()),
-            np.asarray(GM["Position"].to_numpy(), dtype=float),
+            as_str_vector(GM["Chromosome"].to_numpy()),
+            positions,
             max_qtns=max_qtns,
         )
         assert len(qtns) <= max_qtns, f"Got {len(qtns)} QTNs, max is {max_qtns}"
@@ -671,12 +675,13 @@ class TestFarmCPU:
         from pygapit.stats.testing import genomic_inflation_factor
 
         GM = real_data["GM"]
+        positions = as_float_vector(GM["Position"].to_numpy())
         r = farmcpu_gwas(
             real_data["y"],
             real_data["X0"],
             real_data["GD"],
-            chromosomes=np.asarray(GM["Chromosome"].to_numpy()),
-            positions=np.asarray(GM["Position"].to_numpy(), dtype=float),
+            chromosomes=as_str_vector(GM["Chromosome"].to_numpy()),
+            positions=positions,
             max_iterations=5,
         )
         non_qtn = np.ones(len(r.p_values), dtype=bool)
@@ -1190,10 +1195,11 @@ class TestVisualization:
 
         r = glm_gwas(real_data["y"], real_data["X0"], real_data["GD"])
         GM = real_data["GM"]
+        positions = as_float_vector(GM["Position"].to_numpy())
         fig = manhattan_plot(
-            snp_names=np.asarray(GM["SNP"].to_numpy()),
-            chromosomes=np.asarray(GM["Chromosome"].to_numpy()),
-            positions=np.asarray(GM["Position"].to_numpy()),
+            snp_names=as_str_vector(GM["SNP"].to_numpy()),
+            chromosomes=as_str_vector(GM["Chromosome"].to_numpy()),
+            positions=positions,
             p_values=r.p_values,
             save_path=str(tmp_path / "manhattan.pdf"),
         )

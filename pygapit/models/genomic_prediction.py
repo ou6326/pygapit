@@ -22,8 +22,9 @@ import warnings
 from typing import cast
 
 import numpy as np
-from numpy import ndarray
 from scipy import optimize
+
+from .._typing import FloatMatrix, FloatVector, Matrix, Vector
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Shared REML helper (same math as MLM _EMMA_vc)
@@ -31,31 +32,28 @@ from scipy import optimize
 
 
 def _reml_delta(
-    y: np.ndarray, X: np.ndarray, K: np.ndarray
+    y: FloatVector, X: FloatMatrix, K: FloatMatrix
 ) -> tuple[float, float, float]:
     """
     EMMA REML: estimate delta = Ve/Vg via spectral decomposition of K.
     Returns (delta, Vg, Ve).
     Matches GAPIT's EMMA.delta / _EMMA_vc used in MLM.
     """
-    y = np.asarray(y, dtype=float)
-    X = np.asarray(X, dtype=float)
-    K = np.asarray(K, dtype=float)
     n = len(y)
     raw_eigvals, raw_U = np.linalg.eigh(K)
-    eigvals = np.asarray(np.maximum(raw_eigvals, 1e-8), dtype=float)
-    U = np.asarray(raw_U, dtype=float)
-    Uy = np.asarray(U.T @ y, dtype=float)
-    UX = np.asarray(U.T @ X, dtype=float)
+    eigvals: FloatVector = np.maximum(raw_eigvals, 1e-8)
+    U: FloatMatrix = raw_U
+    Uy: FloatVector = U.T @ y
+    UX: FloatMatrix = U.T @ X
 
     def neg_reml(log_delta: float) -> float:
         delta = np.exp(log_delta)
         d = eigvals + delta
-        UXd = np.asarray(UX / d[:, np.newaxis], dtype=float)
-        gram = np.asarray(UX.T @ UXd, dtype=float)
-        rhs = np.asarray(UXd.T @ Uy, dtype=float)
+        UXd: FloatMatrix = UX / d[:, np.newaxis]
+        gram: FloatMatrix = UX.T @ UXd
+        rhs: FloatVector = UXd.T @ Uy
         try:
-            beta = np.asarray(np.linalg.solve(gram, rhs), dtype=float)
+            beta: FloatVector = np.linalg.solve(gram, rhs)
         except np.linalg.LinAlgError:
             return 1e15
         res = Uy - UX @ beta
@@ -71,10 +69,10 @@ def _reml_delta(
 
     delta = np.exp(opt.x)
     d = eigvals + delta
-    UXd = np.asarray(UX / d[:, np.newaxis], dtype=float)
-    gram = np.asarray(UX.T @ UXd, dtype=float)
-    rhs = np.asarray(UXd.T @ Uy, dtype=float)
-    beta = np.asarray(np.linalg.lstsq(gram, rhs, rcond=None)[0], dtype=float)
+    UXd = UX / d[:, np.newaxis]
+    gram = UX.T @ UXd
+    rhs = UXd.T @ Uy
+    beta = cast(FloatVector, np.linalg.lstsq(gram, rhs, rcond=None)[0])
     resid = Uy - UX @ beta
     df = n - X.shape[1]
     Vg = cast(float, np.sum(resid**2 / d)) / df
@@ -88,11 +86,11 @@ def _reml_delta(
 
 
 def RR_BLUP(
-    phenotype: np.ndarray,
-    genotype: np.ndarray,
+    phenotype: Vector,
+    genotype: Matrix,
     lambda_: float | None = None,
     n_folds: int = 5,
-) -> tuple[np.ndarray, float]:
+) -> tuple[FloatVector, float]:
     """
     Ridge Regression BLUP (RR-BLUP) for genomic prediction.
 
@@ -125,7 +123,7 @@ def RR_BLUP(
         delta, Vg, Ve = _reml_delta(y, X0, K)
         # RR-BLUP: lambda = Ve/Vg * m  (because K = Z*Z'/m in RR-BLUP parameterisation)
         # delta = Ve/Vg so lambda = delta * m
-        lambda_ = float(delta * m)
+        lambda_ = delta * m
         print(
             f"[PyGAPIT]  REML delta={delta:.4f}, Vg={Vg:.4f}, Ve={Ve:.4f} => lambda={lambda_:.2f}"
         )
@@ -146,11 +144,11 @@ def RR_BLUP(
 
 
 def GBLUP(
-    phenotype: np.ndarray,
-    kinship: np.ndarray | None = None,
+    phenotype: Vector,
+    kinship: Matrix | None = None,
     n_folds: int = 5,
-    K: np.ndarray | None = None,
-) -> tuple[np.ndarray, float]:
+    K: Matrix | None = None,
+) -> tuple[FloatVector, float]:
     """
     Genomic BLUP (G-BLUP) using a pre-computed GRM.
 
@@ -173,6 +171,7 @@ def GBLUP(
         kinship = K
     if kinship is None:
         raise ValueError("kinship matrix required (pass as `kinship=` or `K=`).")
+    kinship_matrix = np.asarray(kinship, dtype=np.float64)
 
     print("[PyGAPIT] Running G-BLUP genomic prediction ...")
     y = phenotype.astype(float)
@@ -180,16 +179,16 @@ def GBLUP(
     X0 = np.ones((n, 1))
 
     # ── REML estimate of delta = Ve/Vg ──────────────────────────────────────
-    delta, Vg, Ve = _reml_delta(y, X0, kinship)
+    delta, Vg, Ve = _reml_delta(y, X0, kinship_matrix)
     lambda_ = delta  # Ve/Vg
     print(f"[PyGAPIT]  REML delta={delta:.4f}, h2={Vg / (Vg + Ve):.4f}")
 
     # ── Henderson's MME solution ──────────────────────────────────────────────
-    V = kinship + lambda_ * np.eye(n)
+    V = kinship_matrix + lambda_ * np.eye(n)
     Vinv = np.linalg.inv(V)
     XVi = X0.T @ Vinv
     beta = np.linalg.solve(XVi @ X0, XVi @ y)
-    gebv = kinship @ Vinv @ (y - X0 @ beta)
+    gebv = np.asarray(kinship_matrix @ Vinv @ (y - X0 @ beta), dtype=np.float64)
 
     # ── Cross-validation ──────────────────────────────────────────────────────
     fold_size = n // n_folds
@@ -197,8 +196,8 @@ def GBLUP(
     for fold in range(n_folds):
         test = np.arange(fold * fold_size, min((fold + 1) * fold_size, n), dtype=int)
         train = np.asarray(np.setdiff1d(np.arange(n, dtype=int), test), dtype=int)
-        K_tt = kinship[np.ix_(train, train)]
-        K_pt = kinship[np.ix_(test, train)]
+        K_tt = kinship_matrix[np.ix_(train, train)]
+        K_pt = kinship_matrix[np.ix_(test, train)]
         yt = y[train]
         # Re-estimate lambda on training fold
         try:
@@ -222,12 +221,12 @@ def GBLUP(
 
 
 def BayesB(
-    phenotype: np.ndarray,
-    genotype: np.ndarray,
+    phenotype: Vector,
+    genotype: Matrix,
     n_iter: int = 5000,
     burn_in: int = 1000,
     pi: float = 0.95,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[FloatVector, FloatVector]:
     """
     Simplified BayesB via Gibbs sampling.
     (pi = prior probability of a SNP having zero effect)
@@ -312,20 +311,18 @@ def BayesB(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _sample_var(residuals: np.ndarray, n: int, a: float = 4, b: float = 1) -> float:
+def _sample_var(residuals: FloatVector, n: int, a: float = 4, b: float = 1) -> float:
     """Sample from Scaled-Inverse-Chi-Squared distribution."""
     if n < 2:
         return b / a
     shape = (a + n) / 2
-    scale = (a * b + np.sum(np.asarray(residuals) ** 2)) / 2
+    scale = (a * b + np.sum(residuals**2)) / 2
     return float(scale / np.random.gamma(shape))
 
 
 def _cross_validate_rrblup(
-    y: ndarray, Z: ndarray, lambda_: float, n_folds: int
+    y: FloatVector, Z: FloatMatrix, lambda_: float, n_folds: int
 ) -> float:
-    y = np.asarray(y, dtype=float)
-    Z = np.asarray(Z, dtype=float)
     n, m = Z.shape
     fold_size = n // n_folds
     preds = np.zeros(n)

@@ -25,6 +25,17 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ._typing import (
+    Array,
+    FloatMatrix,
+    FloatVector,
+    IntVector,
+    LabelVector,
+    Matrix,
+    StrVector,
+    as_float_vector,
+    as_str_vector,
+)
 from .gs.blup import cblup, gblup, sblup
 from .gwas.blink import blink_gwas
 from .gwas.farmcpu import farmcpu_gwas
@@ -82,13 +93,13 @@ class GAPITOutputFiles:
 class ModelRunResult:
     """Normalized output shared by every top-level analysis model."""
 
-    p_values: np.ndarray
-    effects: np.ndarray
-    se: np.ndarray
+    p_values: FloatVector
+    effects: FloatVector
+    se: FloatVector
     h2: float = 0.0
     vg: float = 0.0
     ve: float = 0.0
-    selected_qtns: np.ndarray | None = None
+    selected_qtns: IntVector | None = None
 
     def __post_init__(self) -> None:
         marker_count = len(self.p_values)
@@ -105,16 +116,16 @@ class PreparedTrait:
     """Arrays and annotations shared by every model for one trait."""
 
     name: str
-    y: np.ndarray
-    genotypes: np.ndarray
-    kinship: np.ndarray
-    design: np.ndarray
-    taxa: np.ndarray
+    y: FloatVector
+    genotypes: FloatMatrix
+    kinship: FloatMatrix
+    design: FloatMatrix
+    taxa: StrVector
     pca: PCAResult
-    snp_names: np.ndarray
-    chromosomes: np.ndarray
-    positions: np.ndarray
-    maf: np.ndarray
+    snp_names: StrVector
+    chromosomes: LabelVector
+    positions: FloatVector
+    maf: FloatVector
 
     @property
     def n_obs(self) -> int:
@@ -122,7 +133,7 @@ class PreparedTrait:
 
     @property
     def marker_count(self) -> int:
-        return int(self.genotypes.shape[1])
+        return self.genotypes.shape[1]
 
 
 _SUPPORTED_MODELS = frozenset(
@@ -151,12 +162,12 @@ class GAPITResult:
     ve: float = 0.0
 
     # QTNs identified (multi-locus methods)
-    QTNs: np.ndarray | None = None
+    QTNs: IntVector | None = None
 
     # Intermediate objects (useful for custom downstream analysis)
-    kinship: np.ndarray | None = None
+    kinship: FloatMatrix | None = None
     pca: PCAResult | None = None
-    taxa: np.ndarray | None = None
+    taxa: StrVector | None = None
     output_files: GAPITOutputFiles | None = None
 
     # Method used
@@ -169,11 +180,11 @@ def GAPIT(
     # ── Input data ──────────────────────────────────────────────────────
     Y: pd.DataFrame | str | Path | None = None,  # phenotype
     G: pd.DataFrame | str | Path | None = None,  # HapMap genotype
-    GD: pd.DataFrame | np.ndarray | str | Path | None = None,  # numeric genotype
+    GD: pd.DataFrame | Matrix | str | Path | None = None,  # numeric genotype
     GM: pd.DataFrame | str | Path | None = None,  # SNP map
-    KI: np.ndarray | pd.DataFrame | None = None,  # kinship
-    CV: pd.DataFrame | np.ndarray | None = None,  # covariates
-    Z: np.ndarray | None = None,  # incidence matrix
+    KI: Matrix | pd.DataFrame | None = None,  # kinship
+    CV: pd.DataFrame | Array | None = None,  # covariates
+    Z: Matrix | None = None,  # incidence matrix
     # ── Model selection ─────────────────────────────────────────────────
     model: str | list[str] = "BLINK",
     # ── PCA parameters ──────────────────────────────────────────────────
@@ -339,7 +350,7 @@ def GAPIT(
 
 def _validate_compatibility_options(
     *,
-    Z: np.ndarray | None,
+    Z: Matrix | None,
     FDRcut: object,
     prediction_model: str | None,
     Multiple_analysis: bool,
@@ -456,7 +467,7 @@ def _select_traits(trait_names: list[str], trait: str | int | None) -> tuple[str
 def _load_data(
     Y: pd.DataFrame | str | Path | None,
     G: pd.DataFrame | str | Path | None,
-    GD: pd.DataFrame | np.ndarray | str | Path | None,
+    GD: pd.DataFrame | Matrix | str | Path | None,
     GM: pd.DataFrame | str | Path | None,
     snp_impute: str,
 ) -> tuple[PhenotypeData, GenotypeData]:
@@ -482,15 +493,6 @@ def _load_data(
 
         if isinstance(GD, (str, Path)):
             geno = read_numeric(GD, GM, impute_method=snp_impute)
-        elif isinstance(GD, pd.DataFrame):
-            if isinstance(GM, pd.DataFrame):
-                gm_df = GM
-            else:
-                marker_path = Path(GM)
-                if not marker_path.exists():
-                    raise FileNotFoundError(f"Marker map file not found: {marker_path}")
-                gm_df = pd.read_csv(marker_path, sep="\t")
-            geno = GenotypeData.from_numeric_frame(GD, gm_df, snp_impute)
         else:
             if isinstance(GM, pd.DataFrame):
                 gm_df = GM
@@ -499,12 +501,16 @@ def _load_data(
                 if not marker_path.exists():
                     raise FileNotFoundError(f"Marker map file not found: {marker_path}")
                 gm_df = pd.read_csv(marker_path, sep="\t")
-            geno = GenotypeData.from_array(
-                GD,
-                gm_df,
-                pheno.taxa,
-                impute_method=snp_impute,
-            )
+
+            if isinstance(GD, pd.DataFrame):
+                geno = GenotypeData.from_numeric_frame(GD, gm_df, snp_impute)
+            else:
+                geno = GenotypeData.from_array(
+                    GD,
+                    gm_df,
+                    pheno.taxa,
+                    impute_method=snp_impute,
+                )
 
     return pheno, geno
 
@@ -554,7 +560,7 @@ def _simulate_phenotype(
     )
 
 
-def _ki_to_df(KI: pd.DataFrame | np.ndarray, taxa: np.ndarray) -> pd.DataFrame:
+def _ki_to_df(KI: pd.DataFrame | Matrix, taxa: StrVector) -> pd.DataFrame:
     """Convert kinship numpy array to DataFrame with taxa column."""
     if isinstance(KI, pd.DataFrame):
         return KI
@@ -570,7 +576,7 @@ def _ki_to_df(KI: pd.DataFrame | np.ndarray, taxa: np.ndarray) -> pd.DataFrame:
     return df
 
 
-def _cv_to_df(CV: pd.DataFrame | np.ndarray, taxa: np.ndarray) -> pd.DataFrame:
+def _cv_to_df(CV: pd.DataFrame | Array, taxa: StrVector) -> pd.DataFrame:
     """Convert CV numpy array to DataFrame with taxa column."""
     if isinstance(CV, pd.DataFrame):
         return CV
@@ -645,8 +651,8 @@ def _prepare_trait(
         taxa=taxa,
         pca=pca_result,
         snp_names=np.asarray(marker_map["SNP"], dtype=str),
-        chromosomes=np.asarray(marker_map["Chromosome"]),
-        positions=np.asarray(marker_map["Position"], dtype=float),
+        chromosomes=np.asarray(marker_map["Chromosome"], dtype=str),
+        positions=np.asarray(marker_map["Position"], dtype=np.float64),
         maf=_compute_maf(filtered_genotypes),
     )
 
@@ -732,12 +738,12 @@ def _assemble_result(
 
 def _run_model(
     model_name: str,
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    K: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
+    chromosomes: LabelVector,
+    positions: FloatVector,
     p_threshold: float | None,
     group_from: int,
     group_to: int | None,
@@ -820,23 +826,23 @@ def _run_model(
         )
 
 
-def _compute_maf(GD: np.ndarray) -> np.ndarray:
+def _compute_maf(GD: FloatMatrix) -> FloatVector:
     """Compute MAF for each SNP."""
     n = GD.shape[0]
     freq = np.nansum(GD, axis=0) / (2.0 * n)
-    return np.asarray(np.minimum(freq, 1.0 - freq), dtype=float)
+    return np.minimum(freq, 1.0 - freq)
 
 
 def _build_gwas_table(
-    snp_names: np.ndarray,
-    chromosomes: np.ndarray,
-    positions: np.ndarray,
-    p_values: np.ndarray,
-    effects: np.ndarray,
-    se: np.ndarray,
-    maf: np.ndarray,
+    snp_names: StrVector,
+    chromosomes: LabelVector,
+    positions: FloatVector,
+    p_values: FloatVector,
+    effects: FloatVector,
+    se: FloatVector,
+    maf: FloatVector,
     n_obs: int,
-    adj_pvalues: np.ndarray,
+    adj_pvalues: FloatVector,
 ) -> pd.DataFrame:
     """Build standardized GWAS result DataFrame matching GAPIT's CSV output."""
     return (
@@ -859,13 +865,13 @@ def _build_gwas_table(
 
 
 def _run_gs_and_build_pred(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    K: np.ndarray,
-    taxa: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
+    taxa: StrVector,
     model_name: str,
-    qtn_indices: np.ndarray | None = None,
+    qtn_indices: IntVector | None = None,
 ) -> pd.DataFrame | None:
     """Run genomic prediction and build prediction DataFrame."""
     try:
@@ -893,8 +899,8 @@ def _save_outputs(
     gwas_df: pd.DataFrame,
     pred_df: pd.DataFrame | None,
     pca_result: PCAResult,
-    K: np.ndarray,
-    taxa: np.ndarray,
+    K: FloatMatrix,
+    taxa: StrVector,
     trait_name: str,
     model_name: str,
     output_dir: str | Path,
@@ -947,12 +953,16 @@ def _save_outputs(
         # Manhattan
         sig_mask = gwas_df["P.value"] <= bonferroni_threshold(len(gwas_df))
         sig_indices = np.where(np.asarray(sig_mask.to_numpy(), dtype=bool))[0]
+        plot_snp_names = as_str_vector(gwas_df["SNP"].to_numpy())
+        plot_chromosomes = as_str_vector(gwas_df["Chr"].to_numpy())
+        plot_positions = as_float_vector(gwas_df["Pos"].to_numpy())
+        plot_p_values = as_float_vector(gwas_df["P.value"].to_numpy())
 
         fig_man = manhattan_plot(
-            snp_names=np.asarray(gwas_df["SNP"].to_numpy()),
-            chromosomes=np.asarray(gwas_df["Chr"].to_numpy()),
-            positions=np.asarray(gwas_df["Pos"].to_numpy()),
-            p_values=np.asarray(gwas_df["P.value"].to_numpy(), dtype=float),
+            snp_names=plot_snp_names,
+            chromosomes=plot_chromosomes,
+            positions=plot_positions,
+            p_values=plot_p_values,
             title=f"Manhattan: {trait_name} ({model_name})",
             highlight_snps=sig_indices if len(sig_indices) > 0 else None,
             save_path=str(manhattan_path),
@@ -961,7 +971,7 @@ def _save_outputs(
 
         # QQ
         fig_qq = qq_plot(
-            p_values=np.asarray(gwas_df["P.value"].to_numpy(), dtype=float),
+            p_values=plot_p_values,
             title=f"QQ: {trait_name} ({model_name})",
             save_path=str(qq_path),
         )

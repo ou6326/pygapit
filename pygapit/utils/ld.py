@@ -15,8 +15,10 @@ import numpy as np
 import pandas as pd
 from scipy import stats
 
+from .._typing import FloatMatrix, FloatVector, Matrix
 
-def _safe_r2(a: np.ndarray, b: np.ndarray) -> float:
+
+def _safe_r2(a: FloatVector, b: FloatVector) -> float:
     """Pearson r² with guard for constant/invariant inputs.
 
     Returns NaN if either column has zero variance (undefined correlation).
@@ -29,7 +31,7 @@ def _safe_r2(a: np.ndarray, b: np.ndarray) -> float:
     return float(np.clip(r**2, 0.0, 1.0))  # clip floating-point noise
 
 
-def LD_matrix(genotype: np.ndarray, max_snps: int = 500) -> np.ndarray:
+def LD_matrix(genotype: Matrix, max_snps: int = 500) -> FloatMatrix:
     """
     Compute pairwise LD (r²) matrix for up to *max_snps* SNPs.
 
@@ -60,7 +62,7 @@ def LD_matrix(genotype: np.ndarray, max_snps: int = 500) -> np.ndarray:
 
 
 def LD_decay(
-    genotype: np.ndarray,
+    genotype: Matrix,
     snp_info: pd.DataFrame,
     chrom: int | None = None,
     max_dist: int = 1_000_000,

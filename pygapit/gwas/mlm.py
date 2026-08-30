@@ -19,15 +19,16 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
+from .._typing import FloatMatrix, FloatVector
 from ..stats.emma import emma_remle, emmax_p3d
 
 
 @dataclass
 class MLMResult:
-    p_values: np.ndarray
-    effects: np.ndarray
-    se: np.ndarray
-    stats: np.ndarray
+    p_values: FloatVector
+    effects: FloatVector
+    se: FloatVector
+    stats: FloatVector
     vg: float
     ve: float
     h2: float
@@ -35,10 +36,10 @@ class MLMResult:
 
 
 def mlm_gwas(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    K: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
     ngrids: int = 100,
 ) -> MLMResult:
     """
@@ -73,9 +74,9 @@ def mlm_gwas(
 
 
 def compress_kinship(
-    K: np.ndarray,
+    K: FloatMatrix,
     n_groups: int,
-) -> tuple[np.ndarray, np.ndarray]:
+) -> tuple[FloatMatrix, FloatMatrix]:
     """
     Compress n individuals into g groups and compute group kinship.
     Translates GAPIT.Compress.R and GAPIT.ZmatrixCompress.R
@@ -127,10 +128,10 @@ def compress_kinship(
 
 
 def reml_for_groups(
-    y: np.ndarray,
-    X0: np.ndarray,
-    K_c: np.ndarray,
-    Z: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    K_c: FloatMatrix,
+    Z: FloatMatrix,
 ) -> float:
     """
     Compute REML log-likelihood for a given compression.
@@ -146,10 +147,10 @@ def reml_for_groups(
 
 
 def cmlm_gwas(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    K: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
     group_from: int = 1,
     group_to: int | None = None,
     ngrids: int = 100,

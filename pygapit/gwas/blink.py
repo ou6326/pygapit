@@ -24,25 +24,26 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .._typing import FloatMatrix, FloatVector, IntVector
 from .glm import glm_gwas, glm_scan_with_cofactors
 
 
 @dataclass
 class BLINKResult:
-    p_values: np.ndarray
-    effects: np.ndarray
-    se: np.ndarray
-    t_stats: np.ndarray
-    selected_qtns: np.ndarray  # indices of pseudo-QTN cofactors
+    p_values: FloatVector
+    effects: FloatVector
+    se: FloatVector
+    t_stats: FloatVector
+    selected_qtns: IntVector  # indices of pseudo-QTN cofactors
     n_iterations: int
     method: str = "BLINK"
 
 
 def _compute_bic(
-    y: np.ndarray,
-    X0: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
     cofactor_indices: list[int],
-    GD: np.ndarray,
+    GD: FloatMatrix,
 ) -> float:
     """
     Compute BIC for model with given cofactors.
@@ -76,10 +77,10 @@ def _compute_bic(
 
 
 def _ld_prune(
-    candidate_indices: np.ndarray,
-    GD: np.ndarray,
+    candidate_indices: IntVector,
+    GD: FloatMatrix,
     ld_threshold: float = 0.7,
-) -> np.ndarray:
+) -> IntVector:
     """
     LD-based pruning of candidate SNPs.
     Translates Blink.LDRemove() from GAPIT.Blink.R
@@ -135,11 +136,11 @@ def _ld_prune(
 
 
 def _bic_select_cofactors(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    candidates: np.ndarray,
-) -> np.ndarray:
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    candidates: IntVector,
+) -> IntVector:
     """
     Greedily add cofactors from candidates while BIC decreases.
     Translates Blink.BICselection() from GAPIT.Blink.R
@@ -162,9 +163,9 @@ def _bic_select_cofactors(
 
 
 def blink_gwas(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
     max_iterations: int = 10,
     ld_threshold: float = 0.7,
     p_threshold: float | None = None,

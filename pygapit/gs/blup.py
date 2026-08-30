@@ -22,6 +22,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .._typing import FloatMatrix, FloatVector, StrVector, Vector
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
 
@@ -30,12 +31,12 @@ from ..stats.kinship import vanraden_kinship
 class GBLUPResult:
     """Genomic prediction output per individual."""
 
-    taxa: np.ndarray
-    blue: np.ndarray  # BLUE (fixed effects prediction)
-    blup: np.ndarray  # BLUP (total genomic breeding value)
-    pev: np.ndarray  # prediction error variance
-    gebv: np.ndarray  # genomic estimated breeding value
-    prediction: np.ndarray  # blue + blup
+    taxa: StrVector
+    blue: FloatVector  # BLUE (fixed effects prediction)
+    blup: FloatVector  # BLUP (total genomic breeding value)
+    pev: FloatVector  # prediction error variance
+    gebv: FloatVector  # genomic estimated breeding value
+    prediction: FloatVector  # blue + blup
     vg: float  # genetic variance
     ve: float  # residual variance
     h2: float  # heritability
@@ -43,13 +44,13 @@ class GBLUPResult:
 
 
 def _emma_blup(
-    y: np.ndarray,
-    X: np.ndarray,
-    K: np.ndarray,
+    y: FloatVector,
+    X: FloatMatrix,
+    K: FloatMatrix,
     delta: float,
     vg: float,
     ve: float,
-) -> tuple[np.ndarray, np.ndarray, np.ndarray]:
+) -> tuple[FloatVector, FloatVector, FloatVector]:
     """
     Solve GAPIT's EMMA-transformed mixed model for BLUE, BLUP, and PEV.
 
@@ -89,10 +90,10 @@ def _emma_blup(
 
 
 def gblup(
-    y: np.ndarray,
-    X0: np.ndarray,
-    K: np.ndarray,
-    taxa: np.ndarray | None = None,
+    y: FloatVector,
+    X0: FloatMatrix,
+    K: FloatMatrix,
+    taxa: StrVector | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
     """
@@ -145,10 +146,10 @@ def gblup(
 
 
 def predict_new(
-    K_train_train: np.ndarray,
-    K_new_train: np.ndarray,
-    blup_train: np.ndarray,
-) -> np.ndarray:
+    K_train_train: FloatMatrix,
+    K_new_train: FloatMatrix,
+    blup_train: FloatVector,
+) -> FloatVector:
     """
     Predict GEBV for new (un-phenotyped) individuals.
     Translates GAPIT.GS.R: UO = t(KWO) %*% solve(KW) %*% UW
@@ -175,10 +176,10 @@ def predict_new(
 
 
 def cblup(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    taxa: np.ndarray | None = None,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    taxa: StrVector | None = None,
     group_to: int | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
@@ -224,11 +225,11 @@ def cblup(
 
 
 def sblup(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    qtn_indices: np.ndarray,
-    taxa: np.ndarray | None = None,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    qtn_indices: Vector,
+    taxa: StrVector | None = None,
     ngrids: int = 100,
 ) -> GBLUPResult:
     """
@@ -246,10 +247,11 @@ def sblup(
         raise ValueError("sBLUP requires at least one pseudo-QTN index")
     if not np.issubdtype(indices.dtype, np.integer):
         raise ValueError("sBLUP pseudo-QTN indices must be integers")
-    if np.any(indices < 0) or np.any(indices >= GD.shape[1]):
+    integer_indices = indices.astype(np.intp, copy=False)
+    if np.any(integer_indices < 0) or np.any(integer_indices >= GD.shape[1]):
         raise ValueError("sBLUP pseudo-QTN index is outside the genotype matrix")
 
-    unique_indices = np.unique(indices.astype(np.intp, copy=False))
+    unique_indices = np.unique(integer_indices)
     K_pseudo = vanraden_kinship(GD[:, unique_indices])
 
     K_pseudo += np.eye(len(y)) * 1e-6

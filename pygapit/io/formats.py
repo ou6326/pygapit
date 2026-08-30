@@ -18,6 +18,8 @@ from typing import Any
 import numpy as np
 import pandas as pd
 
+from .._typing import FloatMatrix, FloatVector, IntVector, Matrix, StrVector, Vector
+
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
 # Based on GAPIT.Numericalization.R lookup table
@@ -34,9 +36,9 @@ MISSING_2BIT = frozenset({"NN", "XX", "--", "++", "//", "00", "N", "NA", "NAN"})
 class GenotypeData:
     """Container for processed genotype data."""
 
-    GD: np.ndarray  # (n_individuals, n_snps) float, 0/1/2 coded
+    GD: FloatMatrix  # (n_individuals, n_snps), 0/1/2 coded
     GM: pd.DataFrame  # columns: SNP, Chromosome, Position
-    taxa: np.ndarray  # (n,) individual IDs
+    taxa: StrVector  # individual IDs
 
     @classmethod
     def from_numeric_frame(
@@ -53,14 +55,14 @@ class GenotypeData:
     @classmethod
     def from_array(
         cls,
-        genotype: np.ndarray,
+        genotype: Matrix,
         marker_map: pd.DataFrame,
-        taxa: np.ndarray,
+        taxa: Vector,
         impute_method: str = "middle",
     ) -> GenotypeData:
         """Build validated numeric genotype data using explicit row taxa."""
         try:
-            values = np.asarray(genotype, dtype=float)
+            values = np.asarray(genotype, dtype=np.float64)
         except (TypeError, ValueError) as exc:
             raise ValueError("Numeric genotype array values must be numeric") from exc
         if values.ndim != 2 or values.shape[1] == 0:
@@ -93,7 +95,7 @@ class PhenotypeData:
     """Container for phenotype data."""
 
     Y: pd.DataFrame  # col0 = Taxa, col1+ = trait values
-    taxa: np.ndarray  # (n,) individual IDs
+    taxa: StrVector  # individual IDs
     trait_names: list[str]
 
     @classmethod
@@ -106,12 +108,12 @@ class PhenotypeData:
 class AlignedData:
     """Typed result of aligning phenotype, genotype, and optional inputs."""
 
-    taxa: np.ndarray
+    taxa: StrVector
     phenotypes: pd.DataFrame
-    genotypes: np.ndarray
+    genotypes: FloatMatrix
     markers: pd.DataFrame
-    kinship: np.ndarray | None = None
-    covariates: np.ndarray | None = None
+    kinship: FloatMatrix | None = None
+    covariates: FloatMatrix | None = None
 
     def as_legacy_dict(self) -> dict[str, Any]:
         """Return the historical mapping produced by :func:`align_taxa`."""
@@ -128,7 +130,7 @@ class AlignedData:
         return result
 
 
-def _unique_taxa_index(values: np.ndarray, source: str) -> dict[str, int]:
+def _unique_taxa_index(values: Vector, source: str) -> dict[str, int]:
     """Build a taxa-to-row mapping and reject ambiguous duplicate IDs."""
     taxa = np.asarray(values, dtype=str)
     if taxa.ndim != 1:
@@ -148,7 +150,7 @@ def _unique_taxa_index(values: np.ndarray, source: str) -> dict[str, int]:
     return index
 
 
-def _taxa_array(values: pd.Series[Any] | np.ndarray, source: str) -> np.ndarray:
+def _taxa_array(values: pd.Series[Any] | Vector, source: str) -> StrVector:
     """Return validated, non-empty string taxa identifiers."""
     series = pd.Series(values, copy=False)
     if series.isna().any():
@@ -234,7 +236,7 @@ def _numeric_from_frames(
             "Numeric genotype SNP columns must match marker-map rows in order"
         )
     try:
-        values = gd_df.iloc[:, 1:].to_numpy(dtype=float)
+        values = gd_df.iloc[:, 1:].to_numpy(dtype=np.float64)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{source} SNP values must be numeric") from exc
     if np.isinf(values).any():
@@ -248,9 +250,9 @@ def _numeric_from_frames(
 
 
 def _numericalize_snp(
-    alleles: np.ndarray,
+    alleles: Vector,
     major_allele_zero: bool = False,
-) -> np.ndarray:
+) -> FloatVector:
     """
     Convert a SNP's character allele calls to 0/1/2.
     Translates GAPIT.Numericalization.R
@@ -385,7 +387,7 @@ def read_hapmap(
     n_snps, n_indiv = geno_block.shape
 
     # Convert each SNP row to numeric
-    GD_T = np.full((n_snps, n_indiv), np.nan)
+    GD_T = np.full((n_snps, n_indiv), np.nan, dtype=np.float64)
     for i in range(n_snps):
         GD_T[i, :] = _numericalize_snp(geno_block[i, :], major_allele_zero)
 
@@ -440,7 +442,7 @@ def read_numeric(
     return _numeric_from_frames(gd_df, gm_df, impute_method, "Numeric genotype")
 
 
-def impute_missing(GD: np.ndarray, method: str = "middle") -> np.ndarray:
+def impute_missing(GD: FloatMatrix, method: str = "middle") -> FloatMatrix:
     """
     Impute missing genotype values.
     Translates GAPIT's SNP.impute options.
@@ -523,7 +525,7 @@ def align_inputs(
     common = set(phenotype_index) & set(genotype_index)
 
     covariate_index: dict[str, int] | None = None
-    covariate_values: np.ndarray | None = None
+    covariate_values: FloatMatrix | None = None
 
     if cv_df is not None:
         if cv_df.shape[1] < 2:
@@ -536,7 +538,7 @@ def align_inputs(
         common &= set(covariate_index)
 
     kinship_index: dict[str, int] | None = None
-    kinship_values: np.ndarray | None = None
+    kinship_values: FloatMatrix | None = None
 
     if ki_df is not None:
         kinship_taxa = np.asarray(ki_df.iloc[:, 0].astype(str), dtype=str)
@@ -604,8 +606,8 @@ def align_taxa(
 
 
 def maf_filter(
-    GD: np.ndarray, threshold: float = 0.05
-) -> tuple[np.ndarray, np.ndarray]:
+    GD: FloatMatrix, threshold: float = 0.05
+) -> tuple[FloatMatrix, IntVector]:
     """
     Filter SNPs by minor allele frequency.
     Translates GAPIT.QC.R MAF filtering logic.

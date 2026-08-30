@@ -13,8 +13,10 @@ import warnings
 
 import numpy as np
 
+from .._typing import FloatMatrix
 
-def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
+
+def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
     """
     Compute genomic relationship matrix using VanRaden (2009) method.
     Direct translation of GAPIT.kinship.VanRaden.R
@@ -29,7 +31,6 @@ def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
         K[i,i] ~ 1 for outbred, > 1 for inbred
         K[i,j] > 0 = more related than average
     """
-    GD = np.asarray(GD, dtype=float)
     n, _m = GD.shape
 
     # ── Remove monomorphic SNPs ────────────────────────────────────────────
@@ -45,7 +46,7 @@ def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
 
     # ── Center genotypes ──────────────────────────────────────────────────
     # p = allele frequency of alternate allele
-    p = np.asarray(GD.sum(axis=0) / (2 * n), dtype=float)
+    p = GD.sum(axis=0) / (2 * n)
     # P = deviation vector: 2*(p - 0.5)
     P = 2.0 * (p - 0.5)
     # Shift coding: 0/1/2 -> -1/0/1
@@ -64,12 +65,10 @@ def vanraden_kinship(GD: np.ndarray) -> np.ndarray:
         warnings.warn("Adjustment factor near zero; check allele frequencies.")
         adj = 1.0
 
-    K = np.asarray(K / adj, dtype=float)
-
-    return np.asarray(K, dtype=float)
+    return K / adj
 
 
-def zhang_kinship(GD: np.ndarray) -> np.ndarray:
+def zhang_kinship(GD: FloatMatrix) -> FloatMatrix:
     """
     Identity-by-state kinship (Zhang method).
     Translates GAPIT.kinship.Zhang.R
@@ -77,7 +76,6 @@ def zhang_kinship(GD: np.ndarray) -> np.ndarray:
     K[i,j] = proportion of alleles shared identical-by-state
     Faster to compute than VanRaden but less statistically motivated.
     """
-    GD = np.asarray(GD, dtype=float)
     _n, _m = GD.shape
 
     # Remove monomorphic
@@ -91,21 +89,21 @@ def zhang_kinship(GD: np.ndarray) -> np.ndarray:
     GD_norm = GD / 2.0  # scale to 0-1
     # Mean centering
     GD_c = GD_norm - GD_norm.mean(axis=0)
-    K = GD_c @ GD_c.T / GD_c.shape[1]
+    kinship: FloatMatrix = GD_c @ GD_c.T / GD_c.shape[1]
     # Normalize to make diagonal ~ 1
-    diag_mean = np.mean(np.diag(K))
+    diag_mean = float(np.mean(np.diag(kinship)))
     if diag_mean > 0:
-        K = K / diag_mean
+        kinship /= diag_mean
 
-    return np.asarray(K, dtype=float)
+    return kinship
 
 
-def scale_kinship(K: np.ndarray) -> np.ndarray:
+def scale_kinship(K: FloatMatrix) -> FloatMatrix:
     """
     Scale kinship matrix so diagonal mean = 1.
     Useful for numerical stability in mixed model solvers.
     """
     d = np.mean(np.diag(K))
     if d > 1e-12:
-        return np.asarray(K / d, dtype=float)
-    return np.asarray(K, dtype=float)
+        return K / d
+    return K

@@ -12,19 +12,20 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from numpy.typing import NDArray
+
+from .._typing import FloatMatrix, FloatVector
 
 
 @dataclass
 class PCAResult:
-    scores: np.ndarray  # (n, k) PC scores per individual
-    loadings: np.ndarray  # (m, k) SNP loadings
-    var_explained: np.ndarray  # (k,) proportion variance explained
-    eigenvalues: np.ndarray  # (k,) eigenvalues
+    scores: FloatMatrix  # (n, k) PC scores per individual
+    loadings: FloatMatrix  # (m, k) SNP loadings
+    var_explained: FloatVector  # proportion variance explained
+    eigenvalues: FloatVector
 
 
 def compute_pca(
-    GD: np.ndarray,
+    GD: FloatMatrix,
     n_components: int = 3,
     maf_filter: float = 0.05,
 ) -> PCAResult:
@@ -42,7 +43,6 @@ def compute_pca(
     -------
     PCAResult with scores, loadings, variance explained
     """
-    GD = np.asarray(GD, dtype=float)
     n, _m = GD.shape
 
     # ── MAF filter ────────────────────────────────────────────────────────
@@ -63,10 +63,8 @@ def compute_pca(
     # Use truncated SVD via numpy
     # G = U * S * V^T, scores = U * S
     U, singular_values, Vt = np.linalg.svd(GD_centered, full_matrices=False)
-    singular_values_array: NDArray[np.float64] = np.asarray(
-        singular_values, dtype=np.float64
-    )
-    eigenvalues_all: NDArray[np.float64] = singular_values_array**2 / (n - 1)
+    singular_values_array: FloatVector = singular_values
+    eigenvalues_all: FloatVector = singular_values_array**2 / (n - 1)
     U = U[:, :k]
     S = singular_values_array[:k]
     Vt = Vt[:k, :]
@@ -75,9 +73,8 @@ def compute_pca(
     loadings = Vt.T  # (m, k)
     eigenvalues = S**2 / (n - 1)
     total_var = float(np.sum(eigenvalues_all))
-    var_explained = np.asarray(
-        eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum(),
-        dtype=float,
+    var_explained: FloatVector = (
+        eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum()
     )
 
     return PCAResult(
@@ -91,8 +88,8 @@ def compute_pca(
 def build_covariate_matrix(
     pca_result: PCAResult,
     n_pcs: int,
-    extra_covariates: np.ndarray | None = None,
-) -> np.ndarray:
+    extra_covariates: FloatMatrix | None = None,
+) -> FloatMatrix:
     """
     Build the fixed-effect design matrix X0 = [1 | PC1 | ... | PCk | CVs].
     This is the X0 matrix used in all GAPIT GWAS/GS models.
@@ -117,7 +114,7 @@ def build_covariate_matrix(
         X0 = np.column_stack([X0, pca_result.scores[:, :k]])
 
     if extra_covariates is not None:
-        cv = np.asarray(extra_covariates, dtype=float)
+        cv = np.asarray(extra_covariates, dtype=np.float64)
         if cv.ndim == 1:
             cv = cv.reshape(-1, 1)
         X0 = np.column_stack([X0, cv])

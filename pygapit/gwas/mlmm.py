@@ -23,16 +23,17 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .._typing import FloatMatrix, FloatVector, IntVector
 from ..stats.emma import emma_remle, emmax_p3d
 
 
 @dataclass
 class MLMMResult:
-    p_values: np.ndarray
-    effects: np.ndarray
-    se: np.ndarray
-    stats: np.ndarray
-    selected_qtns: np.ndarray
+    p_values: FloatVector
+    effects: FloatVector
+    se: FloatVector
+    stats: FloatVector
+    selected_qtns: IntVector
     vg: float
     ve: float
     h2: float
@@ -53,10 +54,10 @@ def _ext_bic(log_lik: float, n: int, k: int, m: int) -> float:
 
 
 def mlmm_gwas(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    K: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
     max_steps: int = 10,
     p_threshold: float = 1.2e-5,
     ngrids: int = 100,

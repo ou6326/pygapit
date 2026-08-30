@@ -16,19 +16,21 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.stats import t as t_dist
 
+from .._typing import FloatMatrix, FloatVector, IntVector
+
 
 @dataclass
 class GLMResult:
-    p_values: np.ndarray  # (m,) p-values for each SNP
-    effects: np.ndarray  # (m,) effect size estimates
-    se: np.ndarray  # (m,) standard errors
-    t_stats: np.ndarray  # (m,) t-statistics
+    p_values: FloatVector  # p-values for each SNP
+    effects: FloatVector  # effect size estimates
+    se: FloatVector  # standard errors
+    t_stats: FloatVector  # t-statistics
     r2_full: float  # R² of null model
 
 
 def _ols_vectorized(
-    y: np.ndarray, X0: np.ndarray, GD: np.ndarray
-) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    y: FloatVector, X0: FloatMatrix, GD: FloatMatrix
+) -> tuple[FloatVector, FloatVector, FloatVector, FloatVector]:
     """
     Vectorized OLS test for all m SNPs simultaneously.
     Uses the partitioned regression trick:
@@ -90,9 +92,9 @@ def _ols_vectorized(
 
 
 def glm_gwas(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
 ) -> GLMResult:
     """
     GLM genome-wide association scan.
@@ -108,10 +110,6 @@ def glm_gwas(
     -------
     GLMResult with p_values, effects, se, t_stats for all m SNPs
     """
-    y = np.asarray(y, dtype=float)
-    X0 = np.asarray(X0, dtype=float)
-    GD = np.asarray(GD, dtype=float)
-
     _n, _m = GD.shape
 
     # Null model R²
@@ -137,10 +135,10 @@ def glm_gwas(
 
 
 def glm_scan_with_cofactors(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    cofactor_indices: np.ndarray | None,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    cofactor_indices: IntVector | None,
 ) -> GLMResult:
     """
     GLM scan including pseudo-QTN cofactors as additional fixed effects.

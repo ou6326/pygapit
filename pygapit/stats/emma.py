@@ -21,6 +21,7 @@ import numpy as np
 from scipy.optimize import brentq
 from scipy.stats import t as t_dist
 
+from .._typing import FloatMatrix, FloatVector
 from ..io.formats import impute_missing
 
 
@@ -39,16 +40,16 @@ class EMMAResult:
 class GWASResult:
     """Per-SNP GWAS output."""
 
-    p_values: np.ndarray
-    effects: np.ndarray
-    se: np.ndarray
-    stats: np.ndarray
+    p_values: FloatVector
+    effects: FloatVector
+    se: FloatVector
+    stats: FloatVector
     vg: float
     ve: float
     h2: float
 
 
-def _eigen_R_wo_Z(K: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _eigen_R_wo_Z(K: FloatMatrix, X: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
     """
     Spectral decomposition of the residual projection matrix (no Z).
     Equivalent to emma.eigen.R.wo.Z in R.
@@ -67,7 +68,7 @@ def _eigen_R_wo_Z(K: np.ndarray, X: np.ndarray) -> tuple[np.ndarray, np.ndarray]
     return eigvals - 1.0, eigvecs  # subtract 1 added by I
 
 
-def _eigen_L_wo_Z(K: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+def _eigen_L_wo_Z(K: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
     """
     Eigendecomposition of K for the full log-likelihood.
     Equivalent to emma.eigen.L.wo.Z in R.
@@ -76,30 +77,26 @@ def _eigen_L_wo_Z(K: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
     return eigvals[::-1], eigvecs[:, ::-1]
 
 
-def _reml_ll(log_delta: float, lambda_R: np.ndarray, etas: np.ndarray) -> float:
+def _reml_ll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> float:
     """
     REML log-likelihood as a function of log(delta).
     Equation from Kang et al. (2008) Genetics.
     """
-    lambda_R = np.asarray(lambda_R, dtype=float)
-    etas = np.asarray(etas, dtype=float)
     nq = len(etas)
     delta = math.exp(log_delta)
-    denom = np.asarray(lambda_R + delta, dtype=float)
+    denom = lambda_R + delta
     sse = float(np.sum(etas**2 / denom))
     log_scale = math.log(nq / (2 * math.pi)) - 1.0 - math.log(sse)
     log_denom = float(np.sum(np.log(denom)))
     return 0.5 * (nq * log_scale - log_denom)
 
 
-def _reml_dll(log_delta: float, lambda_R: np.ndarray, etas: np.ndarray) -> float:
+def _reml_dll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> float:
     """Derivative of REML log-likelihood w.r.t. log(delta)."""
-    lambda_R = np.asarray(lambda_R, dtype=float)
-    etas = np.asarray(etas, dtype=float)
     nq = len(etas)
     delta = math.exp(log_delta)
-    etasq = np.asarray(etas**2, dtype=float)
-    denom = np.asarray(lambda_R + delta, dtype=float)
+    etasq = etas**2
+    denom = lambda_R + delta
     weighted_sq = float(np.sum(etasq / denom**2))
     weighted = float(np.sum(etasq / denom))
     inv_sum = float(np.sum(1.0 / denom))
@@ -107,9 +104,9 @@ def _reml_dll(log_delta: float, lambda_R: np.ndarray, etas: np.ndarray) -> float
 
 
 def emma_remle(
-    y: np.ndarray,
-    X: np.ndarray,
-    K: np.ndarray,
+    y: FloatVector,
+    X: FloatMatrix,
+    K: FloatMatrix,
     ngrids: int = 100,
     llim: float = -10.0,
     ulim: float = 10.0,
@@ -190,7 +187,7 @@ def emma_remle(
     nq = n - q
     denom = lambda_R + best_delta
     sse = float(np.sum(etas**2 / denom))
-    vg = float(sse / nq)
+    vg = sse / nq
     ve = vg * best_delta
     h2 = vg / (vg + ve) if (vg + ve) > 0 else 0.0
 
@@ -198,10 +195,10 @@ def emma_remle(
 
 
 def emmax_p3d(
-    y: np.ndarray,
-    X0: np.ndarray,
-    GD: np.ndarray,
-    K: np.ndarray,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
     ngrids: int = 100,
     llim: float = -10.0,
     ulim: float = 10.0,
