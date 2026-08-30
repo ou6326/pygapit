@@ -23,7 +23,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .._typing import FloatMatrix, FloatVector, IntVector
+from .._typing import FloatMatrix, FloatVector, IntVector, readonly_copy
 from ..stats.emma import emma_remle, emmax_p3d
 
 
@@ -39,6 +39,10 @@ class MLMMResult:
     h2: float
     n_steps: int
     method: str = "MLMM"
+
+    def __post_init__(self) -> None:
+        for field in ("p_values", "effects", "se", "stats", "selected_qtns"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def _ext_bic(log_lik: float, n: int, k: int, m: int) -> float:

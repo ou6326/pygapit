@@ -46,8 +46,9 @@ def test_scale_kinship_rejects_non_square_matrix() -> None:
 
 
 def test_model_results_are_immutable() -> None:
+    source = np.ones(1)
     result = GLMResult(
-        p_values=np.ones(1),
+        p_values=source,
         effects=np.zeros(1),
         se=np.ones(1),
         t_stats=np.zeros(1),
@@ -57,3 +58,9 @@ def test_model_results_are_immutable() -> None:
     field_name = "r2_full"
     with pytest.raises(FrozenInstanceError):
         setattr(result, field_name, 1.0)
+    assert result.p_values is not source
+    with pytest.raises(ValueError, match="read-only"):
+        np.put(result.p_values, [0], [0.5])
+
+    source[0] = 0.25
+    assert result.p_values[0] == 1.0

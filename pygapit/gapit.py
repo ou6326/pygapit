@@ -36,6 +36,7 @@ from ._typing import (
     as_float_matrix,
     as_float_vector,
     as_str_vector,
+    readonly_copy,
     require_square,
 )
 from .gs.blup import cblup, gblup, sblup
@@ -111,6 +112,10 @@ class ModelRunResult:
             raise ValueError(
                 "Model p-values, effects, and standard errors must have equal length"
             )
+        for field in ("p_values", "effects", "se"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
+        if self.selected_qtns is not None:
+            object.__setattr__(self, "selected_qtns", readonly_copy(self.selected_qtns))
 
 
 @dataclass(frozen=True, slots=True)
@@ -128,6 +133,20 @@ class PreparedTrait:
     chromosomes: LabelVector
     positions: FloatVector
     maf: FloatVector
+
+    def __post_init__(self) -> None:
+        for field in (
+            "y",
+            "genotypes",
+            "kinship",
+            "design",
+            "taxa",
+            "snp_names",
+            "chromosomes",
+            "positions",
+            "maf",
+        ):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
     @property
     def n_obs(self) -> int:
@@ -187,7 +206,7 @@ def GAPIT(
     GM: pd.DataFrame | str | Path | None = None,  # SNP map
     KI: Matrix | pd.DataFrame | None = None,  # kinship
     CV: pd.DataFrame | Array | None = None,  # covariates
-    Z: Matrix | None = None,  # incidence matrix
+    Z: Matrix | pd.DataFrame | None = None,  # incidence matrix
     # ── Model selection ─────────────────────────────────────────────────
     model: str | list[str] = "BLINK",
     # ── PCA parameters ──────────────────────────────────────────────────
@@ -374,7 +393,7 @@ def GAPIT(
 
 def _validate_compatibility_options(
     *,
-    Z: Matrix | None,
+    Z: Matrix | pd.DataFrame | None,
     FDRcut: object,
     prediction_model: object,
     Multiple_analysis: object,
@@ -385,7 +404,7 @@ def _validate_compatibility_options(
         raise TypeError("FDRcut must be a boolean, matching GAPIT 3.5")
     if not isinstance(Multiple_analysis, bool):
         raise TypeError("Multiple_analysis must be a boolean")
-    if Z is not None:
+    if Z is not None and not isinstance(Z, pd.DataFrame):
         as_float_matrix(Z, name="incidence matrix Z")
 
     if not isinstance(kinship_algorithm, str):
@@ -608,12 +627,43 @@ def _ki_to_df(KI: pd.DataFrame | Matrix, taxa: StrVector) -> pd.DataFrame:
 
 
 def _incidence_kinship_to_df(
-    Z: Matrix,
+    Z: Matrix | pd.DataFrame,
     KI: pd.DataFrame | Matrix,
     taxa: StrVector,
 ) -> pd.DataFrame:
     """Expand a random-effect kinship matrix to observations via ``Z K Z'``."""
-    incidence = as_float_matrix(Z, name="incidence matrix Z")
+    effect_labels: list[str] | None = None
+    if isinstance(Z, pd.DataFrame):
+        incidence_frame = Z.copy()
+        first_column: object | None = (
+            incidence_frame.columns[0] if len(incidence_frame.columns) else None
+        )
+        if isinstance(first_column, str) and first_column.casefold() in {
+            "taxa",
+            "taxon",
+        }:
+            incidence_frame = incidence_frame.set_index(first_column)
+        elif isinstance(incidence_frame.index, pd.RangeIndex):
+            raise ValueError(
+                "DataFrame Z must have a Taxa column or a labeled taxon index"
+            )
+
+        incidence_frame.index = incidence_frame.index.map(str)
+        phenotype_taxa = [str(taxon) for taxon in taxa]
+        if incidence_frame.index.has_duplicates:
+            raise ValueError("DataFrame Z taxon labels must be unique")
+        if set(incidence_frame.index) != set(phenotype_taxa):
+            raise ValueError("DataFrame Z taxa must exactly match phenotype taxa")
+        incidence_frame = incidence_frame.rename(columns=str)
+        effect_labels = list(incidence_frame.columns)
+        if len(set(effect_labels)) != len(effect_labels):
+            raise ValueError("DataFrame Z random-effect labels must be unique")
+        incidence_frame.columns = effect_labels
+        incidence = as_float_matrix(
+            incidence_frame.loc[phenotype_taxa], name="incidence matrix Z"
+        )
+    else:
+        incidence = as_float_matrix(Z, name="incidence matrix Z")
     if incidence.shape[0] != len(taxa):
         raise ValueError(
             "incidence matrix Z must have one row per phenotype taxon; "
@@ -625,17 +675,35 @@ def _incidence_kinship_to_df(
         raise ValueError("every row of incidence matrix Z must map to a random effect")
 
     if isinstance(KI, pd.DataFrame):
-        values = KI
-        first_column: object | None = (
-            values.columns[0] if len(values.columns) > 0 else None
+        kinship_frame = KI.copy()
+        first_column = (
+            kinship_frame.columns[0] if len(kinship_frame.columns) > 0 else None
         )
         if isinstance(first_column, str) and first_column.casefold() in {
             "taxa",
             "taxon",
         }:
-            values = values.iloc[:, 1:]
+            kinship_frame = kinship_frame.set_index(first_column)
+        elif isinstance(kinship_frame.index, pd.RangeIndex):
+            raise ValueError(
+                "DataFrame KI used with Z must have labeled rows and columns"
+            )
+        kinship_frame.index = kinship_frame.index.map(str)
+        kinship_frame = kinship_frame.rename(columns=str)
+        if kinship_frame.index.has_duplicates or kinship_frame.columns.has_duplicates:
+            raise ValueError("DataFrame KI random-effect labels must be unique")
+        if set(kinship_frame.index) != set(kinship_frame.columns):
+            raise ValueError("DataFrame KI row and column labels must match")
+        ordered_labels = (
+            effect_labels if effect_labels is not None else list(kinship_frame.index)
+        )
+        if set(ordered_labels) != set(kinship_frame.index):
+            raise ValueError("Z columns must exactly match KI random-effect labels")
+        kinship_frame = kinship_frame.loc[ordered_labels, ordered_labels]
         try:
-            random_kinship = as_float_matrix(values, name="KI random-effect matrix")
+            random_kinship = as_float_matrix(
+                kinship_frame, name="KI random-effect matrix"
+            )
         except ValueError as exc:
             raise ValueError(
                 "KI random-effect matrix must contain numeric values"
@@ -999,13 +1067,72 @@ def _run_gs_and_build_pred(
         return None
 
 
+def _align_multiple_gwas(
+    results: Sequence[GAPITResult],
+) -> tuple[pd.DataFrame, list[tuple[str, FloatVector]]]:
+    """Align model p-values by marker identity and genomic coordinates."""
+    keys = ["SNP", "Chr", "Pos"]
+    marker_frames: list[pd.DataFrame] = []
+    for result in results:
+        if result.GWAS is None:
+            continue
+        missing = {*keys, "P.value"} - set(result.GWAS.columns)
+        if missing:
+            raise ValueError(
+                f"{result.model} GWAS table is missing columns: {sorted(missing)}"
+            )
+        frame = result.GWAS.loc[:, [*keys, "P.value"]].copy()
+        if frame.duplicated(keys).any():
+            raise ValueError(f"{result.model} GWAS table contains duplicate markers")
+        frame["SNP"] = frame["SNP"].astype(str)
+        frame["Chr"] = frame["Chr"].astype(str)
+        frame["Pos"] = pd.to_numeric(frame["Pos"], errors="raise")
+        marker_frames.append(frame)
+
+    if not marker_frames:
+        raise ValueError("at least one GWAS table is required")
+
+    all_markers = pd.concat(
+        [frame.loc[:, keys] for frame in marker_frames], ignore_index=True
+    )
+    coordinate_counts = all_markers.groupby("SNP", sort=False)[["Chr", "Pos"]].nunique()
+    conflicting = coordinate_counts.index[(coordinate_counts > 1).any(axis=1)]
+    if len(conflicting):
+        raise ValueError(
+            "SNP identifiers have conflicting genomic coordinates: "
+            + ", ".join(map(str, conflicting[:5]))
+        )
+
+    chromosome_order = {
+        chromosome: index
+        for index, chromosome in enumerate(dict.fromkeys(all_markers["Chr"]))
+    }
+    reference = all_markers.drop_duplicates(keys).copy()
+    reference["_chromosome_order"] = reference["Chr"].map(chromosome_order)
+    reference = (
+        reference.sort_values(["_chromosome_order", "Pos", "SNP"], kind="stable")
+        .drop(columns="_chromosome_order")
+        .reset_index(drop=True)
+    )
+
+    aligned: list[tuple[str, FloatVector]] = []
+    for result, frame in zip(
+        (result for result in results if result.GWAS is not None),
+        marker_frames,
+        strict=True,
+    ):
+        merged = reference.merge(frame, on=keys, how="left", validate="one_to_one")
+        aligned.append((result.model, np.asarray(merged["P.value"], dtype=np.float64)))
+    return reference, aligned
+
+
 def _attach_multiple_analysis_outputs(
     results: dict[str, GAPITResult], output_dir: str | Path
 ) -> None:
     """Create GAPIT-style cross-model Manhattan and QQ plots per trait."""
     import matplotlib.pyplot as plt
 
-    from .visualization.plots import _axes, _savefig
+    from .visualization.plots import _axes, _genomic_axis, _savefig
 
     grouped: dict[str, list[GAPITResult]] = {}
     for result in results.values():
@@ -1021,23 +1148,25 @@ def _attach_multiple_analysis_outputs(
         manhattan_path = out / f"GAPIT.Multiple.Manhattan.{component}.pdf"
         qq_path = out / f"GAPIT.Multiple.QQ.{component}.pdf"
 
+        marker_reference, aligned_p_values = _align_multiple_gwas(trait_results)
+        x_values, chromosome_labels, chromosome_centers = _genomic_axis(
+            as_str_vector(marker_reference["Chr"].to_numpy()),
+            as_float_vector(marker_reference["Pos"].to_numpy()),
+        )
         fig_man, raw_ax_man = plt.subplots(figsize=(12, 5))
         ax_man = _axes(raw_ax_man)
-        for result in trait_results:
-            gwas = result.GWAS
-            if gwas is None:
-                continue
-            p_values = np.clip(
-                np.asarray(gwas["P.value"], dtype=np.float64), 1e-300, 1.0
-            )
+        for model, p_values in aligned_p_values:
+            valid = np.isfinite(p_values) & (p_values > 0.0) & (p_values <= 1.0)
             ax_man.scatter(
-                np.arange(len(gwas)),
-                -np.log10(p_values),
+                x_values[valid],
+                -np.log10(np.maximum(p_values[valid], 1e-300)),
                 s=12,
                 alpha=0.65,
-                label=result.model,
+                label=model,
             )
-        ax_man.set_xlabel("Markers in genomic order")
+        ax_man.set_xticks(chromosome_centers)
+        ax_man.set_xticklabels(chromosome_labels)
+        ax_man.set_xlabel("Chromosome")
         ax_man.set_ylabel(r"$-\log_{10}(p)$")
         ax_man.set_title(f"Multiple Manhattan: {trait_name}")
         ax_man.legend()
@@ -1104,6 +1233,7 @@ def _save_outputs(
     )
 
     prefix = _output_prefix(model_name, trait_name)
+    trait_component = _safe_filename_component(trait_name)
     out = Path(output_dir)
     out.mkdir(parents=True, exist_ok=True)
 
@@ -1118,13 +1248,13 @@ def _save_outputs(
         pred_df.to_csv(prediction_path, index=False)
 
     # Kinship
-    kinship_path = out / "GAPIT.Kinship.csv"
+    kinship_path = out / f"GAPIT.{trait_component}.Kinship.csv"
     ki_df = pd.DataFrame(K, columns=taxa)
     ki_df.insert(0, "Taxa", taxa)
     ki_df.to_csv(kinship_path, index=False)
 
     # PCA scores
-    pca_path = out / "GAPIT.PCA.csv"
+    pca_path = out / f"GAPIT.{trait_component}.PCA.csv"
     pca_df = pd.DataFrame(
         pca_result.scores,
         columns=[f"PC{i + 1}" for i in range(pca_result.scores.shape[1])],
@@ -1135,8 +1265,8 @@ def _save_outputs(
     # ── Plots ──────────────────────────────────────────────────────────
     manhattan_path = out / f"{prefix}.Manhattan.pdf"
     qq_path = out / f"{prefix}.QQ.pdf"
-    kinship_plot_path = out / "GAPIT.Kinship.pdf"
-    pca_plot_path = out / "GAPIT.PCA.pdf"
+    kinship_plot_path = out / f"GAPIT.{trait_component}.Kinship.pdf"
+    pca_plot_path = out / f"GAPIT.{trait_component}.PCA.pdf"
     try:
         # Manhattan
         sig_mask = gwas_df["P.value"] <= bonferroni_threshold(len(gwas_df))

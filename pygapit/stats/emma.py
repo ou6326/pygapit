@@ -26,6 +26,7 @@ from .._typing import (
     FloatVector,
     as_float_matrix,
     as_float_vector,
+    readonly_copy,
     require_row_count,
     require_square,
 )
@@ -54,6 +55,10 @@ class GWASResult:
     vg: float
     ve: float
     h2: float
+
+    def __post_init__(self) -> None:
+        for field in ("p_values", "effects", "se", "stats"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def _eigen_R_wo_Z(K: FloatMatrix, X: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:

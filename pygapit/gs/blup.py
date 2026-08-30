@@ -30,6 +30,7 @@ from .._typing import (
     as_float_matrix,
     as_float_vector,
     as_str_vector,
+    readonly_copy,
     require_length,
     require_row_count,
     require_square,
@@ -52,6 +53,10 @@ class GBLUPResult:
     ve: float  # residual variance
     h2: float  # heritability
     method: str = "gBLUP"
+
+    def __post_init__(self) -> None:
+        for field in ("taxa", "blue", "blup", "pev", "gebv", "prediction"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def _emma_blup(

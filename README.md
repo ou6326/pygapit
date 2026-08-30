@@ -216,12 +216,12 @@ When `file_output=True` (default), pyGAPIT writes to `output_dir`:
 |------|---------|
 | `GAPIT.BLINK.EarHT.GWAS.Results.csv` | Full GWAS table: SNP, Chr, Pos, P.value, maf, effect, FDR |
 | `GAPIT.BLINK.EarHT.Prediction.csv` | BLUE, BLUP, PEV, GEBV per individual; written only when `buspred=True` and prediction succeeds |
-| `GAPIT.Kinship.csv` | Selected or supplied kinship matrix |
-| `GAPIT.PCA.csv` | PC scores per individual |
+| `GAPIT.EarHT.Kinship.csv` | Selected or supplied kinship matrix |
+| `GAPIT.EarHT.PCA.csv` | PC scores per individual |
 | `GAPIT.BLINK.EarHT.Manhattan.pdf` | Manhattan plot |
 | `GAPIT.BLINK.EarHT.QQ.pdf` | QQ plot with λ annotation |
-| `GAPIT.Kinship.pdf` | Kinship heatmap |
-| `GAPIT.PCA.pdf` | 2D PCA scatter |
+| `GAPIT.EarHT.Kinship.pdf` | Kinship heatmap |
+| `GAPIT.EarHT.PCA.pdf` | 2D PCA scatter |
 
 The returned `GAPITResult.output_files` records every file written for that
 analysis. With `file_output=False`, `output_files` is `None` and `output_dir`
@@ -248,16 +248,19 @@ The main supported GAPIT-style parameters are:
 | `h2` | `h2` | `None` | Heritability for simulation |
 | `NQTN` | `NQTN` | `None` | QTNs for simulation |
 | `buspred` | `buspred` | `False` | Run GS after GWAS |
-| `FDRcut` | `FDRcut` | `False` | Use BH FDR filtering for BLINK pseudo-QTNs |
+| `FDRcut` | `FDRcut` | `False` | Use the GAPIT 3.5 FDR cutoff for BLINK pseudo-QTNs |
 | `kinship.algorithm` | `kinship_algorithm` | `"VanRaden"` | `"VanRaden"` or `"Zhang"` |
 | `Z` | `Z` | `None` | Incidence matrix; combines with `KI` as `Z @ KI @ Z.T` |
 | — | `prediction_model` | `None` | Override prediction with `gBLUP`, `cBLUP`, or `sBLUP` |
 | `Multiple_analysis` | `Multiple_analysis` | `False` | Write combined Manhattan and QQ plots by trait |
 
 When `Z` is supplied, `KI` represents covariance among the random-effect
-levels (the columns of `Z`). An explicit `p_threshold` takes precedence over
-`FDRcut` during BLINK candidate selection. Multiple-analysis plots are written
-only when `file_output=True`.
+levels (the columns of `Z`). NumPy inputs are aligned positionally. DataFrame
+inputs are aligned by phenotype taxa and random-effect labels, and mismatched
+labels are rejected. An explicit `p_threshold` takes precedence over `FDRcut`
+during BLINK candidate selection. Multiple-analysis plots join models by SNP,
+chromosome, and position before drawing them on a shared genomic axis; they are
+written only when `file_output=True`.
 
 ---
 

@@ -24,8 +24,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .._typing import BoolVector, FloatMatrix, FloatVector, IntVector
-from ..stats.testing import benjamini_hochberg
+from .._typing import BoolVector, FloatMatrix, FloatVector, IntVector, readonly_copy
 from .glm import glm_gwas, glm_scan_with_cofactors
 
 
@@ -38,6 +37,10 @@ class BLINKResult:
     selected_qtns: IntVector  # indices of pseudo-QTN cofactors
     n_iterations: int
     method: str = "BLINK"
+
+    def __post_init__(self) -> None:
+        for field in ("p_values", "effects", "se", "t_stats", "selected_qtns"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def _compute_bic(
@@ -168,9 +171,17 @@ def _candidate_mask(
     p_threshold: float,
     fdr_alpha: float | None,
 ) -> BoolVector:
-    """Select BLINK candidates using BH FDR or the fixed p-value cutoff."""
+    """Select candidates with GAPIT 3.5's FDR or a fixed p-value cutoff."""
     if fdr_alpha is not None:
-        return benjamini_hochberg(p_values) <= fdr_alpha
+        finite = p_values[np.isfinite(p_values)]
+        if len(finite) == 0:
+            return np.zeros(len(p_values), dtype=bool)
+        sorted_p = np.sort(finite)
+        distances = np.abs(fdr_alpha - sorted_p * len(p_values) / fdr_alpha)
+        index_fdr = int(np.argmin(distances)) + 1
+        fdr_cutoff = fdr_alpha * index_fdr / len(p_values)
+        fdr_mask: BoolVector = (p_values < fdr_cutoff) & np.isfinite(p_values)
+        return fdr_mask
     fixed_mask: BoolVector = (p_values <= p_threshold) & ~np.isnan(p_values)
     return fixed_mask
 
@@ -198,8 +209,8 @@ def blink_gwas(
     ld_threshold   : absolute-correlation threshold for LD pruning (LD in R)
     p_threshold    : p-value threshold to pre-select candidates
                      (default: Bonferroni = 1/m)
-    fdr_alpha      : BH-adjusted cutoff for candidate selection. An explicit
-                     p_threshold takes precedence, matching GAPIT 3.5.
+    fdr_alpha      : GAPIT 3.5 FDR cutoff level for candidate selection. An
+                     explicit p_threshold takes precedence.
     converge_threshold : Jaccard similarity for convergence check
 
     Returns

@@ -22,6 +22,7 @@ from .._typing import (
     IntVector,
     as_float_matrix,
     as_float_vector,
+    readonly_copy,
     require_row_count,
 )
 
@@ -33,6 +34,10 @@ class GLMResult:
     se: FloatVector  # standard errors
     t_stats: FloatVector  # t-statistics
     r2_full: float  # R² of null model
+
+    def __post_init__(self) -> None:
+        for field in ("p_values", "effects", "se", "t_stats"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def _ols_vectorized(

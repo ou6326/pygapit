@@ -13,7 +13,13 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .._typing import FloatMatrix, FloatVector, as_float_matrix, require_row_count
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    as_float_matrix,
+    readonly_copy,
+    require_row_count,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -22,6 +28,10 @@ class PCAResult:
     loadings: FloatMatrix  # (m, k) SNP loadings
     var_explained: FloatVector  # proportion variance explained
     eigenvalues: FloatVector
+
+    def __post_init__(self) -> None:
+        for field in ("scores", "loadings", "var_explained", "eigenvalues"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def compute_pca(

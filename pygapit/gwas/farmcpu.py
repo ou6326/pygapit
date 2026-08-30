@@ -27,7 +27,14 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .._typing import FloatMatrix, FloatVector, IntVector, LabelVector, NumericVector
+from .._typing import (
+    FloatMatrix,
+    FloatVector,
+    IntVector,
+    LabelVector,
+    NumericVector,
+    readonly_copy,
+)
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
 from .glm import glm_scan_with_cofactors
@@ -45,6 +52,10 @@ class FarmCPUResult:
     ve: float
     h2: float
     method: str = "FarmCPU"
+
+    def __post_init__(self) -> None:
+        for field in ("p_values", "effects", "se", "t_stats", "selected_qtns"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def _bin_select_qtns(

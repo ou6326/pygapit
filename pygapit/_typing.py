@@ -20,6 +20,14 @@ BoolVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.bool_]]
 StrVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.str_]]
 
 LabelVector: t.TypeAlias = StrVector | NumericVector
+ArrayT = t.TypeVar("ArrayT", bound=Array)
+
+
+def readonly_copy(values: ArrayT) -> ArrayT:
+    """Return an independent NumPy array whose contents cannot be mutated."""
+    result = values.copy()
+    result.setflags(write=False)
+    return result
 
 
 def as_float_vector(values: object, *, name: str = "array") -> FloatVector:

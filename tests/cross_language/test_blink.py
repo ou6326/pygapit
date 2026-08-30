@@ -8,7 +8,7 @@ import numpy as np
 import numpy.testing as nt
 from numpy.typing import NDArray
 
-from pygapit.gwas.blink import _bic_select_cofactors, _ld_prune
+from pygapit.gwas.blink import _bic_select_cofactors, _candidate_mask, _ld_prune
 from tests.cross_language.r_bridge import RBridge
 
 
@@ -70,3 +70,26 @@ def test_blink_bic_selection_matches_bundled_r_gapit(
     )
 
     nt.assert_array_equal(py_indices, r_indices)
+
+
+def test_blink_fdr_candidate_mask_matches_gapit_3_5(r_bridge: RBridge) -> None:
+    """Compare GAPIT's data-dependent FDR cutoff used for pseudo-QTNs."""
+    p_values = np.array([0.0001, 0.001, 0.01, 0.04, 0.5], dtype=np.float64)
+    alpha = 0.05
+    r_mask_function = r_bridge.function(
+        "function(p, cutOff) {"
+        " nm <- length(p); sp <- sort(p);"
+        " spd <- abs(cutOff - sp * nm / cutOff);"
+        " index_fdr <- grep(min(spd), spd)[1];"
+        " FDRcutoff <- cutOff * index_fdr / nm;"
+        " as.numeric(p < FDRcutoff)"
+        "}"
+    )
+    r_mask = r_bridge.float_array(
+        r_mask_function(r_bridge.float_vector(p_values), alpha)
+    ).astype(bool)
+    py_mask = _candidate_mask(
+        p_values, p_threshold=1.0 / len(p_values), fdr_alpha=alpha
+    )
+
+    nt.assert_array_equal(py_mask, r_mask)

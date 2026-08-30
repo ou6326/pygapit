@@ -126,6 +126,37 @@ SIG_COLOR = "#E41A1C"  # red for significant hits
 SUGGEST_COLOR = "#FF7F00"  # orange for suggestive
 
 
+def _genomic_axis(
+    chromosomes: LabelVector,
+    positions: NumericVector,
+    chromosome_gap: float = 5_000_000.0,
+) -> tuple[FloatVector, tuple[str, ...], FloatVector]:
+    """Map chromosome-local positions onto one cumulative genomic axis."""
+    chroms = np.asarray(chromosomes, dtype=str)
+    pos = np.asarray(positions, dtype=np.float64)
+    if chroms.ndim != 1 or pos.ndim != 1 or len(chroms) != len(pos):
+        raise ValueError("chromosomes and positions must be equal-length vectors")
+    if len(pos) == 0:
+        raise ValueError("chromosomes and positions must not be empty")
+    if not np.all(np.isfinite(pos)):
+        raise ValueError("positions must contain only finite values")
+
+    unique_chroms = tuple(dict.fromkeys(str(chrom) for chrom in chroms))
+    x_values = np.empty(len(pos), dtype=np.float64)
+    centers = np.empty(len(unique_chroms), dtype=np.float64)
+    cumulative = 0.0
+    for index, chrom in enumerate(unique_chroms):
+        mask = chroms == chrom
+        chrom_positions = pos[mask]
+        minimum = float(np.min(chrom_positions))
+        maximum = float(np.max(chrom_positions))
+        span = maximum - minimum
+        x_values[mask] = cumulative + chrom_positions - minimum
+        centers[index] = cumulative + span / 2.0
+        cumulative += span + chromosome_gap
+    return x_values, unique_chroms, centers
+
+
 def manhattan_plot(
     snp_names: StrVector,
     chromosomes: LabelVector,
@@ -170,30 +201,8 @@ def manhattan_plot(
     sig_line = -np.log10(significance_threshold)
     sug_line = -np.log10(suggestive_threshold)
 
-    # ── Compute cumulative positions ─────────────────────────────────────
     chroms = np.asarray(chromosomes, dtype=str)
-    unique_chroms: list[str] = []
-    seen: set[str] = set()
-    for raw_chromosome in chroms:
-        chromosome = str(raw_chromosome)
-        if chromosome not in seen:
-            unique_chroms.append(chromosome)
-            seen.add(chromosome)
-
-    chrom_offset: dict[str, float] = {}
-    cumulative = 0.0
-    chrom_centers: dict[str, float] = {}
-    for chrom in unique_chroms:
-        mask = chroms == chrom
-        max_pos = float(np.nanmax(positions[mask])) if mask.any() else 0.0
-        chrom_offset[chrom] = cumulative
-        chrom_centers[chrom] = cumulative + max_pos / 2
-        cumulative += max_pos + 5_000_000  # gap between chromosomes
-
-    x_vals = np.asarray(
-        [float(positions[i]) + chrom_offset.get(str(chroms[i]), 0.0) for i in range(m)],
-        dtype=float,
-    )
+    x_vals, unique_chroms, chrom_centers = _genomic_axis(chroms, positions)
 
     # ── Plot ─────────────────────────────────────────────────────────────
     fig, raw_ax = plt.subplots(figsize=figsize)
@@ -231,9 +240,9 @@ def manhattan_plot(
     )
 
     # Axis formatting
-    ax.set_xlim(0, float(x_vals.max()) * 1.01)
+    ax.set_xlim(0, max(float(x_vals.max()) * 1.01, 1.0))
     ax.set_ylim(0, max(log_p.max() * 1.1, sig_line * 1.2))
-    ax.set_xticks([chrom_centers[c] for c in unique_chroms])
+    ax.set_xticks(chrom_centers)
     ax.set_xticklabels(unique_chroms, fontsize=7)
     ax.set_xlabel("Chromosome", fontsize=10)
     ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=10)
@@ -521,26 +530,7 @@ def manhattan_interactive(
     m = len(p_values)
 
     chroms = chromosomes
-    unique_chroms: list[str] = []
-    seen: set[str] = set()
-    for raw_chromosome in chroms:
-        chromosome = str(raw_chromosome)
-        if chromosome not in seen:
-            unique_chroms.append(chromosome)
-            seen.add(chromosome)
-
-    chrom_offset: dict[str, float] = {}
-    cumulative = 0.0
-    for chrom in unique_chroms:
-        mask = chroms == chrom
-        max_pos = float(np.nanmax(positions[mask])) if mask.any() else 0.0
-        chrom_offset[chrom] = cumulative
-        cumulative += max_pos + 5_000_000
-
-    x_vals = np.asarray(
-        [float(positions[i]) + chrom_offset.get(str(chroms[i]), 0.0) for i in range(m)],
-        dtype=float,
-    )
+    x_vals, unique_chroms, _ = _genomic_axis(chroms, positions)
     log_p = -np.log10(np.where(valid, np.maximum(p_values, 1e-300), 1.0))
 
     # Build hover text

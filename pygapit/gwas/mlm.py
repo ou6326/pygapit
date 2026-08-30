@@ -19,7 +19,7 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
-from .._typing import FloatMatrix, FloatVector
+from .._typing import FloatMatrix, FloatVector, readonly_copy
 from ..stats.emma import emma_remle, emmax_p3d
 
 
@@ -33,6 +33,10 @@ class MLMResult:
     ve: float
     h2: float
     method: str = "MLM"
+
+    def __post_init__(self) -> None:
+        for field in ("p_values", "effects", "se", "stats"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
 def mlm_gwas(

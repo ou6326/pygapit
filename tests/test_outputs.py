@@ -78,3 +78,30 @@ def test_output_prefix_sanitizes_user_controlled_path_characters() -> None:
     assert _output_prefix("GLM", "height/../unsafe:trait") == (
         "GAPIT.GLM.height_.._unsafe_trait"
     )
+
+
+def test_multiple_traits_have_distinct_shared_output_paths(tmp_path: Path) -> None:
+    phenotype, genotype, marker_map = _small_inputs()
+    phenotype["yield"] = phenotype["height"].to_numpy()[::-1]
+
+    results = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        PCA_total=2,
+        file_output=True,
+        output_dir=tmp_path,
+    )
+
+    assert isinstance(results, dict)
+    height_files = results["height_GLM"].output_files
+    yield_files = results["yield_GLM"].output_files
+    assert height_files is not None
+    assert yield_files is not None
+    assert height_files.kinship != yield_files.kinship
+    assert height_files.pca != yield_files.pca
+    assert height_files.kinship_plot != yield_files.kinship_plot
+    assert height_files.pca_plot != yield_files.pca_plot
+    assert all(path.exists() for path in height_files.paths())
+    assert all(path.exists() for path in yield_files.paths())
