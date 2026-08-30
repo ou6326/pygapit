@@ -71,31 +71,55 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
 
 def zhang_kinship(GD: FloatMatrix) -> FloatMatrix:
     """
-    Identity-by-state kinship (Zhang method).
+    Compute the Zhang relationship matrix used by GAPIT 3.5.
     Translates GAPIT.kinship.Zhang.R
-
-    K[i,j] = proportion of alleles shared identical-by-state
-    Faster to compute than VanRaden but less statistically motivated.
     """
     GD = as_float_matrix(GD, name="genotype matrix")
-    _n, _m = GD.shape
+    n, _m = GD.shape
 
-    # Remove monomorphic
-    fa = GD.mean(axis=0) / 2.0
+    # Remove invariant markers, matching the R implementation.
+    fa = GD.sum(axis=0) / (2.0 * n)
     valid = (fa > 0) & (fa < 1)
     GD = GD[:, valid]
+    if GD.shape[1] == 0:
+        warnings.warn("All SNPs are monomorphic; returning identity matrix.")
+        return np.eye(n)
 
-    # IBS: proportion of matching alleles
-    # For 0/1/2 coded: match when |g_i - g_j| == 0
-    # Approximation: use correlation-based similarity
-    GD_norm = GD / 2.0  # scale to 0-1
-    # Mean centering
-    GD_c = GD_norm - GD_norm.mean(axis=0)
-    kinship: FloatMatrix = GD_c @ GD_c.T / GD_c.shape[1]
-    # Normalize to make diagonal ~ 1
-    diag_mean = float(np.mean(np.diag(kinship)))
-    if diag_mean > 0:
-        kinship /= diag_mean
+    heterozygosity = 1.0 - np.abs(GD - 1.0)
+    individual_heterozygosity = heterozygosity.sum(axis=1) / (2.0 * GD.shape[1])
+    inbreeding = 1.0 - float(np.min(individual_heterozygosity))
+    top = 1.0 + inbreeding
+
+    centered = GD - GD.mean(axis=0)
+    kinship: FloatMatrix = centered @ centered.T
+    diagonal = np.diag(kinship).copy()
+    diagonal_min = float(np.min(diagonal))
+    diagonal_max = float(np.max(diagonal))
+    floor = float(np.min(kinship))
+    scale = diagonal_max - floor
+    if scale <= 1e-12:
+        warnings.warn(
+            "Zhang kinship has no usable variation; returning identity matrix."
+        )
+        return np.eye(n)
+
+    kinship = top * (kinship - floor) / scale
+    adjusted_diagonal_min = top * (diagonal_min - floor) / scale
+    diagonal_mask = np.eye(n, dtype=bool)
+    off_diagonal_mask = ~diagonal_mask
+
+    if adjusted_diagonal_min < 1.0:
+        denominator = (top + 1.0 - adjusted_diagonal_min) * 0.5
+        kinship[diagonal_mask] = (
+            kinship[diagonal_mask] - adjusted_diagonal_min + 1.0
+        ) / denominator
+        if adjusted_diagonal_min > 1e-12:
+            kinship[off_diagonal_mask] /= adjusted_diagonal_min
+
+    if n > 1:
+        off_diagonal_max = float(np.max(kinship[off_diagonal_mask]))
+        if off_diagonal_max > top:
+            kinship[off_diagonal_mask] *= top / off_diagonal_max
 
     return kinship
 

@@ -1,6 +1,6 @@
 # pyGAPIT — Genome Association and Prediction Integrated Tool (Python)
 
-**Compatibility target:** pyGAPIT currently targets R **GAPIT 3.5**, using the official [GAPIT3.5 release tag](https://github.com/jiabowang/GAPIT/tree/GAPIT3.5) by Jiabo Wang & Zhiwu Zhang as its upstream reference. That tag currently resolves to commit [`8d6651c`](https://github.com/jiabowang/GAPIT/tree/8d6651c719484c9f6c844144783dca1e4ef85b3e). This identifies the intended upstream baseline; exact numerical and interface parity has not yet been established. GAPIT v4 compatibility is not currently targeted.
+**Compatibility target:** pyGAPIT currently targets R **GAPIT 3.5**, using the official [GAPIT3.5](https://github.com/jiabowang/GAPIT/tree/GAPIT3.5) by Jiabo Wang & Zhiwu Zhang as its upstream reference. That tag currently resolves to commit [`8d6651c`](https://github.com/jiabowang/GAPIT/tree/8d6651c719484c9f6c844144783dca1e4ef85b3e). This identifies the intended upstream baseline; exact numerical and interface parity has not yet been established. GAPIT v4 compatibility is not currently targeted.
 
 It provides GAPIT-style inputs for the GWAS models **GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK**, together with **gBLUP, cBLUP, and sBLUP** genomic-selection functions. It is not a drop-in replacement for every R GAPIT parameter.
 
@@ -216,7 +216,7 @@ When `file_output=True` (default), pyGAPIT writes to `output_dir`:
 |------|---------|
 | `GAPIT.BLINK.EarHT.GWAS.Results.csv` | Full GWAS table: SNP, Chr, Pos, P.value, maf, effect, FDR |
 | `GAPIT.BLINK.EarHT.Prediction.csv` | BLUE, BLUP, PEV, GEBV per individual; written only when `buspred=True` and prediction succeeds |
-| `GAPIT.Kinship.csv` | VanRaden kinship matrix |
+| `GAPIT.Kinship.csv` | Selected or supplied kinship matrix |
 | `GAPIT.PCA.csv` | PC scores per individual |
 | `GAPIT.BLINK.EarHT.Manhattan.pdf` | Manhattan plot |
 | `GAPIT.BLINK.EarHT.QQ.pdf` | QQ plot with λ annotation |
@@ -248,11 +248,16 @@ The main supported GAPIT-style parameters are:
 | `h2` | `h2` | `None` | Heritability for simulation |
 | `NQTN` | `NQTN` | `None` | QTNs for simulation |
 | `buspred` | `buspred` | `False` | Run GS after GWAS |
+| `FDRcut` | `FDRcut` | `False` | Use BH FDR filtering for BLINK pseudo-QTNs |
+| `kinship.algorithm` | `kinship_algorithm` | `"VanRaden"` | `"VanRaden"` or `"Zhang"` |
+| `Z` | `Z` | `None` | Incidence matrix; combines with `KI` as `Z @ KI @ Z.T` |
+| — | `prediction_model` | `None` | Override prediction with `gBLUP`, `cBLUP`, or `sBLUP` |
+| `Multiple_analysis` | `Multiple_analysis` | `False` | Write combined Manhattan and QQ plots by trait |
 
-The compatibility parameters `Z`, `FDRcut=True`, `prediction_model`,
-`Multiple_analysis=True`, and non-`VanRaden` `kinship_algorithm` values are not
-implemented yet. Passing them raises `NotImplementedError` instead of silently
-ignoring the requested behavior.
+When `Z` is supplied, `KI` represents covariance among the random-effect
+levels (the columns of `Z`). An explicit `p_threshold` takes precedence over
+`FDRcut` during BLINK candidate selection. Multiple-analysis plots are written
+only when `file_output=True`.
 
 ---
 

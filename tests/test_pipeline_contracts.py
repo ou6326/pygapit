@@ -2,11 +2,16 @@
 
 from __future__ import annotations
 
+from pathlib import Path
+
 import numpy as np
 import pandas as pd
 import pytest
 
 from pygapit.gapit import GAPIT, ModelRunResult, _normalize_models, _select_traits
+from pygapit.gwas.blink import _candidate_mask
+from pygapit.stats.kinship import zhang_kinship
+from pygapit.stats.testing import benjamini_hochberg
 
 
 def _inputs(n: int = 12, invariant: bool = False) -> tuple[pd.DataFrame, ...]:
@@ -124,3 +129,115 @@ def test_multiple_traits_and_models_return_named_results() -> None:
 
     assert isinstance(result, dict)
     assert set(result) == {"height_GLM", "height_MLM", "yield_GLM", "yield_MLM"}
+
+
+def test_blink_fdr_cut_uses_bh_adjusted_p_values() -> None:
+    p_values = np.array([0.001, 0.01, 0.04, 0.5], dtype=np.float64)
+
+    mask = _candidate_mask(p_values, p_threshold=0.25, fdr_alpha=0.05)
+
+    np.testing.assert_array_equal(mask, benjamini_hochberg(p_values) <= 0.05)
+
+
+def test_zhang_kinship_is_exposed_through_gapit() -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.0,
+        kinship_algorithm="Zhang",
+        file_output=False,
+    )
+
+    assert not isinstance(result, dict)
+    expected = zhang_kinship(genotype.iloc[:, 1:].to_numpy(dtype=np.float64))
+    assert result.kinship is not None
+    np.testing.assert_allclose(result.kinship, expected)
+
+
+def test_incidence_matrix_expands_random_effect_kinship() -> None:
+    phenotype, genotype, marker_map = _inputs()
+    incidence = np.zeros((len(phenotype), 3))
+    incidence[np.arange(len(phenotype)), np.arange(len(phenotype)) % 3] = 1.0
+    random_kinship = np.array([[1.0, 0.2, 0.1], [0.2, 1.5, 0.3], [0.1, 0.3, 2.0]])
+
+    result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        KI=random_kinship,
+        Z=incidence,
+        model="GLM",
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.0,
+        file_output=False,
+    )
+
+    assert not isinstance(result, dict)
+    assert result.kinship is not None
+    np.testing.assert_allclose(result.kinship, incidence @ random_kinship @ incidence.T)
+
+
+def test_prediction_model_overrides_default_gs_path() -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        prediction_model="cBLUP",
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.0,
+        file_output=False,
+    )
+
+    assert not isinstance(result, dict)
+    assert result.Pred is not None
+    assert list(result.Pred["Taxa"]) == list(phenotype["Taxa"])
+
+
+def test_sblup_prediction_override_requires_selected_qtns() -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    with pytest.raises(ValueError, match="requires selected QTNs"):
+        GAPIT(
+            Y=phenotype,
+            GD=genotype,
+            GM=marker_map,
+            model="GLM",
+            prediction_model="sBLUP",
+            trait="height",
+            PCA_total=1,
+            maf_threshold=0.0,
+            file_output=False,
+        )
+
+
+def test_multiple_analysis_writes_combined_plots(tmp_path: Path) -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model=["GLM", "MLM"],
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.0,
+        Multiple_analysis=True,
+        file_output=True,
+        output_dir=tmp_path,
+    )
+
+    assert isinstance(result, dict)
+    for model_result in result.values():
+        assert len(model_result.multiple_output_files) == 2
+        assert all(path.exists() for path in model_result.multiple_output_files)

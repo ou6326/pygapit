@@ -805,20 +805,16 @@ class TestModelContracts:
 
         assert pygapit.__version__ == version("pygapit")
 
-    def test_unimplemented_compatibility_options_fail_explicitly(self) -> None:
-        """Accepted GAPIT-style options must never be ignored silently."""
+    def test_compatibility_options_reject_invalid_values(self) -> None:
+        """Implemented GAPIT-style options retain explicit value contracts."""
         from pygapit import GAPIT
 
-        with pytest.raises(NotImplementedError, match="Z incidence"):
+        with pytest.raises(ValueError, match="Z requires"):
             GAPIT(Z=np.eye(2))
-        with pytest.raises(NotImplementedError, match="FDR-based"):
-            GAPIT(FDRcut=True)
-        with pytest.raises(NotImplementedError, match="prediction_model"):
-            GAPIT(prediction_model="sBLUP")
-        with pytest.raises(NotImplementedError, match="Multiple_analysis"):
-            GAPIT(Multiple_analysis=True)
-        with pytest.raises(NotImplementedError, match="kinship_algorithm"):
-            GAPIT(kinship_algorithm="Zhang")
+        with pytest.raises(ValueError, match="prediction_model"):
+            GAPIT(prediction_model="ridge")
+        with pytest.raises(ValueError, match="kinship_algorithm"):
+            GAPIT(kinship_algorithm="IBS")
 
     def test_fdr_cut_requires_gapit_boolean_value(self) -> None:
         """R GAPIT defines FDRcut as a flag rather than a q-value threshold."""
@@ -852,6 +848,8 @@ class TestModelContracts:
                 bin_size=5_000_000,
                 maxLoop=1,
                 LD_threshold=0.7,
+                fdr_cut=False,
+                fdr_alpha=0.05,
             )
 
     def test_cli_rejects_unimplemented_top_level_sblup(self) -> None:

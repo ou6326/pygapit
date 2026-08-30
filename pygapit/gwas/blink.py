@@ -24,7 +24,8 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from .._typing import FloatMatrix, FloatVector, IntVector
+from .._typing import BoolVector, FloatMatrix, FloatVector, IntVector
+from ..stats.testing import benjamini_hochberg
 from .glm import glm_gwas, glm_scan_with_cofactors
 
 
@@ -162,6 +163,18 @@ def _bic_select_cofactors(
     return np.array(current_cofactors, dtype=int)
 
 
+def _candidate_mask(
+    p_values: FloatVector,
+    p_threshold: float,
+    fdr_alpha: float | None,
+) -> BoolVector:
+    """Select BLINK candidates using BH FDR or the fixed p-value cutoff."""
+    if fdr_alpha is not None:
+        return benjamini_hochberg(p_values) <= fdr_alpha
+    fixed_mask: BoolVector = (p_values <= p_threshold) & ~np.isnan(p_values)
+    return fixed_mask
+
+
 def blink_gwas(
     y: FloatVector,
     X0: FloatMatrix,
@@ -169,6 +182,7 @@ def blink_gwas(
     max_iterations: int = 10,
     ld_threshold: float = 0.7,
     p_threshold: float | None = None,
+    fdr_alpha: float | None = None,
     converge_threshold: float = 1.0,
 ) -> BLINKResult:
     """
@@ -184,6 +198,8 @@ def blink_gwas(
     ld_threshold   : absolute-correlation threshold for LD pruning (LD in R)
     p_threshold    : p-value threshold to pre-select candidates
                      (default: Bonferroni = 1/m)
+    fdr_alpha      : BH-adjusted cutoff for candidate selection. An explicit
+                     p_threshold takes precedence, matching GAPIT 3.5.
     converge_threshold : Jaccard similarity for convergence check
 
     Returns
@@ -192,6 +208,9 @@ def blink_gwas(
     """
     _n, m = GD.shape
 
+    if fdr_alpha is not None and not 0.0 < fdr_alpha <= 1.0:
+        raise ValueError("fdr_alpha must be between 0 and 1")
+    use_fdr = fdr_alpha is not None and p_threshold is None
     if p_threshold is None:
         p_threshold = 1.0 / m  # Bonferroni
 
@@ -208,7 +227,11 @@ def blink_gwas(
 
         # ── GLM-1: Select cofactors ───────────────────────────────────────
         # Step 1: get significant candidates from current p-values
-        sig_mask = (p_values <= p_threshold) & ~np.isnan(p_values)
+        sig_mask = _candidate_mask(
+            p_values,
+            p_threshold,
+            fdr_alpha if use_fdr else None,
+        )
         candidate_idx = np.where(sig_mask)[0]
 
         if len(candidate_idx) == 0:

@@ -9,7 +9,7 @@ import numpy.testing as nt
 import pytest
 from numpy.typing import NDArray
 
-from pygapit.stats.kinship import vanraden_kinship
+from pygapit.stats.kinship import vanraden_kinship, zhang_kinship
 from tests.cross_language.r_bridge import RBridge
 
 
@@ -37,4 +37,22 @@ def test_vanraden_kinship_matches_bundled_r_gapit(
     py_matrix = vanraden_kinship(genotypes)
 
     assert r_matrix.shape == py_matrix.shape == (genotypes.shape[0],) * 2
+    nt.assert_allclose(py_matrix, r_matrix, rtol=1e-12, atol=1e-12)
+
+
+def test_zhang_kinship_matches_bundled_r_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+    fixed_genotypes: NDArray[np.float64],
+) -> None:
+    """Compare the scaled Zhang relationship matrix with GAPIT 3.5."""
+    r_zhang = r_bridge.source_function(
+        r_root,
+        "GAPIT.kinship.Zhang.R",
+        "GAPIT.kinship.Zhang",
+    )
+    r_matrix = r_bridge.float_array(r_zhang(r_bridge.matrix(fixed_genotypes)))
+    py_matrix = zhang_kinship(fixed_genotypes)
+
+    assert r_matrix.shape == py_matrix.shape == (fixed_genotypes.shape[0],) * 2
     nt.assert_allclose(py_matrix, r_matrix, rtol=1e-12, atol=1e-12)

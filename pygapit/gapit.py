@@ -33,8 +33,10 @@ from ._typing import (
     LabelVector,
     Matrix,
     StrVector,
+    as_float_matrix,
     as_float_vector,
     as_str_vector,
+    require_square,
 )
 from .gs.blup import cblup, gblup, sblup
 from .gwas.blink import blink_gwas
@@ -52,7 +54,7 @@ from .io.formats import (
     read_numeric,
     read_phenotype,
 )
-from .stats.kinship import vanraden_kinship
+from .stats.kinship import vanraden_kinship, zhang_kinship
 from .stats.pca import PCAResult, build_covariate_matrix, compute_pca
 from .stats.testing import (
     benjamini_hochberg,
@@ -169,6 +171,7 @@ class GAPITResult:
     pca: PCAResult | None = None
     taxa: StrVector | None = None
     output_files: GAPITOutputFiles | None = None
+    multiple_output_files: tuple[Path, ...] = ()
 
     # Method used
     model: str = ""
@@ -247,13 +250,17 @@ def GAPIT(
     GAPITResult with GWAS table, significant SNPs, Pred table,
     h2, vg, ve, kinship, pca, QTNs
     """
-    _validate_compatibility_options(
-        Z=Z,
-        FDRcut=FDRcut,
-        prediction_model=prediction_model,
-        Multiple_analysis=Multiple_analysis,
-        kinship_algorithm=kinship_algorithm,
+    normalized_kinship_algorithm, normalized_prediction_model = (
+        _validate_compatibility_options(
+            Z=Z,
+            FDRcut=FDRcut,
+            prediction_model=prediction_model,
+            Multiple_analysis=Multiple_analysis,
+            kinship_algorithm=kinship_algorithm,
+        )
     )
+    if Z is not None and KI is None:
+        raise ValueError("Z requires a corresponding KI random-effect matrix")
     models = _normalize_models(model)
     _validate_analysis_options(
         PCA_total=PCA_total,
@@ -286,7 +293,12 @@ def GAPIT(
     traits_to_run = _select_traits(pheno.trait_names, trait)
 
     # Taxa alignment is independent of the selected trait and model.
-    ki_df = _ki_to_df(KI, pheno.taxa) if KI is not None else None
+    if Z is not None:
+        if KI is None:  # narrowed by the pre-load contract above
+            raise ValueError("Z requires a corresponding KI random-effect matrix")
+        ki_df = _incidence_kinship_to_df(Z, KI, pheno.taxa)
+    else:
+        ki_df = _ki_to_df(KI, pheno.taxa) if KI is not None else None
     cv_df = _cv_to_df(CV, pheno.taxa) if CV is not None else None
     aligned = align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df)
 
@@ -294,7 +306,13 @@ def GAPIT(
 
     for trait_name in traits_to_run:
         print(f"\n[pyGAPIT] ──── Trait: {trait_name} ────")
-        prepared = _prepare_trait(aligned, trait_name, PCA_total, maf_threshold)
+        prepared = _prepare_trait(
+            aligned,
+            trait_name,
+            PCA_total,
+            maf_threshold,
+            normalized_kinship_algorithm,
+        )
         if prepared is None:
             continue
 
@@ -317,6 +335,8 @@ def GAPIT(
                 bin_size=bin_size,
                 maxLoop=maxLoop,
                 LD_threshold=LD,
+                fdr_cut=FDRcut,
+                fdr_alpha=cutOff or 0.05,
             )
 
             elapsed = time.time() - t_model
@@ -327,10 +347,14 @@ def GAPIT(
                 model_name=model_name,
                 cut_off=cutOff,
                 buspred=buspred,
+                prediction_model=normalized_prediction_model,
                 file_output=file_output,
                 output_dir=output_dir,
                 started_at=t_start,
             )
+
+    if Multiple_analysis and file_output:
+        _attach_multiple_analysis_outputs(all_results, output_dir)
 
     if not all_results:
         raise ValueError(
@@ -352,28 +376,35 @@ def _validate_compatibility_options(
     *,
     Z: Matrix | None,
     FDRcut: object,
-    prediction_model: str | None,
-    Multiple_analysis: bool,
-    kinship_algorithm: str,
-) -> None:
-    """Reject accepted GAPIT-style options that are not implemented yet."""
-    unsupported: list[str] = []
-    if Z is not None:
-        unsupported.append("Z incidence matrices")
+    prediction_model: object,
+    Multiple_analysis: object,
+    kinship_algorithm: object,
+) -> tuple[str, str | None]:
+    """Validate and normalize GAPIT compatibility options."""
     if not isinstance(FDRcut, bool):
         raise TypeError("FDRcut must be a boolean, matching GAPIT 3.5")
-    if FDRcut is True:
-        unsupported.append("FDR-based BLINK pseudo-QTN filtering")
+    if not isinstance(Multiple_analysis, bool):
+        raise TypeError("Multiple_analysis must be a boolean")
+    if Z is not None:
+        as_float_matrix(Z, name="incidence matrix Z")
+
+    if not isinstance(kinship_algorithm, str):
+        raise TypeError("kinship_algorithm must be a string")
+    algorithm_key = kinship_algorithm.strip().casefold()
+    algorithms = {"vanraden": "VanRaden", "zhang": "Zhang"}
+    if algorithm_key not in algorithms:
+        raise ValueError("kinship_algorithm must be 'VanRaden' or 'Zhang'")
+
+    normalized_prediction = None
     if prediction_model is not None:
-        unsupported.append("prediction_model overrides")
-    if Multiple_analysis:
-        unsupported.append("Multiple_analysis plots")
-    if kinship_algorithm.casefold() != "vanraden":
-        unsupported.append(f"kinship_algorithm={kinship_algorithm!r}")
-    if unsupported:
-        raise NotImplementedError(
-            "Unsupported GAPIT option(s): " + ", ".join(unsupported)
-        )
+        if not isinstance(prediction_model, str) or not prediction_model.strip():
+            raise TypeError("prediction_model must be a non-empty string")
+        prediction_key = prediction_model.strip().upper()
+        if prediction_key not in {"GBLUP", "CBLUP", "SBLUP"}:
+            raise ValueError("prediction_model must be gBLUP, cBLUP, or sBLUP")
+        normalized_prediction = prediction_key
+
+    return algorithms[algorithm_key], normalized_prediction
 
 
 def _normalize_models(model: str | Sequence[object]) -> tuple[str, ...]:
@@ -576,6 +607,53 @@ def _ki_to_df(KI: pd.DataFrame | Matrix, taxa: StrVector) -> pd.DataFrame:
     return df
 
 
+def _incidence_kinship_to_df(
+    Z: Matrix,
+    KI: pd.DataFrame | Matrix,
+    taxa: StrVector,
+) -> pd.DataFrame:
+    """Expand a random-effect kinship matrix to observations via ``Z K Z'``."""
+    incidence = as_float_matrix(Z, name="incidence matrix Z")
+    if incidence.shape[0] != len(taxa):
+        raise ValueError(
+            "incidence matrix Z must have one row per phenotype taxon; "
+            f"expected {len(taxa)}, got {incidence.shape[0]}"
+        )
+    if incidence.shape[1] == 0 or not np.isfinite(incidence).all():
+        raise ValueError("incidence matrix Z must be finite and contain columns")
+    if np.any(np.sum(np.abs(incidence), axis=1) == 0):
+        raise ValueError("every row of incidence matrix Z must map to a random effect")
+
+    if isinstance(KI, pd.DataFrame):
+        values = KI
+        first_column: object | None = (
+            values.columns[0] if len(values.columns) > 0 else None
+        )
+        if isinstance(first_column, str) and first_column.casefold() in {
+            "taxa",
+            "taxon",
+        }:
+            values = values.iloc[:, 1:]
+        try:
+            random_kinship = as_float_matrix(values, name="KI random-effect matrix")
+        except ValueError as exc:
+            raise ValueError(
+                "KI random-effect matrix must contain numeric values"
+            ) from exc
+    else:
+        random_kinship = as_float_matrix(KI, name="KI random-effect matrix")
+
+    require_square(
+        random_kinship,
+        name="KI random-effect matrix",
+        size=incidence.shape[1],
+    )
+    effective_kinship = incidence @ random_kinship @ incidence.T
+    result = pd.DataFrame(effective_kinship, columns=taxa)
+    result.insert(0, "Taxa", taxa)
+    return result
+
+
 def _cv_to_df(CV: pd.DataFrame | Array, taxa: StrVector) -> pd.DataFrame:
     """Convert CV numpy array to DataFrame with taxa column."""
     if isinstance(CV, pd.DataFrame):
@@ -600,6 +678,7 @@ def _prepare_trait(
     trait_name: str,
     pca_total: int,
     maf_threshold: float,
+    kinship_algorithm: str,
 ) -> PreparedTrait | None:
     """Prepare the taxa, markers, kinship, PCA, and design for one trait."""
     y_column = np.asarray(aligned.phenotypes[trait_name], dtype=float)
@@ -632,8 +711,11 @@ def _prepare_trait(
         kinship = aligned.kinship[np.ix_(valid_indices, valid_indices)]
         print("[pyGAPIT] Using provided kinship matrix")
     else:
-        print("[pyGAPIT] Computing VanRaden kinship...")
-        kinship = vanraden_kinship(filtered_genotypes)
+        print(f"[pyGAPIT] Computing {kinship_algorithm} kinship...")
+        kinship_function = (
+            vanraden_kinship if kinship_algorithm == "VanRaden" else zhang_kinship
+        )
+        kinship = kinship_function(filtered_genotypes)
 
     print(f"[pyGAPIT] Computing PCA (k={pca_total})...")
     pca_result = compute_pca(filtered_genotypes, n_components=pca_total)
@@ -664,6 +746,7 @@ def _assemble_result(
     model_name: str,
     cut_off: float | None,
     buspred: bool,
+    prediction_model: str | None,
     file_output: bool,
     output_dir: str | Path,
     started_at: float,
@@ -693,7 +776,7 @@ def _assemble_result(
     )
 
     prediction = None
-    if buspred or model_name in ("GBLUP", "CBLUP"):
+    if buspred or prediction_model is not None or model_name in ("GBLUP", "CBLUP"):
         prediction = _run_gs_and_build_pred(
             y=prepared.y,
             X0=prepared.design,
@@ -702,6 +785,7 @@ def _assemble_result(
             taxa=prepared.taxa,
             model_name=model_name,
             qtn_indices=model_result.selected_qtns,
+            prediction_model=prediction_model,
         )
 
     output_files = None
@@ -750,6 +834,8 @@ def _run_model(
     bin_size: int,
     maxLoop: int,
     LD_threshold: float,
+    fdr_cut: bool,
+    fdr_alpha: float,
 ) -> ModelRunResult:
     """Dispatch to the correct GWAS/GS model."""
     m = GD.shape[1]
@@ -783,7 +869,8 @@ def _run_model(
             GD,
             max_iterations=maxLoop,
             ld_threshold=LD_threshold,
-            p_threshold=p_thresh,
+            p_threshold=None if fdr_cut and p_threshold is None else p_thresh,
+            fdr_alpha=fdr_alpha if fdr_cut and p_threshold is None else None,
         )
         return ModelRunResult(
             r.p_values, r.effects, r.se, selected_qtns=r.selected_qtns
@@ -872,11 +959,28 @@ def _run_gs_and_build_pred(
     taxa: StrVector,
     model_name: str,
     qtn_indices: IntVector | None = None,
+    prediction_model: str | None = None,
 ) -> pd.DataFrame | None:
     """Run genomic prediction and build prediction DataFrame."""
+    selected_model = prediction_model
+    if selected_model is None:
+        selected_model = (
+            "SBLUP"
+            if qtn_indices is not None
+            and len(qtn_indices) > 0
+            and model_name == "FARMCPU"
+            else "GBLUP"
+        )
+    if selected_model == "SBLUP" and (qtn_indices is None or len(qtn_indices) == 0):
+        raise ValueError(
+            "prediction_model='sBLUP' requires selected QTNs from the GWAS model"
+        )
+
     try:
-        if qtn_indices is not None and len(qtn_indices) > 0 and model_name == "FARMCPU":
+        if selected_model == "SBLUP" and qtn_indices is not None:
             gs_result = sblup(y, X0, GD, qtn_indices=qtn_indices, taxa=taxa)
+        elif selected_model == "CBLUP":
+            gs_result = cblup(y, X0, GD, taxa=taxa)
         else:
             gs_result = gblup(y, X0, K, taxa=taxa)
 
@@ -893,6 +997,90 @@ def _run_gs_and_build_pred(
     except (ValueError, TypeError, np.linalg.LinAlgError) as e:
         warnings.warn(f"GS prediction failed: {e}")
         return None
+
+
+def _attach_multiple_analysis_outputs(
+    results: dict[str, GAPITResult], output_dir: str | Path
+) -> None:
+    """Create GAPIT-style cross-model Manhattan and QQ plots per trait."""
+    import matplotlib.pyplot as plt
+
+    from .visualization.plots import _axes, _savefig
+
+    grouped: dict[str, list[GAPITResult]] = {}
+    for result in results.values():
+        if result.GWAS is not None and result.model not in {"GBLUP", "CBLUP"}:
+            grouped.setdefault(result.trait, []).append(result)
+
+    out = Path(output_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    for trait_name, trait_results in grouped.items():
+        if not trait_results:
+            continue
+        component = _safe_filename_component(trait_name)
+        manhattan_path = out / f"GAPIT.Multiple.Manhattan.{component}.pdf"
+        qq_path = out / f"GAPIT.Multiple.QQ.{component}.pdf"
+
+        fig_man, raw_ax_man = plt.subplots(figsize=(12, 5))
+        ax_man = _axes(raw_ax_man)
+        for result in trait_results:
+            gwas = result.GWAS
+            if gwas is None:
+                continue
+            p_values = np.clip(
+                np.asarray(gwas["P.value"], dtype=np.float64), 1e-300, 1.0
+            )
+            ax_man.scatter(
+                np.arange(len(gwas)),
+                -np.log10(p_values),
+                s=12,
+                alpha=0.65,
+                label=result.model,
+            )
+        ax_man.set_xlabel("Markers in genomic order")
+        ax_man.set_ylabel(r"$-\log_{10}(p)$")
+        ax_man.set_title(f"Multiple Manhattan: {trait_name}")
+        ax_man.legend()
+        fig_man.tight_layout()
+        _savefig(fig_man, manhattan_path, bbox_inches="tight")
+        plt.close(fig_man)
+
+        fig_qq, raw_ax_qq = plt.subplots(figsize=(6, 6))
+        ax_qq = _axes(raw_ax_qq)
+        qq_upper = 1.0
+        for result in trait_results:
+            gwas = result.GWAS
+            if gwas is None:
+                continue
+            observed = np.sort(
+                np.clip(np.asarray(gwas["P.value"], dtype=np.float64), 1e-300, 1.0)
+            )
+            expected = (np.arange(1, len(observed) + 1) - 0.5) / len(observed)
+            qq_upper = max(
+                qq_upper,
+                float(np.max(-np.log10(expected))),
+                float(np.max(-np.log10(observed))),
+            )
+            ax_qq.plot(
+                -np.log10(expected),
+                -np.log10(observed),
+                marker="o",
+                markersize=3,
+                linewidth=1,
+                label=result.model,
+            )
+        ax_qq.plot([0.0, qq_upper], [0.0, qq_upper], linestyle="--", color="grey")
+        ax_qq.set_xlabel(r"Expected $-\log_{10}(p)$")
+        ax_qq.set_ylabel(r"Observed $-\log_{10}(p)$")
+        ax_qq.set_title(f"Multiple QQ: {trait_name}")
+        ax_qq.legend()
+        fig_qq.tight_layout()
+        _savefig(fig_qq, qq_path, bbox_inches="tight")
+        plt.close(fig_qq)
+
+        paths = (manhattan_path, qq_path)
+        for result in trait_results:
+            result.multiple_output_files = paths
 
 
 def _save_outputs(
@@ -986,13 +1174,14 @@ def _save_outputs(
         plt.close(fig_k)
 
         # PCA 2D
-        fig_pca = pca_plot_2d(
-            scores=pca_result.scores,
-            var_explained=pca_result.var_explained,
-            title=f"PCA: {trait_name}",
-            save_path=str(pca_plot_path),
-        )
-        plt.close(fig_pca)
+        if pca_result.scores.shape[1] >= 2:
+            fig_pca = pca_plot_2d(
+                scores=pca_result.scores,
+                var_explained=pca_result.var_explained,
+                title=f"PCA: {trait_name}",
+                save_path=str(pca_plot_path),
+            )
+            plt.close(fig_pca)
 
     except (ValueError, TypeError, OSError, np.linalg.LinAlgError) as e:
         warnings.warn(f"Plot generation failed: {e}")
