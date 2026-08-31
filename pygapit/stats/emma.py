@@ -94,10 +94,7 @@ def _real_eigendecomposition(
 ) -> tuple[FloatVector, FloatMatrix]:
     """Match R's general ``eigen`` ordering for the native-incidence path."""
     values, vectors = np.linalg.eig(matrix)
-    if (
-        np.max(np.abs(values.imag), initial=0.0) > 1e-8
-        or np.max(np.abs(vectors.imag), initial=0.0) > 1e-8
-    ):
+    if np.max(np.abs(values.imag), initial=0.0) > 1e-8:
         raise np.linalg.LinAlgError("incidence eigendecomposition is not real")
     real_values = values.real
     real_vectors = vectors.real

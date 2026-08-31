@@ -8,7 +8,9 @@ import pytest
 
 from pygapit._typing import as_float_matrix, as_float_vector
 from pygapit.gwas.glm import GLMResult, glm_gwas
-from pygapit.stats.kinship import scale_kinship
+from pygapit.gwas.mlm import compress_kinship
+from pygapit.stats.emma import emma_remle
+from pygapit.stats.kinship import scale_kinship, vanraden_kinship
 
 
 def test_float_array_helpers_normalize_dtype_and_dimension() -> None:
@@ -64,3 +66,39 @@ def test_model_results_are_immutable() -> None:
 
     source[0] = 0.25
     assert result.p_values[0] == 1.0
+
+
+def test_emma_remle_accepts_redundant_incidence_with_real_spectrum() -> None:
+    fixed_genotypes = np.array(
+        [
+            [0, 1, 2, 0, 1, 2],
+            [1, 1, 2, 1, 0, 2],
+            [2, 0, 1, 2, 1, 1],
+            [0, 2, 0, 1, 2, 0],
+            [1, 0, 1, 2, 0, 1],
+            [2, 2, 2, 0, 2, 0],
+            [0, 1, 0, 2, 1, 2],
+            [1, 2, 1, 1, 2, 1],
+            [2, 0, 2, 0, 0, 2],
+            [0, 2, 1, 1, 1, 0],
+            [1, 0, 0, 2, 2, 1],
+            [2, 1, 2, 0, 0, 2],
+        ],
+        dtype=np.float64,
+    )
+    phenotype = np.array(
+        [2.1, 2.8, 3.7, 1.4, 2.5, 3.2, 1.8, 3.0, 3.4, 1.6, 2.3, 3.6],
+        dtype=np.float64,
+    )
+    full_kinship = vanraden_kinship(fixed_genotypes)
+    kinship, incidence = compress_kinship(full_kinship, 5)
+    covariate = np.linspace(-1.0, 1.0, len(phenotype), dtype=np.float64)
+    design = np.column_stack([np.ones(len(phenotype)), covariate])
+
+    redundant_incidence = np.column_stack([incidence, incidence[:, 0]])
+    expanded_kinship = np.zeros((6, 6), dtype=np.float64)
+    expanded_kinship[:5, :5] = kinship
+    expanded_kinship[5, 5] = np.mean(np.diag(kinship))
+
+    result = emma_remle(phenotype, design, expanded_kinship, Z=redundant_incidence)
+    assert np.isfinite(np.array([result.reml, result.delta, result.vg, result.ve])).all()
