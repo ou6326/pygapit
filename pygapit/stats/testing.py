@@ -45,7 +45,7 @@ def benjamini_hochberg(p_values: FloatVector, alpha: float = 0.05) -> FloatVecto
     return result
 
 
-def genomic_inflation_factor(p_values: FloatVector) -> float | np.float64:
+def genomic_inflation_factor(p_values: FloatVector) -> float:
     """
     Genomic inflation factor lambda.
     lambda = median(chi2_observed) / 0.4549
@@ -57,7 +57,7 @@ def genomic_inflation_factor(p_values: FloatVector) -> float | np.float64:
         return 1.0
     chi2_obs = t.cast(FloatVector, chi2.ppf(1.0 - valid, df=1))
     lam = np.median(chi2_obs) / 0.4549  # 0.4549 = median of chi2(1)
-    return lam
+    return lam.item()
 
 
 def get_significant_snps(

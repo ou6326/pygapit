@@ -21,7 +21,7 @@ import typing as t
 import warnings
 
 import numpy as np
-from scipy import optimize
+from scipy import optimize, stats
 
 from .._typing import (
     FloatMatrix,
@@ -220,7 +220,7 @@ def GBLUP(
         predictions[test] = K_pt @ Vinv_t @ (yt - mu_t) + mu_t
 
     valid = ~np.isnan(y)
-    acc = np.corrcoef(y[valid], predictions[valid])[0, 1]
+    acc = stats.pearsonr(y[valid], predictions[valid]).statistic.item()
     print(f"[PyGAPIT]  G-BLUP CV accuracy (r): {acc:.4f}")
     return gebv, acc
 
@@ -327,13 +327,14 @@ def _sample_var(residuals: FloatVector, n: int, a: float = 4, b: float = 1) -> f
     if n < 2:
         return b / a
     shape = (a + n) / 2
-    scale = (a * b + np.sum(residuals**2)) / 2
+    sum_squares = np.sum(residuals**2).item()
+    scale = (a * b + sum_squares) / 2
     return scale / np.random.gamma(shape)
 
 
 def _cross_validate_rrblup(
     y: FloatVector, Z: FloatMatrix, lambda_: float, n_folds: int
-) -> np.float64:
+) -> float:
     n, m = Z.shape
     fold_size = n // n_folds
     preds = np.zeros(n)
@@ -345,4 +346,4 @@ def _cross_validate_rrblup(
         A = Zt.T @ Zt + lambda_ * np.eye(m)
         u = np.linalg.solve(A, Zt.T @ yt)
         preds[test] = Z[test] @ u
-    return t.cast(np.float64, np.corrcoef(y, preds)[0, 1])
+    return stats.pearsonr(y, preds).statistic.item()

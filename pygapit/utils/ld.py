@@ -27,8 +27,8 @@ def _safe_r2(a: FloatVector, b: FloatVector) -> float:
         return np.nan
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
-        r = np.asarray(stats.pearsonr(a, b)[0], dtype=float).item()
-    return np.clip(r**2, 0.0, 1.0)  # clip floating-point noise
+        r = stats.pearsonr(a, b).statistic
+    return np.clip(r**2, 0.0, 1.0).item()  # clip floating-point noise
 
 
 def LD_matrix(genotype: Matrix, max_snps: int = 500) -> FloatMatrix:
