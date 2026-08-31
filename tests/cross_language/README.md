@@ -28,6 +28,8 @@ The suite is divided by function so a failure identifies the affected layer dire
   supplied kinship, shuffled labels, and missing phenotype observations
 - `test_cmlm.py`: public CMLM orchestration with fixed compression, native
   incidence-matrix REML/EMMAX statistics, and automatic group selection
+- `test_cmlm_boundaries.py`: redundant incidence levels, near-collinear fixed
+  effects, and singular-design behavior in native-incidence REML
 - `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding
   values, prediction-error variances, and phenotype predictions
 
@@ -59,3 +61,7 @@ silently changes a CMLM group count that cannot support the fixed-effect design
 to one and effectively switches to a GLM path. pyGAPIT excludes such counts
 from a wider search and raises when the entire requested range is invalid,
 rather than returning results from a different model without notice.
+GAPIT also returns an all-zero REML sentinel for a singular fixed-effect
+design; pyGAPIT raises `ValueError` because those values do not describe a
+fitted model. Redundant or empty incidence levels remain accepted when their
+marginal model is numerically defined and matches GAPIT.

@@ -124,7 +124,8 @@ def _eigen_R_w_Z(
             "incidence matrix must have more columns than the fixed-effect design"
         )
 
-    residualized_Z = Z - X @ np.linalg.solve(X.T @ X, X.T @ Z)
+    projection_coefficients, *_ = np.linalg.lstsq(X, Z, rcond=None)
+    residualized_Z = Z - X @ projection_coefficients
     values, vectors = _real_eigendecomposition(K @ (Z.T @ residualized_Z))
     fixed_basis, _ = np.linalg.qr(X, mode="reduced")
     combined = np.column_stack([residualized_Z @ vectors[:, :random_rank], fixed_basis])
@@ -249,9 +250,8 @@ def emma_remle(
                 "incidence matrix must have more columns than the fixed-effect design"
             )
 
-    # Check singularity
-    if np.linalg.matrix_rank(X.T @ X) < q:
-        return EMMAResult(reml=0.0, delta=1.0, ve=0.0, vg=0.0, h2=0.0)
+    if np.linalg.matrix_rank(X) < q:
+        raise ValueError("design matrix must have linearly independent columns")
 
     # Spectral decomposition
     if incidence is None:
