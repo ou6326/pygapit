@@ -20,6 +20,41 @@ will use descriptive `snake_case` names, explicit option semantics, and typed
 result objects. Legacy spellings will be deprecated gradually rather than
 removed without a transition period.
 
+### Compatibility evidence
+
+The table below reports tested behavior, not an estimate of feature
+completeness. **R-validated** means that an automated cross-language test
+compares pyGAPIT with the pinned GAPIT 3.5 source. **Python-only** means that
+the interface has ordinary regression tests but does not yet have a direct R
+comparison. **Not yet** identifies an evidence gap rather than a known model
+failure.
+
+| Model | Public interface | GAPIT 3.5 numerical evidence | Official maize regression | Current boundary coverage |
+|---|---|---|---|---|
+| GLM | `GAPIT(model="GLM")` | R-validated top-level workflow | Full MAF-filtered marker set | PCA, covariates, supplied kinship alignment, shuffled labels, and missing phenotypes |
+| MLM | `GAPIT(model="MLM")` | R-validated top-level workflow and EMMA/P3D statistics | Full MAF-filtered marker set | Variance components, monomorphic markers, missing genotypes, and data alignment |
+| CMLM | `GAPIT(model="CMLM")` | R-validated top-level workflow | Not yet | Fixed and automatic compression, native incidence matrices, redundant levels, near-collinear covariates, and invalid designs |
+| MLMM | `GAPIT(model="MLMM")` | R-validated top-level workflow | Not yet | Forward/backward selection, final marker statistics, corrected extended BIC, and indefinite-kinship rejection |
+| FarmCPU | `GAPIT(model="FarmCPU")` | R-validated complete iterative workflow | Not yet | Static-bin selection, pseudo-QTNs, final p-values, and effects |
+| BLINK | `GAPIT(model="BLINK")` | R-validated complete iterative workflow | Not yet | FDR candidates, LD pruning, prefix BIC, zero/one/multiple-QTN paths, and invalid-statistic normalization |
+| gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Not yet | BLUE, BLUP, PEV, predictions, and variance components |
+| cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | Python-only | Not yet | Compressed-kinship prediction and top-level result contracts |
+| sBLUP | `sblup()` or a GWAS prediction override | Python-only | Not yet | Explicit pseudo-QTN validation; standalone top-level `model="sBLUP"` and GAPIT SUPER-based QTN selection are not implemented |
+
+The official-data column currently refers to GAPIT's bundled maize diversity
+panel and the `EarHT` trait. GLM and MLM comparisons cover every marker retained
+by the shared MAF filter; other rows must not be interpreted as official-data
+parity until a corresponding regression is added.
+
+Intentional divergences are tested rather than hidden. They include replacing
+GAPIT's invalid BLINK `NaN`/infinite statistics with documented valid outputs,
+rejecting CMLM requests that silently change the model or return a singular-fit
+sentinel, correcting MLMM's extended-BIC marker penalty, and rejecting
+materially indefinite supplied kinship matrices. The detailed test inventory
+and divergence rationale are maintained in
+[`tests/cross_language/README.md`](tests/cross_language/README.md); the required
+R-backed suite runs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
 ---
 
 ## Installation
