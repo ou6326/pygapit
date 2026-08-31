@@ -7,15 +7,101 @@ from pathlib import Path
 import numpy as np
 import numpy.testing as nt
 import pandas as pd
+import pytest
 from numpy.typing import NDArray
 
 from pygapit.gapit import GAPIT
+from pygapit.gwas.mlmm import _ext_bic, _normalize_kinship
 from tests.cross_language.r_bridge import RBridge
 from tests.cross_language.workflow import (
     assert_top_level_preparation,
     make_workflow_inputs,
     r_design_with_pca,
 )
+
+
+def test_corrected_ext_bic_excludes_covariates_from_marker_penalty(
+    r_bridge: RBridge,
+) -> None:
+    """Lock the intentional model-choice divergence from GAPIT's penalty bug."""
+    n = 100
+    marker_count = 1_000
+    baseline_fixed_effect_count = 5
+    log_likelihoods = np.array([-100.0, -91.6])
+    selected_marker_counts = np.array([0, 1], dtype=np.int64)
+    fixed_effect_counts = baseline_fixed_effect_count + selected_marker_counts
+
+    r_ext_bic = r_bridge.function(
+        "function(log_lik, nfixed, n, m) {"
+        " -2 * log_lik + (nfixed + 1) * log(n) +"
+        " 2 * lchoose(m, nfixed - 1)"
+        "}"
+    )
+    r_scores = r_bridge.float_array(
+        r_ext_bic(
+            r_bridge.float_vector(log_likelihoods),
+            r_bridge.float_vector(fixed_effect_counts.astype(np.float64)),
+            n,
+            marker_count,
+        )
+    )
+    py_scores = np.asarray(
+        [
+            _ext_bic(
+                log_likelihood,
+                n,
+                int(n_fixed),
+                marker_count,
+                int(n_selected),
+            )
+            for log_likelihood, n_fixed, n_selected in zip(
+                log_likelihoods,
+                fixed_effect_counts,
+                selected_marker_counts,
+                strict=True,
+            )
+        ]
+    )
+
+    assert int(np.argmin(r_scores)) == 1
+    assert int(np.argmin(py_scores)) == 0
+
+
+def test_indefinite_kinship_characterization(
+    r_bridge: RBridge,
+    r_root: Path,
+) -> None:
+    """Reject an indefinite K that makes GAPIT return an invalid likelihood."""
+    r_bridge.source(r_root, "GAPIT.emma.R")
+    r_fit = r_bridge.function(
+        "function(y, X, K) {"
+        " fit <- tryCatch(emma.MLE(y, X, K), error=function(e) e);"
+        " if (inherits(fit, 'error'))"
+        "   return(list(ok=FALSE, value=conditionMessage(fit)));"
+        " list(ok=TRUE, value=fit$ML)"
+        "}"
+    )
+    sample_count = 6
+    kinship = np.diag([1.0, 1.0, 1.0, 1.0, 1.0, -0.25])
+    result = r_fit(
+        r_bridge.float_vector(np.array([0.2, 1.1, -0.4, 0.8, -1.2, 0.5])),
+        r_bridge.matrix(np.ones((sample_count, 1))),
+        r_bridge.matrix(kinship),
+    )
+    r_likelihood = r_bridge.float_array(r_bridge.component(result, "value"))[0]
+
+    assert np.isneginf(r_likelihood)
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        _normalize_kinship(kinship)
+
+    rounding_noise = kinship.copy()
+    rounding_noise[-1, -1] = -1e-10
+    assert np.isfinite(_normalize_kinship(rounding_noise)).all()
+
+    asymmetric = np.eye(sample_count)
+    asymmetric[0, 1] = 0.1
+    with pytest.raises(ValueError, match="symmetric"):
+        _normalize_kinship(asymmetric)
 
 
 def test_top_level_mlmm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(

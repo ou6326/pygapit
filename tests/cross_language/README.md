@@ -74,4 +74,7 @@ cofactors, preserving the intended statistical meaning when user covariates
 or principal components are present. The public MLMM result is the extended
 BIC model, so the generic `p_threshold` option does not truncate its forward
 path; GAPIT's similarly named `thresh` selects a separate report rather than
-controlling forward selection.
+controlling forward selection. GAPIT's ML likelihood can also return `-Inf`
+with `NaN` warnings for a supplied indefinite kinship matrix; pyGAPIT rejects
+such a matrix explicitly while tolerating insignificant floating-point
+eigenvalue noise.

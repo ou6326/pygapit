@@ -52,12 +52,19 @@ class MLMMResult:
 
 def _normalize_kinship(K: FloatMatrix) -> FloatMatrix:
     """Apply the GAPIT MLMM kinship scaling without changing its structure."""
+    if not np.allclose(K, K.T, rtol=1e-10, atol=1e-12):
+        raise ValueError("MLMM kinship matrix must be symmetric")
+    eigenvalues = np.linalg.eigvalsh(K)
+    psd_tolerance = 1e-8 * max(np.max(np.abs(eigenvalues)), 1.0)
+    if np.min(eigenvalues) < -psd_tolerance:
+        raise ValueError("MLMM kinship matrix must be positive semidefinite")
     n = K.shape[0]
     centering = np.eye(n) - np.full((n, n), 1.0 / n)
     scale = np.sum(centering * K)
     if not np.isfinite(scale) or scale <= 0.0:
         raise ValueError("MLMM kinship matrix must have positive centered variation")
-    return t.cast(FloatMatrix, (n - 1) * K / scale)
+    normalized = (n - 1) * K / scale
+    return t.cast(FloatMatrix, (normalized + normalized.T) / 2.0)
 
 
 def _profile_ml_log_likelihood(
