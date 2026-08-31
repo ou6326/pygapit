@@ -126,9 +126,15 @@ def _eigen_R_w_Z(
 
     projection_coefficients, *_ = np.linalg.lstsq(X, Z, rcond=None)
     residualized_Z = Z - X @ projection_coefficients
-    values, vectors = _real_eigendecomposition(K @ (Z.T @ residualized_Z))
+    # AB and BA share their nonzero eigenvalues; use the symmetric
+    # observation-space form to avoid platform-dependent complex eigenvectors.
+    residual_covariance = residualized_Z @ K @ residualized_Z.T
+    residual_covariance = (residual_covariance + residual_covariance.T) / 2.0
+    values, random_basis = np.linalg.eigh(residual_covariance)
+    values = values[::-1]
+    random_basis = random_basis[:, ::-1]
     fixed_basis, _ = np.linalg.qr(X, mode="reduced")
-    combined = np.column_stack([residualized_Z @ vectors[:, :random_rank], fixed_basis])
+    combined = np.column_stack([random_basis[:, :random_rank], fixed_basis])
     basis, _ = np.linalg.qr(combined, mode="complete")
     selected = [*range(random_rank), *range(t_random, n)]
     return values[:random_rank], basis[:, selected]
