@@ -510,17 +510,40 @@ class TestMLM:
         genotypes = small_dataset["GD"]
         design = build_covariate_matrix(compute_pca(genotypes, 3), 3)
         kinship = vanraden_kinship(genotypes)
-        compressed, incidence = compress_kinship(kinship, 4)
-        effective = incidence @ compressed @ incidence.T
-        effective += np.eye(len(y)) * 1e-6
+        compressed, incidence = compress_kinship(kinship, 5)
 
-        actual = cmlm_gwas(y, design, genotypes, kinship, group_from=4, group_to=4)
-        expected = emmax_p3d(y, design, genotypes, effective)
+        actual = cmlm_gwas(y, design, genotypes, kinship, group_from=5, group_to=5)
+        expected = emmax_p3d(y, design, genotypes, compressed, Z=incidence)
 
-        assert actual.method == "CMLM(g=4)"
+        assert actual.method == "CMLM(g=5)"
         np.testing.assert_allclose(actual.p_values, expected.p_values)
         np.testing.assert_allclose(actual.effects, expected.effects)
         np.testing.assert_allclose(actual.se, expected.se)
+
+    def test_cmlm_rejects_groups_insufficient_for_fixed_effects(
+        self, small_dataset: SmallDataset
+    ) -> None:
+        """CMLM must not silently replace an invalid fit with another model."""
+        from pygapit.gwas.mlm import cmlm_gwas
+        from pygapit.stats.kinship import vanraden_kinship
+        from pygapit.stats.pca import build_covariate_matrix, compute_pca
+
+        y = small_dataset["y"]
+        genotypes = small_dataset["GD"]
+        design = build_covariate_matrix(compute_pca(genotypes, 3), 3)
+        kinship = vanraden_kinship(genotypes)
+
+        with pytest.raises(
+            ValueError, match="greater than the number of fixed effects"
+        ):
+            cmlm_gwas(
+                y,
+                design,
+                genotypes,
+                kinship,
+                group_from=4,
+                group_to=4,
+            )
 
 
 # ─────────────────────────────────────────────────────────────────────────────

@@ -4,6 +4,22 @@
 
 It provides GAPIT-style inputs for the GWAS models **GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK**, together with **gBLUP, cBLUP, and sBLUP** genomic-selection functions. It is not a drop-in replacement for every R GAPIT parameter.
 
+### Compatibility policy
+
+GAPIT 3.5 is a pinned behavioral reference, not a requirement to reproduce
+every historical implementation detail. pyGAPIT follows its numerical results
+when the upstream behavior is statistically valid and well defined. A safer
+Python behavior is used when GAPIT produces invalid statistics, silently
+changes the requested model, discards data labels, or relies on an obsolete
+runtime convention. Each such intentional divergence must be documented and
+covered by a characterization or regression test.
+
+The `GAPIT()` entry point currently retains several R-derived parameter names
+for migration compatibility. New public interfaces and replacement parameters
+will use descriptive `snake_case` names, explicit option semantics, and typed
+result objects. Legacy spellings will be deprecated gradually rather than
+removed without a transition period.
+
 ---
 
 ## Installation

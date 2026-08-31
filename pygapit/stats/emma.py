@@ -89,9 +89,51 @@ def _eigen_L_wo_Z(K: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
     return eigvals[::-1], eigvecs[:, ::-1]
 
 
-def _reml_ll(
-    log_delta: float, lambda_R: FloatVector, etas: FloatVector
-) -> np.float64:
+def _real_eigendecomposition(
+    matrix: FloatMatrix,
+) -> tuple[FloatVector, FloatMatrix]:
+    """Match R's general ``eigen`` ordering for the native-incidence path."""
+    values, vectors = np.linalg.eig(matrix)
+    if (
+        np.max(np.abs(values.imag), initial=0.0) > 1e-8
+        or np.max(np.abs(vectors.imag), initial=0.0) > 1e-8
+    ):
+        raise np.linalg.LinAlgError("incidence eigendecomposition is not real")
+    real_values = values.real
+    real_vectors = vectors.real
+    order = np.argsort(np.abs(real_values))[::-1]
+    return real_values[order], real_vectors[:, order]
+
+
+def _eigen_L_w_Z(Z: FloatMatrix, K: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
+    """Translate GAPIT's ``emma.eigen.L.w.Z`` decomposition."""
+    values, vectors = _real_eigendecomposition(K @ (Z.T @ Z))
+    basis, _ = np.linalg.qr(Z @ vectors, mode="complete")
+    return values, basis
+
+
+def _eigen_R_w_Z(
+    Z: FloatMatrix, K: FloatMatrix, X: FloatMatrix
+) -> tuple[FloatVector, FloatMatrix]:
+    """Translate GAPIT's ``emma.eigen.R.w.Z`` decomposition."""
+    n, t_random = Z.shape
+    q_fixed = X.shape[1]
+    random_rank = t_random - q_fixed
+    if random_rank <= 0:
+        raise ValueError(
+            "incidence matrix must have more columns than the fixed-effect design"
+        )
+
+    residualized_Z = Z - X @ np.linalg.solve(X.T @ X, X.T @ Z)
+    values, vectors = _real_eigendecomposition(K @ (Z.T @ residualized_Z))
+    fixed_basis, _ = np.linalg.qr(X, mode="reduced")
+    combined = np.column_stack([residualized_Z @ vectors[:, :random_rank], fixed_basis])
+    basis, _ = np.linalg.qr(combined, mode="complete")
+    selected = [*range(random_rank), *range(t_random, n)]
+    return values[:random_rank], basis[:, selected]
+
+
+def _reml_ll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> np.float64:
     """
     REML log-likelihood as a function of log(delta).
     Equation from Kang et al. (2008) Genetics.
@@ -100,16 +142,12 @@ def _reml_ll(
     delta = t.cast(np.float64, np.exp(log_delta))
     denom = lambda_R + delta
     sse = np.sum(etas**2 / denom)
-    log_scale = t.cast(
-        np.float64, np.log(nq / (2 * np.pi)) - 1.0 - np.log(sse)
-    )
+    log_scale = t.cast(np.float64, np.log(nq / (2 * np.pi)) - 1.0 - np.log(sse))
     log_denom = t.cast(np.float64, np.sum(np.log(denom)))
     return np.float64(0.5) * (nq * log_scale - log_denom)
 
 
-def _reml_dll(
-    log_delta: float, lambda_R: FloatVector, etas: FloatVector
-) -> np.float64:
+def _reml_dll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> np.float64:
     """Derivative of REML log-likelihood w.r.t. log(delta)."""
     nq = len(etas)
     delta = t.cast(np.float64, np.exp(log_delta))
@@ -118,9 +156,46 @@ def _reml_dll(
     weighted_sq = np.sum(etasq / denom**2)
     weighted = np.sum(etasq / denom)
     inv_sum = np.sum(1.0 / denom)
-    return np.float64(0.5) * delta * (
-        nq * weighted_sq / weighted - inv_sum
+    return np.float64(0.5) * delta * (nq * weighted_sq / weighted - inv_sum)
+
+
+def _reml_ll_w_Z(
+    log_delta: float,
+    lambda_R: FloatVector,
+    etas: FloatVector,
+    residual_rank: int,
+) -> np.float64:
+    """REML log-likelihood for GAPIT's native incidence-matrix path."""
+    delta = t.cast(np.float64, np.exp(log_delta))
+    etas1 = etas[: len(lambda_R)]
+    etas2_sq = np.sum(etas[len(lambda_R) :] ** 2)
+    nq = len(etas)
+    denom = lambda_R + delta
+    sse = np.sum(etas1**2 / denom) + etas2_sq / delta
+    log_scale = t.cast(np.float64, np.log(nq / (2 * np.pi)) - 1.0 - np.log(sse))
+    log_denom = t.cast(
+        np.float64,
+        np.sum(np.log(denom)) + residual_rank * np.log(delta),
     )
+    return np.float64(0.5) * (nq * log_scale - log_denom)
+
+
+def _reml_dll_w_Z(
+    log_delta: float,
+    lambda_R: FloatVector,
+    etas: FloatVector,
+    residual_rank: int,
+) -> np.float64:
+    """Derivative of native-incidence REML with respect to log(delta)."""
+    delta = t.cast(np.float64, np.exp(log_delta))
+    etas1_sq = etas[: len(lambda_R)] ** 2
+    etas2_sq = np.sum(etas[len(lambda_R) :] ** 2)
+    nq = len(etas)
+    denom = lambda_R + delta
+    weighted_sq = np.sum(etas1_sq / denom**2) + etas2_sq / delta**2
+    weighted = np.sum(etas1_sq / denom) + etas2_sq / delta
+    inverse_sum = np.sum(1.0 / denom) + residual_rank / delta
+    return np.float64(0.5) * delta * (nq * weighted_sq / weighted - inverse_sum)
 
 
 def emma_remle(
@@ -131,6 +206,7 @@ def emma_remle(
     llim: float = -10.0,
     ulim: float = 10.0,
     esp: float = 1e-10,
+    Z: FloatMatrix | None = None,
 ) -> EMMAResult:
     """
     REML variance component estimation via EMMA algorithm.
@@ -140,10 +216,11 @@ def emma_remle(
     ----------
     y : (n,) observed phenotype
     X : (n, q) fixed-effects design matrix (intercept + covariates)
-    K : (n, n) genomic kinship matrix
+    K : genomic kinship matrix; (n, n) without Z or (t, t) with Z
     ngrids : number of grid points for initial search
     llim, ulim : log-delta search bounds
     esp : convergence tolerance
+    Z : optional (n, t) incidence matrix for random effects
 
     Returns
     -------
@@ -154,25 +231,51 @@ def emma_remle(
     K = as_float_matrix(K, name="kinship matrix")
     n = len(y)
     require_row_count(X, n, name="design matrix")
-    require_square(K, name="kinship matrix", size=n)
     q = X.shape[1]
     if q == 0:
         raise ValueError("design matrix must contain at least one column")
     if n <= q:
         raise ValueError("REML requires more observations than fixed effects")
 
+    incidence: FloatMatrix | None = None
+    if Z is None:
+        require_square(K, name="kinship matrix", size=n)
+    else:
+        incidence = as_float_matrix(Z, name="incidence matrix")
+        require_row_count(incidence, n, name="incidence matrix")
+        require_square(K, name="kinship matrix", size=incidence.shape[1])
+        if incidence.shape[1] <= q:
+            raise ValueError(
+                "incidence matrix must have more columns than the fixed-effect design"
+            )
+
     # Check singularity
     if np.linalg.matrix_rank(X.T @ X) < q:
         return EMMAResult(reml=0.0, delta=1.0, ve=0.0, vg=0.0, h2=0.0)
 
     # Spectral decomposition
-    lambda_R, U_R = _eigen_R_wo_Z(K, X)
+    if incidence is None:
+        lambda_R, U_R = _eigen_R_wo_Z(K, X)
+        residual_rank = 0
+    else:
+        lambda_R, U_R = _eigen_R_w_Z(incidence, K, X)
+        residual_rank = n - incidence.shape[1]
     # Rotate phenotype into eigenbasis
     etas = U_R.T @ y  # (n-q,) rotated residuals
 
+    def ll_at(log_delta: float) -> np.float64:
+        if incidence is None:
+            return _reml_ll(log_delta, lambda_R, etas)
+        return _reml_ll_w_Z(log_delta, lambda_R, etas, residual_rank)
+
+    def dll_at(log_delta: float) -> np.float64:
+        if incidence is None:
+            return _reml_dll(log_delta, lambda_R, etas)
+        return _reml_dll_w_Z(log_delta, lambda_R, etas, residual_rank)
+
     # Grid search over log(delta)
     log_deltas = np.linspace(llim, ulim, ngrids + 1)
-    dlls = np.array([_reml_dll(ld, lambda_R, etas) for ld in log_deltas])
+    dlls = np.array([dll_at(ld) for ld in log_deltas])
 
     opt_log_deltas: list[float] = []
     opt_lls: list[float] = []
@@ -180,33 +283,32 @@ def emma_remle(
     # Boundary cases
     if dlls[0] < esp:
         opt_log_deltas.append(llim)
-        opt_lls.append(_reml_ll(llim, lambda_R, etas))
+        opt_lls.append(ll_at(llim))
     if dlls[-2] > -esp:
         opt_log_deltas.append(ulim)
-        opt_lls.append(_reml_ll(ulim, lambda_R, etas))
+        opt_lls.append(ll_at(ulim))
 
     # Find sign changes (local maxima of LL)
     for i in range(len(log_deltas) - 1):
         if dlls[i] * dlls[i + 1] < 0 and dlls[i] > 0 and dlls[i + 1] < 0:
             try:
                 root = brentq(
-                    _reml_dll,
+                    dll_at,
                     log_deltas[i],
                     log_deltas[i + 1],
-                    args=(lambda_R, etas),
                     xtol=esp,
                     full_output=False,
                 )
                 opt_log_deltas.append(root)
-                opt_lls.append(_reml_ll(root, lambda_R, etas))
+                opt_lls.append(ll_at(root))
             except (ValueError, RuntimeError, FloatingPointError):
                 root = None
 
     if not opt_log_deltas:
         # Fallback: take grid maximum
-        best_idx = np.argmax([_reml_ll(ld, lambda_R, etas) for ld in log_deltas])
+        best_idx = np.argmax([ll_at(ld) for ld in log_deltas])
         opt_log_deltas = [log_deltas[best_idx]]
-        opt_lls = [_reml_ll(log_deltas[best_idx], lambda_R, etas)]
+        opt_lls = [ll_at(log_deltas[best_idx])]
 
     best_idx = int(np.argmax(opt_lls))
     best_delta = t.cast(np.float64, np.exp(opt_log_deltas[best_idx]))
@@ -215,7 +317,12 @@ def emma_remle(
     # Recover variance components
     nq = n - q
     denom = lambda_R + best_delta
-    sse = np.sum(etas**2 / denom)
+    if incidence is None:
+        sse = np.sum(etas**2 / denom)
+    else:
+        etas1 = etas[: len(lambda_R)]
+        etas2_sq = np.sum(etas[len(lambda_R) :] ** 2)
+        sse = np.sum(etas1**2 / denom) + etas2_sq / best_delta
     vg = sse / nq
     ve = vg * best_delta
     h2 = vg / (vg + ve) if (vg + ve) > 0 else 0.0
@@ -232,6 +339,7 @@ def emmax_p3d(
     llim: float = -10.0,
     ulim: float = 10.0,
     snp_impute: str = "middle",
+    Z: FloatMatrix | None = None,
 ) -> GWASResult:
     """
     EMMAxP3D: genome-wide association using EMMA with P3D approximation.
@@ -246,8 +354,9 @@ def emmax_p3d(
     y  : (n,) phenotype
     X0 : (n, q) covariate matrix (intercept + PCs)
     GD : (n, m) genotype matrix, 0/1/2 coded
-    K  : (n, n) kinship matrix
+    K  : kinship matrix; (n, n) without Z or (t, t) with Z
     snp_impute : missing-genotype policy; GAPIT defaults to ``"middle"``
+    Z  : optional (n, t) incidence matrix for random effects
 
     Returns
     -------
@@ -260,13 +369,19 @@ def emmax_p3d(
     n = len(y)
     require_row_count(X0, n, name="covariate matrix")
     require_row_count(GD, n, name="genotype matrix")
-    require_square(K, name="kinship matrix", size=n)
+    incidence: FloatMatrix | None = None
+    if Z is None:
+        require_square(K, name="kinship matrix", size=n)
+    else:
+        incidence = as_float_matrix(Z, name="incidence matrix")
+        require_row_count(incidence, n, name="incidence matrix")
+        require_square(K, name="kinship matrix", size=incidence.shape[1])
     GD = impute_missing(GD, method=snp_impute)
     n, m = GD.shape
     q0 = X0.shape[1]
 
     # ── Step 1: Estimate delta from null model (P3D) ──────────────────────
-    remle = emma_remle(y, X0, K, ngrids=ngrids, llim=llim, ulim=ulim)
+    remle = emma_remle(y, X0, K, ngrids=ngrids, llim=llim, ulim=ulim, Z=incidence)
     delta = remle.delta
     vg = remle.vg
     ve = remle.ve
@@ -274,11 +389,18 @@ def emmax_p3d(
 
     # ── Step 2: Build transformed system ─────────────────────────────────
     # Eigendecompose kinship: K = U * diag(lambda) * U'
-    lambda_L, U_L = _eigen_L_wo_Z(K)
+    if incidence is None:
+        lambda_L, U_L = _eigen_L_wo_Z(K)
+    else:
+        lambda_L, U_L = _eigen_L_w_Z(incidence, K)
     lambda_L = np.maximum(lambda_L, 0)  # numerical stability
 
     # Rotation matrix: U * diag(1/sqrt(lambda + delta))
     scale = 1.0 / np.sqrt(lambda_L + delta)
+    if incidence is not None:
+        scale = np.concatenate(
+            [scale, np.full(n - incidence.shape[1], 1.0 / np.sqrt(delta))]
+        )
     transformed_basis = U_L * scale
     # Apply transformation: yt = scale * U' * y,  Xt0 = scale * U' * X0
     Uty = transformed_basis.T @ y  # (n,)
@@ -301,7 +423,12 @@ def emmax_p3d(
             continue
         if not np.all(observed):
             observed_count = int(np.count_nonzero(observed))
-            covariance = K[np.ix_(observed, observed)] + delta * np.eye(observed_count)
+            if incidence is None:
+                random_covariance = K[np.ix_(observed, observed)]
+            else:
+                observed_incidence = incidence[observed]
+                random_covariance = observed_incidence @ K @ observed_incidence.T
+            covariance = random_covariance + delta * np.eye(observed_count)
             precision = np.linalg.pinv(covariance)
             marker_design = np.column_stack([X0[observed], raw_snp[observed]])
             information = marker_design.T @ precision @ marker_design

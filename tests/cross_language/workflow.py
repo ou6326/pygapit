@@ -6,9 +6,11 @@ from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
+import numpy.testing as nt
 import pandas as pd
 from numpy.typing import NDArray
 
+from pygapit.gapit import GAPITResult
 from pygapit.stats.kinship import vanraden_kinship
 from tests.cross_language.r_bridge import RBridge
 
@@ -30,6 +32,37 @@ class WorkflowInputs:
     genotype_values: FloatArray
     covariate_values: FloatArray
     kinship_values: FloatArray
+
+
+def r_scalar(r_bridge: RBridge, result: object, name: str) -> np.float64:
+    """Extract one numeric scalar from a named R list component."""
+    values = r_bridge.float_array(r_bridge.component(result, name)).reshape(-1)
+    return np.float64(values[0])
+
+
+def assert_top_level_preparation(
+    result: GAPITResult,
+    inputs: WorkflowInputs,
+    r_scores: FloatArray,
+) -> None:
+    """Check taxa, marker, kinship, and PCA preparation at the public boundary."""
+    assert result.GWAS is not None
+    assert result.pca is not None
+    assert result.kinship is not None
+    nt.assert_array_equal(result.taxa, inputs.taxa)
+    nt.assert_allclose(result.kinship, inputs.kinship_values, rtol=0.0, atol=0.0)
+    nt.assert_array_equal(result.GWAS["SNP"], inputs.marker_map["SNP"])
+    nt.assert_array_equal(
+        result.GWAS["Chr"].astype(str),
+        inputs.marker_map["Chromosome"].astype(str),
+    )
+    nt.assert_array_equal(result.GWAS["Pos"], inputs.marker_map["Position"])
+    for component in range(r_scores.shape[1]):
+        py_scores = result.pca.scores[:, component]
+        sign = np.sign(np.dot(py_scores, r_scores[:, component])) or 1.0
+        nt.assert_allclose(
+            py_scores, sign * r_scores[:, component], rtol=1e-12, atol=1e-12
+        )
 
 
 def make_workflow_inputs(

@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing as t
 from pathlib import Path
 
 import numpy as np
@@ -14,14 +13,11 @@ from pygapit.gapit import GAPIT, GAPITResult
 from tests.cross_language.r_bridge import RBridge
 from tests.cross_language.workflow import (
     WorkflowInputs,
+    assert_top_level_preparation,
     make_workflow_inputs,
     r_design_with_pca,
+    r_scalar,
 )
-
-
-def _r_scalar(r_bridge: RBridge, result: object, name: str) -> np.float64:
-    values = r_bridge.float_array(r_bridge.component(result, name)).reshape(-1)
-    return t.cast(np.float64, values[0])
 
 
 def _run_python_workflow(inputs: WorkflowInputs, model: str) -> GAPITResult:
@@ -42,30 +38,6 @@ def _run_python_workflow(inputs: WorkflowInputs, model: str) -> GAPITResult:
     assert result.pca is not None
     assert result.kinship is not None
     return result
-
-
-def _assert_top_level_preparation(
-    result: GAPITResult,
-    inputs: WorkflowInputs,
-    r_scores: NDArray[np.float64],
-) -> None:
-    assert result.GWAS is not None
-    assert result.pca is not None
-    assert result.kinship is not None
-    nt.assert_array_equal(result.taxa, inputs.taxa)
-    nt.assert_allclose(result.kinship, inputs.kinship_values, rtol=0.0, atol=0.0)
-    nt.assert_array_equal(result.GWAS["SNP"], inputs.marker_map["SNP"])
-    nt.assert_array_equal(
-        result.GWAS["Chr"].astype(str),
-        inputs.marker_map["Chromosome"].astype(str),
-    )
-    nt.assert_array_equal(result.GWAS["Pos"], inputs.marker_map["Position"])
-    for component in range(r_scores.shape[1]):
-        py_scores = result.pca.scores[:, component]
-        sign = np.sign(np.dot(py_scores, r_scores[:, component])) or 1.0
-        nt.assert_allclose(
-            py_scores, sign * r_scores[:, component], rtol=1e-12, atol=1e-12
-        )
 
 
 def test_top_level_glm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
@@ -95,7 +67,7 @@ def test_top_level_glm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
     )
     py_result = _run_python_workflow(inputs, "GLM")
 
-    _assert_top_level_preparation(py_result, inputs, r_scores)
+    assert_top_level_preparation(py_result, inputs, r_scores)
     py_gwas = py_result.GWAS
     assert py_gwas is not None
     r_p_values = r_bridge.float_array(r_bridge.component(r_result, "PF"))
@@ -158,7 +130,7 @@ def test_top_level_mlm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
     )
     py_result = _run_python_workflow(inputs, "MLM")
 
-    _assert_top_level_preparation(py_result, inputs, r_scores)
+    assert_top_level_preparation(py_result, inputs, r_scores)
     py_gwas = py_result.GWAS
     assert py_gwas is not None
     r_p_values = r_bridge.float_array(r_bridge.component(r_result, "ps")).reshape(-1)
@@ -168,8 +140,8 @@ def test_top_level_mlm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
     r_standard_errors = r_bridge.float_array(
         r_bridge.component(r_result, "stderr")
     ).reshape(-1)
-    r_vg = _r_scalar(r_bridge, r_result, "vgs")
-    r_ve = _r_scalar(r_bridge, r_result, "ves")
+    r_vg = r_scalar(r_bridge, r_result, "vgs")
+    r_ve = r_scalar(r_bridge, r_result, "ves")
 
     nt.assert_allclose(
         np.asarray(py_gwas["P.value"], dtype=np.float64),

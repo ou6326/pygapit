@@ -26,6 +26,8 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
 - `test_workflows.py`: public GLM and MLM orchestration with PCA, covariates,
   supplied kinship, shuffled labels, and missing phenotype observations
+- `test_cmlm.py`: public CMLM orchestration with fixed compression, native
+  incidence-matrix REML/EMMAX statistics, and automatic group selection
 - `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding
   values, prediction-error variances, and phenotype predictions
 
@@ -51,3 +53,9 @@ fixtures. They do not modify the R checkout or write output files. Missing
 numeric genotypes are checked under GAPIT's `Middle`, `Major`, and `Minor`
 imputation policies. The main remaining prediction workflow gap is GAPIT's
 SUPER-based top-level sBLUP QTN selection.
+
+Intentional divergences are kept explicit and tested. In particular, GAPIT
+silently changes a CMLM group count that cannot support the fixed-effect design
+to one and effectively switches to a GLM path. pyGAPIT excludes such counts
+from a wider search and raises when the entire requested range is invalid,
+rather than returning results from a different model without notice.

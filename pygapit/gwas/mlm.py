@@ -142,11 +142,7 @@ def reml_for_groups(
     Used to select optimal group number in CMLM.
     Translates GAPIT's group optimization by REML.
     """
-    # Build effective kinship: ZK_cZ'
-    K_eff = Z @ K_c @ Z.T
-    # Add small diagonal for numerical stability
-    K_eff += np.eye(len(y)) * 1e-6
-    result = emma_remle(y, X0, K_eff)
+    result = emma_remle(y, X0, K_c, Z=Z)
     return result.reml
 
 
@@ -169,6 +165,13 @@ def cmlm_gwas(
     ----------
     group_from : minimum number of groups to try
     group_to   : maximum number of groups (default = n)
+
+    Notes
+    -----
+    A native-incidence REML fit requires more random-effect groups than fixed
+    effects. GAPIT silently changes smaller group counts to one and effectively
+    switches models; pyGAPIT instead excludes invalid search candidates and
+    rejects a range containing no valid CMLM fit.
     """
     n = len(y)
     if group_to is None:
@@ -177,6 +180,13 @@ def cmlm_gwas(
     # Clamp range
     group_from = max(1, group_from)
     group_to = min(n, group_to)
+    minimum_groups = X0.shape[1] + 1
+    if group_to < minimum_groups:
+        raise ValueError(
+            "CMLM group_to must be greater than the number of fixed effects "
+            f"({X0.shape[1]})"
+        )
+    group_from = max(group_from, minimum_groups)
 
     # Try a range of group counts, pick best REML
     candidates = np.unique(
@@ -186,27 +196,32 @@ def cmlm_gwas(
     )
 
     best_reml = -np.inf
-    best_K_eff = K.copy()
+    best_K_c = K.copy()
+    best_Z = np.eye(n)
     best_n_groups = n
+    fitted_candidate = False
 
     for g in candidates:
         compression_failed = False
         try:
             K_c, Z = compress_kinship(K, int(g))
-            K_eff = Z @ K_c @ Z.T
-            K_eff += np.eye(n) * 1e-6
             reml = reml_for_groups(y, X0, K_c, Z)
             if reml > best_reml:
+                fitted_candidate = True
                 best_reml = reml
-                best_K_eff = K_eff.copy()
+                best_K_c = K_c.copy()
+                best_Z = Z.copy()
                 best_n_groups = g
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             compression_failed = True
         if compression_failed:
             continue
 
+    if not fitted_candidate:
+        raise RuntimeError("CMLM failed to fit every requested compression level")
+
     # Run EMMAX-P3D with optimal compressed kinship
-    result = emmax_p3d(y, X0, GD, best_K_eff, ngrids=ngrids)
+    result = emmax_p3d(y, X0, GD, best_K_c, ngrids=ngrids, Z=best_Z)
     return MLMResult(
         p_values=result.p_values,
         effects=result.effects,
