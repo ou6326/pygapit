@@ -20,12 +20,14 @@ Key advantages over FarmCPU:
 
 from __future__ import annotations
 
+import typing as t
 from dataclasses import dataclass
 
 import numpy as np
 
 from .._typing import BoolVector, FloatMatrix, FloatVector, IntVector, readonly_copy
 from .glm import (
+    GLMResult,
     glm_gwas,
     glm_scan_with_cofactors,
     reward_substitute_cofactor_statistics,
@@ -163,6 +165,17 @@ def _candidate_mask(
     return fixed_mask
 
 
+def _calibrate_no_qtn_p_values(p_values: FloatVector) -> FloatVector:
+    """Apply GAPIT 3.5's BLINK fallback when no pseudo-QTN is selected."""
+    p_glm_log = -np.log10(np.nanquantile(p_values, 0.05))
+    bonferroni_comparison = p_glm_log / 1.3
+    with np.errstate(divide="ignore", invalid="ignore"):
+        farmcpu_log = -np.log10(p_values) / bonferroni_comparison
+        calibrated = t.cast(FloatVector, np.power(10.0, -farmcpu_log))
+    calibrated[calibrated > 1.0] = 1.0
+    return calibrated
+
+
 def blink_gwas(
     y: FloatVector,
     X0: FloatMatrix,
@@ -209,6 +222,7 @@ def blink_gwas(
     current_qtns = np.array([], dtype=int)
     np.array([-1], dtype=int)  # sentinel to trigger first iter
     n_iter = 0
+    no_qtn_p_values: FloatVector | None = None
 
     for iteration in range(max_iterations):
         n_iter = iteration + 1
@@ -223,7 +237,8 @@ def blink_gwas(
         candidate_idx = np.where(sig_mask)[0]
 
         if len(candidate_idx) == 0:
-            # No significant hits → converged with empty QTN set
+            if len(current_qtns) == 0:
+                no_qtn_p_values = _calibrate_no_qtn_p_values(p_values)
             break
 
         # Sort candidates by p-value (best first)
@@ -279,6 +294,14 @@ def blink_gwas(
         GD,
         current_qtns,
     )
+    if no_qtn_p_values is not None:
+        final_result = GLMResult(
+            no_qtn_p_values,
+            final_result.effects,
+            final_result.se,
+            final_result.t_stats,
+            final_result.r2_full,
+        )
 
     return BLINKResult(
         p_values=final_result.p_values,

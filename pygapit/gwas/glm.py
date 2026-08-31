@@ -213,6 +213,9 @@ def reward_substitute_cofactor_statistics(
         start = X0.shape[1]
         cofactor_p[marker] = p_values[start : start + cofactor_count]
 
+    # GAPIT's min(..., na.rm=TRUE) returns Inf when every substitute is
+    # unavailable. Normalize that invalid p-value to the equivalent
+    # non-significant value 1.0 while preserving GAPIT's finite rewards.
     reward_p = np.asarray(
         [
             np.min(column[np.isfinite(column)])

@@ -151,6 +151,11 @@ class RBridge:
         """Convert an R numeric vector or matrix to a float64 NumPy array."""
         return np.asarray(value, dtype=np.float64)
 
+    def is_null(self, value: object) -> bool:
+        """Return whether an R value is ``NULL`` without coercing it to NumPy."""
+        result = np.asarray(self._robjects.r["is.null"](value), dtype=np.bool_)
+        return bool(result[0])
+
     @staticmethod
     def component(value: object, name: str) -> object:
         """Extract a named component from an R list result."""

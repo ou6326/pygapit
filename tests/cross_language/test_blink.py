@@ -165,3 +165,212 @@ def test_blink_iterative_workflow_matches_bundled_r_gapit(
     nt.assert_array_equal(np.sort(py_result.QTNs), np.sort(r_qtns))
     nt.assert_allclose(py_result.GWAS["P.value"], r_gwas[:, 3], rtol=1e-9, atol=1e-12)
     nt.assert_allclose(py_result.GWAS["effect"], r_effects, rtol=1e-9, atol=5e-7)
+
+
+def test_blink_no_substitute_reward_normalizes_gapit_infinity(
+    r_bridge: RBridge,
+    r_root: Path,
+    fixed_genotypes: NDArray[np.float64],
+    fixed_phenotype: NDArray[np.float64],
+    fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Normalize GAPIT's infinite no-substitute reward to a valid p-value."""
+    genotype = np.column_stack([fixed_genotypes[:, 0], fixed_genotypes[:, 0]])
+    phenotype = np.column_stack(
+        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
+    )
+    marker_map = np.array(
+        [[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64
+    )
+
+    r_bridge.source(r_root, "GAPIT.Specify.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.Blink.R")
+    r_blink = r_bridge.function("Blink")
+    r_marker_map = r_bridge.function("as.data.frame")(
+        r_bridge.matrix(marker_map, column_names=["SNP", "Chr", "Pos"])
+    )
+    r_result = r_blink(
+        Y=r_bridge.matrix(phenotype, column_names=["Taxa", "Trait"]),
+        GD=r_bridge.matrix(genotype),
+        GM=r_marker_map,
+        file_output=False,
+        maxLoop=5,
+        LD=0.7,
+        p_threshold=1.0,
+        maf_threshold=0.0,
+        converge=1.0,
+    )
+
+    phenotype_frame, genotype_frame, marker_frame = fixed_gapit_inputs
+    duplicated_genotype_frame = genotype_frame.loc[:, ["Taxa", "s1"]].copy()
+    duplicated_genotype_frame["s2"] = duplicated_genotype_frame["s1"]
+    py_result = GAPIT(
+        Y=phenotype_frame,
+        GD=duplicated_genotype_frame,
+        GM=marker_frame.iloc[:2].copy(),
+        model="BLINK",
+        PCA_total=0,
+        maf_threshold=0.0,
+        maxLoop=5,
+        LD=0.7,
+        p_threshold=1.0,
+        file_output=False,
+    )
+
+    r_gwas = r_bridge.float_array(r_bridge.component(r_result, "GWAS")).T
+    r_qtns = (
+        r_bridge.float_array(r_bridge.component(r_result, "seqQTN")).astype(int) - 1
+    )
+    r_effects = r_bridge.float_array(r_bridge.component(r_result, "Beta")).reshape(-1)
+    assert not isinstance(py_result, dict)
+    assert py_result.QTNs is not None
+    assert py_result.GWAS is not None
+    nt.assert_array_equal(py_result.QTNs, r_qtns)
+    assert len(r_qtns) == 1
+    qtn = r_qtns[0]
+    assert np.isposinf(r_gwas[qtn, 3])
+    assert py_result.GWAS["P.value"].iloc[qtn] == 1.0
+    non_qtns = np.setdiff1d(np.arange(len(r_gwas)), r_qtns)
+    nt.assert_allclose(
+        py_result.GWAS["P.value"].iloc[non_qtns],
+        r_gwas[non_qtns, 3],
+        rtol=1e-9,
+        atol=1e-12,
+    )
+    nt.assert_allclose(
+        py_result.GWAS["effect"].iloc[r_qtns],
+        r_effects[r_qtns],
+        rtol=1e-9,
+        atol=5e-7,
+    )
+    assert np.isnan(r_effects[non_qtns]).all()
+    nt.assert_array_equal(
+        py_result.GWAS["effect"].iloc[non_qtns], np.zeros(len(non_qtns))
+    )
+
+
+def test_blink_workflow_without_qtns_matches_bundled_r_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+    fixed_genotypes: NDArray[np.float64],
+    fixed_phenotype: NDArray[np.float64],
+    fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Compare the no-candidate path, where SUB is never applied."""
+    marker_count = fixed_genotypes.shape[1]
+    phenotype = np.column_stack(
+        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
+    )
+    marker_map = np.column_stack(
+        [
+            np.arange(1, marker_count + 1, dtype=float),
+            np.array([1, 1, 1, 2, 2, 2], dtype=float),
+            np.array([100, 200, 1500, 100, 200, 1500], dtype=float),
+        ]
+    )
+    r_bridge.source(r_root, "GAPIT.Specify.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.Blink.R")
+    r_blink = r_bridge.function("Blink")
+    r_marker_map = r_bridge.function("as.data.frame")(
+        r_bridge.matrix(marker_map, column_names=["SNP", "Chr", "Pos"])
+    )
+    r_result = r_blink(
+        Y=r_bridge.matrix(phenotype, column_names=["Taxa", "Trait"]),
+        GD=r_bridge.matrix(fixed_genotypes),
+        GM=r_marker_map,
+        file_output=False,
+        maxLoop=5,
+        LD=0.7,
+        p_threshold=1e-20,
+        maf_threshold=0.0,
+        converge=1.0,
+    )
+
+    phenotype_frame, genotype_frame, marker_frame = fixed_gapit_inputs
+    py_result = GAPIT(
+        Y=phenotype_frame,
+        GD=genotype_frame,
+        GM=marker_frame,
+        model="BLINK",
+        PCA_total=0,
+        maf_threshold=0.0,
+        maxLoop=5,
+        LD=0.7,
+        p_threshold=1e-20,
+        file_output=False,
+    )
+
+    r_gwas = r_bridge.float_array(r_bridge.component(r_result, "GWAS")).T
+    r_qtns = r_bridge.component(r_result, "seqQTN")
+    r_effects = r_bridge.float_array(r_bridge.component(r_result, "Beta")).reshape(-1)
+    assert not isinstance(py_result, dict)
+    assert py_result.QTNs is not None
+    assert py_result.GWAS is not None
+    assert r_bridge.is_null(r_qtns)
+    assert py_result.QTNs.size == 0
+    nt.assert_allclose(py_result.GWAS["P.value"], r_gwas[:, 3], rtol=1e-9, atol=1e-12)
+    nt.assert_allclose(py_result.GWAS["effect"], r_effects, rtol=1e-9, atol=5e-7)
+
+
+def test_blink_single_qtn_with_one_substitute_matches_bundled_r_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+    fixed_genotypes: NDArray[np.float64],
+    fixed_phenotype: NDArray[np.float64],
+    fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Compare one selected QTN with exactly one independent substitute marker."""
+    genotype = fixed_genotypes[:, :2]
+    phenotype = np.column_stack(
+        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
+    )
+    marker_map = np.array(
+        [[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64
+    )
+    r_bridge.source(r_root, "GAPIT.Specify.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.Blink.R")
+    r_blink = r_bridge.function("Blink")
+    r_marker_map = r_bridge.function("as.data.frame")(
+        r_bridge.matrix(marker_map, column_names=["SNP", "Chr", "Pos"])
+    )
+    r_result = r_blink(
+        Y=r_bridge.matrix(phenotype, column_names=["Taxa", "Trait"]),
+        GD=r_bridge.matrix(genotype),
+        GM=r_marker_map,
+        file_output=False,
+        maxLoop=5,
+        LD=0.7,
+        p_threshold=1.0,
+        maf_threshold=0.0,
+        converge=1.0,
+    )
+
+    phenotype_frame, genotype_frame, marker_frame = fixed_gapit_inputs
+    py_result = GAPIT(
+        Y=phenotype_frame,
+        GD=genotype_frame.loc[:, ["Taxa", "s1", "s2"]],
+        GM=marker_frame.iloc[:2].copy(),
+        model="BLINK",
+        PCA_total=0,
+        maf_threshold=0.0,
+        maxLoop=5,
+        LD=0.7,
+        p_threshold=1.0,
+        file_output=False,
+    )
+
+    r_gwas = r_bridge.float_array(r_bridge.component(r_result, "GWAS")).T
+    r_qtns = (
+        r_bridge.float_array(r_bridge.component(r_result, "seqQTN")).astype(int) - 1
+    )
+    r_effects = r_bridge.float_array(r_bridge.component(r_result, "Beta")).reshape(-1)
+    assert not isinstance(py_result, dict)
+    assert py_result.QTNs is not None
+    assert py_result.GWAS is not None
+    assert len(r_qtns) == 1
+    nt.assert_array_equal(py_result.QTNs, r_qtns)
+    nt.assert_allclose(py_result.GWAS["P.value"], r_gwas[:, 3], rtol=1e-9, atol=1e-12)
+    nt.assert_allclose(py_result.GWAS["effect"], r_effects, rtol=1e-9, atol=5e-7)

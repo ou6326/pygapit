@@ -15,7 +15,11 @@ The suite is divided by function so a failure identifies the affected layer dire
   workflow's pseudo-QTNs, p-values, and effects
 - `test_blink.py`: FDR candidate selection, LD pruning, prefix-BIC selection,
   and the complete top-level iterative workflow's pseudo-QTNs, p-values, and
-  effects
+  effects across zero, one, and multiple selected QTNs. SUB reward coverage
+  includes one and multiple valid substitutes. It also characterizes GAPIT's
+  infinite reward when no independent substitute exists; pyGAPIT intentionally
+  normalizes that invalid p-value to the equivalent non-significant value `1.0`
+  and an undefined duplicate-marker effect to `0.0`.
 - `test_mlm.py`: EMMA null-model REML likelihood, variance components, and heritability, plus SNP-level EMMAX/P3D p-values, effects, standard errors, and test statistics
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
 - `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding

@@ -555,7 +555,8 @@ class TestBLINK:
         )
 
         assert result.p_values.shape == (1,)
-        assert 0.0 <= result.p_values[0] <= 1.0
+        np.testing.assert_array_equal(result.selected_qtns, np.array([0]))
+        assert result.p_values[0] == 1.0
 
     def test_blink_selects_qtns(self, small_dataset: SmallDataset) -> None:
         """BLINK should identify QTNs near the planted signal."""
