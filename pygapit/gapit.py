@@ -1187,8 +1187,8 @@ def _attach_multiple_analysis_outputs(
             expected = (np.arange(1, len(observed) + 1) - 0.5) / len(observed)
             qq_upper = max(
                 qq_upper,
-                float(np.max(-np.log10(expected))),
-                float(np.max(-np.log10(observed))),
+                np.max(-np.log10(expected)),
+                np.max(-np.log10(observed)),
             )
             ax_qq.plot(
                 -np.log10(expected),

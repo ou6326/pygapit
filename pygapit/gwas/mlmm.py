@@ -19,6 +19,7 @@ Key difference from FarmCPU:
 
 from __future__ import annotations
 
+import typing as t
 from dataclasses import dataclass
 
 import numpy as np
@@ -45,7 +46,7 @@ class MLMMResult:
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
-def _ext_bic(log_lik: float, n: int, k: int, m: int) -> float:
+def _ext_bic(log_lik: float, n: int, k: int, m: int) -> np.float64:
     """
     Extended BIC for multi-locus model selection.
     extBIC = -2*logL + k*log(n) + 2*k*log(m-1)
@@ -53,8 +54,11 @@ def _ext_bic(log_lik: float, n: int, k: int, m: int) -> float:
     Penalizes model complexity more heavily than standard BIC.
     Translates the opt_extBIC criterion from GAPIT.Bus.R
     """
-    bic = -2.0 * log_lik + k * np.log(n) + 2.0 * k * np.log(max(m - 1, 1))
-    return float(bic)
+    bic = t.cast(
+        np.float64,
+        -2.0 * log_lik + k * np.log(n) + 2.0 * k * np.log(max(m - 1, 1)),
+    )
+    return bic
 
 
 def mlmm_gwas(

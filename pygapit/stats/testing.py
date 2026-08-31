@@ -5,6 +5,8 @@ Translates GAPIT.Perform.BH.FDR.Multiple.Correction.Procedure.R and GAPIT.FDR.Ty
 
 from __future__ import annotations
 
+import typing as t
+
 import numpy as np
 from scipy.stats import chi2
 
@@ -43,7 +45,7 @@ def benjamini_hochberg(p_values: FloatVector, alpha: float = 0.05) -> FloatVecto
     return result
 
 
-def genomic_inflation_factor(p_values: FloatVector) -> float:
+def genomic_inflation_factor(p_values: FloatVector) -> float | np.float64:
     """
     Genomic inflation factor lambda.
     lambda = median(chi2_observed) / 0.4549
@@ -53,9 +55,9 @@ def genomic_inflation_factor(p_values: FloatVector) -> float:
     valid = p_values[(p_values > 0) & (p_values < 1) & ~np.isnan(p_values)]
     if len(valid) == 0:
         return 1.0
-    chi2_obs = chi2.ppf(1.0 - valid, df=1)
+    chi2_obs = t.cast(FloatVector, chi2.ppf(1.0 - valid, df=1))
     lam = np.median(chi2_obs) / 0.4549  # 0.4549 = median of chi2(1)
-    return float(lam)
+    return lam
 
 
 def get_significant_snps(

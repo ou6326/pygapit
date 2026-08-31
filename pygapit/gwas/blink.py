@@ -25,7 +25,11 @@ from dataclasses import dataclass
 import numpy as np
 
 from .._typing import BoolVector, FloatMatrix, FloatVector, IntVector, readonly_copy
-from .glm import glm_gwas, glm_scan_with_cofactors
+from .glm import (
+    glm_gwas,
+    glm_scan_with_cofactors,
+    reward_substitute_cofactor_statistics,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,43 +45,6 @@ class BLINKResult:
     def __post_init__(self) -> None:
         for field in ("p_values", "effects", "se", "t_stats", "selected_qtns"):
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
-
-
-def _compute_bic(
-    y: FloatVector,
-    X0: FloatMatrix,
-    cofactor_indices: list[int],
-    GD: FloatMatrix,
-) -> float:
-    """
-    Compute BIC for model with given cofactors.
-    BIC = -2*logL + k*log(n)
-    where k = number of parameters, n = sample size.
-
-    Translates Blink.BICselection() from GAPIT.Blink.R
-    """
-    n = len(y)
-    if cofactor_indices:
-        cof_mat = GD[:, np.array(cofactor_indices)]
-        X = np.column_stack([X0, cof_mat])
-    else:
-        X = X0
-
-    try:
-        beta, _residuals, _rank, _ = np.linalg.lstsq(X, y, rcond=None)
-        y_hat = X @ beta
-        sse = np.sum((y - y_hat) ** 2)
-    except np.linalg.LinAlgError:
-        return np.inf
-
-    if sse <= 0:
-        sse = 1e-12
-
-    k = X.shape[1]  # number of parameters
-    # Log-likelihood under Gaussian errors
-    log_lik = -0.5 * n * (np.log(2 * np.pi * sse / n) + 1)
-    bic = -2.0 * log_lik + k * np.log(n)
-    return float(bic)
 
 
 def _ld_prune(
@@ -146,24 +113,34 @@ def _bic_select_cofactors(
     candidates: IntVector,
 ) -> IntVector:
     """
-    Greedily add cofactors from candidates while BIC decreases.
-    Translates Blink.BICselection() from GAPIT.Blink.R
+    Select the candidate prefix minimizing GAPIT 3.5's naive BIC.
 
     Returns indices of selected cofactors.
     """
-    current_cofactors: list[int] = []
-    current_bic = _compute_bic(y, X0, [], GD)
+    if len(candidates) == 0:
+        return candidates
 
-    for idx in candidates:
-        if idx in current_cofactors:
-            continue
-        test_cofactors = current_cofactors + [int(idx)]
-        new_bic = _compute_bic(y, X0, test_cofactors, GD)
-        if new_bic < current_bic - 1e-6:  # BIC improvement
-            current_cofactors = test_cofactors
-            current_bic = new_bic
+    n = len(y)
+    threshold = max(1, int(np.floor(n / np.log(n))))
+    ordered = np.asarray(candidates[:threshold], dtype=int)
+    bic = np.empty(len(ordered), dtype=np.float64)
+    for prefix_size in range(1, len(ordered) + 1):
+        design = np.column_stack([X0, GD[:, ordered[:prefix_size]]])
+        beta = np.linalg.pinv(design) @ y
+        residual = design @ beta - y
+        variance = np.var(residual, ddof=1)
+        if variance <= 0.0:
+            variance = np.finfo(np.float64).tiny
+        negative_twice_log_likelihood = (
+            n * np.log(2.0 * np.pi)
+            + n * np.log(variance)
+            + (residual @ residual) / variance
+        )
+        penalty = (design.shape[1] - 1) * np.log(n)
+        bic[prefix_size - 1] = negative_twice_log_likelihood + penalty
 
-    return np.array(current_cofactors, dtype=int)
+    best_prefix_size = int(np.argmin(bic)) + 1
+    return ordered[:best_prefix_size]
 
 
 def _candidate_mask(
@@ -261,6 +238,12 @@ def blink_gwas(
 
         # Step 3: BIC selection
         new_qtns = _bic_select_cofactors(y, X0, GD, candidates_pruned)
+        if iteration > 0 and len(current_qtns) > 0:
+            new_qtns = np.asarray(
+                list(dict.fromkeys([*new_qtns, *current_qtns])), dtype=int
+            )
+            if len(candidates_sorted) > 1 and len(new_qtns) > 1:
+                new_qtns = _bic_select_cofactors(y, X0, GD, new_qtns)
 
         # ── Convergence check ─────────────────────────────────────────────
         # Jaccard similarity between current and previous QTN sets
@@ -276,14 +259,26 @@ def blink_gwas(
         current_qtns = new_qtns
 
         # ── GLM-2: Test all markers with updated cofactors ───────────────
-        glm_result = glm_scan_with_cofactors(y, X0, GD, current_qtns)
+        glm_result = reward_substitute_cofactor_statistics(
+            glm_scan_with_cofactors(y, X0, GD, current_qtns),
+            y,
+            X0,
+            GD,
+            current_qtns,
+        )
         p_values = glm_result.p_values.copy()
 
         if jaccard >= converge_threshold:
             break
 
     # Final scan with last cofactor set
-    final_result = glm_scan_with_cofactors(y, X0, GD, current_qtns)
+    final_result = reward_substitute_cofactor_statistics(
+        glm_scan_with_cofactors(y, X0, GD, current_qtns),
+        y,
+        X0,
+        GD,
+        current_qtns,
+    )
 
     return BLINKResult(
         p_values=final_result.p_values,

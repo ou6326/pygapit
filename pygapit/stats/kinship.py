@@ -61,7 +61,7 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
     K = Z_c @ Z_c.T  # (n, n)
 
     # Adjustment factor: 2 * sum(p_j * (1 - p_j))
-    adj = float(2.0 * np.sum(p * (1.0 - p)))
+    adj = 2.0 * np.sum(p * (1.0 - p))
     if adj < 1e-12:
         warnings.warn("Adjustment factor near zero; check allele frequencies.")
         adj = 1.0
@@ -87,15 +87,15 @@ def zhang_kinship(GD: FloatMatrix) -> FloatMatrix:
 
     heterozygosity = 1.0 - np.abs(GD - 1.0)
     individual_heterozygosity = heterozygosity.sum(axis=1) / (2.0 * GD.shape[1])
-    inbreeding = 1.0 - float(np.min(individual_heterozygosity))
+    inbreeding = 1.0 - np.min(individual_heterozygosity)
     top = 1.0 + inbreeding
 
     centered = GD - GD.mean(axis=0)
     kinship: FloatMatrix = centered @ centered.T
     diagonal = np.diag(kinship).copy()
-    diagonal_min = float(np.min(diagonal))
-    diagonal_max = float(np.max(diagonal))
-    floor = float(np.min(kinship))
+    diagonal_min = np.min(diagonal)
+    diagonal_max = np.max(diagonal)
+    floor = np.min(kinship)
     scale = diagonal_max - floor
     if scale <= 1e-12:
         warnings.warn(
@@ -103,7 +103,8 @@ def zhang_kinship(GD: FloatMatrix) -> FloatMatrix:
         )
         return np.eye(n)
 
-    kinship = top * (kinship - floor) / scale
+    scaled_kinship: FloatMatrix = top * (kinship - floor) / scale
+    kinship = scaled_kinship
     adjusted_diagonal_min = top * (diagonal_min - floor) / scale
     diagonal_mask = np.eye(n, dtype=bool)
     off_diagonal_mask = ~diagonal_mask
@@ -117,7 +118,7 @@ def zhang_kinship(GD: FloatMatrix) -> FloatMatrix:
             kinship[off_diagonal_mask] /= adjusted_diagonal_min
 
     if n > 1:
-        off_diagonal_max = float(np.max(kinship[off_diagonal_mask]))
+        off_diagonal_max = np.max(kinship[off_diagonal_mask])
         if off_diagonal_max > top:
             kinship[off_diagonal_mask] *= top / off_diagonal_max
 

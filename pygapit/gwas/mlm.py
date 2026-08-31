@@ -99,7 +99,7 @@ def compress_kinship(
     if n_groups <= 1:
         # All in one group → GLM equivalent
         Z = np.ones((n, 1)) / n
-        K_c = np.array([[float(K.mean())]])
+        K_c = np.array([[K.mean()]])
         return K_c, Z
 
     try:

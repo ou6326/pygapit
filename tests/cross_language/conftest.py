@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 
 import numpy as np
+import pandas as pd
 import pytest
 from numpy.typing import NDArray
 
@@ -75,3 +76,24 @@ def fixed_phenotype() -> NDArray[np.float64]:
 def fixed_covariate(fixed_phenotype: NDArray[np.float64]) -> NDArray[np.float64]:
     """Return a deterministic continuous covariate."""
     return np.linspace(-1.0, 1.0, len(fixed_phenotype), dtype=float)
+
+
+@pytest.fixture(scope="session")
+def fixed_gapit_inputs(
+    fixed_genotypes: NDArray[np.float64],
+    fixed_phenotype: NDArray[np.float64],
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Return labeled top-level inputs sharing the numerical R fixtures."""
+    taxa = [f"T{index + 1}" for index in range(len(fixed_phenotype))]
+    marker_names = [f"s{index + 1}" for index in range(fixed_genotypes.shape[1])]
+    phenotype = pd.DataFrame({"Taxa": taxa, "Trait": fixed_phenotype})
+    genotype = pd.DataFrame(fixed_genotypes, columns=marker_names)
+    genotype.insert(0, "Taxa", taxa)
+    marker_map = pd.DataFrame(
+        {
+            "SNP": marker_names,
+            "Chromosome": [1, 1, 1, 2, 2, 2],
+            "Position": [100, 200, 1500, 100, 200, 1500],
+        }
+    )
+    return phenotype, genotype, marker_map

@@ -17,9 +17,8 @@ Bug fixes vs v1.0.0:
 
 from __future__ import annotations
 
-import math
+import typing as t
 import warnings
-from typing import cast
 
 import numpy as np
 from scipy import optimize
@@ -42,7 +41,7 @@ from .._typing import (
 
 def _reml_delta(
     y: FloatVector, X: FloatMatrix, K: FloatMatrix
-) -> tuple[float, float, float]:
+) -> tuple[np.float64, np.float64, np.float64]:
     """
     EMMA REML: estimate delta = Ve/Vg via spectral decomposition of K.
     Returns (delta, Vg, Ve).
@@ -55,8 +54,8 @@ def _reml_delta(
     Uy: FloatVector = U.T @ y
     UX: FloatMatrix = U.T @ X
 
-    def neg_reml(log_delta: float) -> float:
-        delta = np.exp(log_delta)
+    def neg_reml(log_delta: float) -> np.float64:
+        delta = t.cast(np.float64, np.exp(log_delta))
         d = eigvals + delta
         UXd: FloatMatrix = UX / d[:, np.newaxis]
         gram: FloatMatrix = UX.T @ UXd
@@ -64,29 +63,31 @@ def _reml_delta(
         try:
             beta: FloatVector = np.linalg.solve(gram, rhs)
         except np.linalg.LinAlgError:
-            return 1e15
+            return np.float64(1e15)
         res = Uy - UX @ beta
         df = n - X.shape[1]
-        s2 = cast(float, np.sum(res**2 / d)) / df
-        sum_log_d: float = cast(float, np.sum(np.log(d)))
-        ll: float = sum_log_d + df * math.log(max(s2, 1e-15)) + n
+        s2 = np.sum(res**2 / d) / df
+        sum_log_d = t.cast(np.float64, np.sum(np.log(d)))
+        ll = t.cast(
+            np.float64, sum_log_d + df * np.log(max(s2, 1e-15)) + n
+        )
         return ll
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
         opt = optimize.minimize_scalar(neg_reml, bounds=(-6, 6), method="bounded")
 
-    delta = np.exp(opt.x)
+    delta = t.cast(np.float64, np.exp(opt.x))
     d = eigvals + delta
     UXd = UX / d[:, np.newaxis]
     gram = UX.T @ UXd
     rhs = UXd.T @ Uy
-    beta = cast(FloatVector, np.linalg.lstsq(gram, rhs, rcond=None)[0])
+    beta = t.cast(FloatVector, np.linalg.lstsq(gram, rhs, rcond=None)[0])
     resid = Uy - UX @ beta
     df = n - X.shape[1]
-    Vg = cast(float, np.sum(resid**2 / d)) / df
-    Ve = float(delta * Vg)
-    return float(delta), Vg, Ve
+    Vg = np.sum(resid**2 / d) / df
+    Ve = delta * Vg
+    return delta, Vg, Ve
 
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -221,7 +222,7 @@ def GBLUP(
         predictions[test] = K_pt @ Vinv_t @ (yt - mu_t) + mu_t
 
     valid = ~np.isnan(y)
-    acc = float(np.corrcoef(y[valid], predictions[valid])[0, 1])
+    acc = np.corrcoef(y[valid], predictions[valid])[0, 1]
     print(f"[PyGAPIT]  G-BLUP CV accuracy (r): {acc:.4f}")
     return gebv, acc
 
@@ -275,10 +276,10 @@ def BayesB(
 
         for j in np.random.permutation(m):
             zj = Z[:, j]
-            zz = float(np.dot(zj, zj))
+            zz = np.dot(zj, zj)
             residual += zj * beta[j]  # un-residualise this SNP
 
-            mean_j = float(np.dot(zj, residual)) / (zz + Ve / max(Vb, 1e-15))
+            mean_j = np.dot(zj, residual) / (zz + Ve / max(Vb, 1e-15))
             var_j = Ve / (zz + Ve / max(Vb, 1e-15))
 
             # Inclusion log-odds
@@ -298,12 +299,12 @@ def BayesB(
 
             residual -= zj * beta[j]
 
-        Ve = _sample_var(residual, n, a=4, b=float(np.var(y) * 0.5))
+        Ve = _sample_var(residual, n, a=4, b=np.var(y) * 0.5)
         Vb = _sample_var(
             beta[delta],
             max(int(delta.sum()), 1),
             a=4,
-            b=float(np.var(y) * 0.5 / max(m * (1 - pi), 1e-8)),
+            b=np.var(y) * 0.5 / max(m * (1 - pi), 1e-8),
         )
 
         if it >= burn_in:
@@ -329,12 +330,12 @@ def _sample_var(residuals: FloatVector, n: int, a: float = 4, b: float = 1) -> f
         return b / a
     shape = (a + n) / 2
     scale = (a * b + np.sum(residuals**2)) / 2
-    return float(scale / np.random.gamma(shape))
+    return scale / np.random.gamma(shape)
 
 
 def _cross_validate_rrblup(
     y: FloatVector, Z: FloatMatrix, lambda_: float, n_folds: int
-) -> float:
+) -> np.float64:
     n, m = Z.shape
     fold_size = n // n_folds
     preds = np.zeros(n)
@@ -346,4 +347,4 @@ def _cross_validate_rrblup(
         A = Zt.T @ Zt + lambda_ * np.eye(m)
         u = np.linalg.solve(A, Zt.T @ yt)
         preds[test] = Z[test] @ u
-    return float(np.corrcoef(y, preds)[0, 1])
+    return t.cast(np.float64, np.corrcoef(y, preds)[0, 1])

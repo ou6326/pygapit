@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import typing as t
 from pathlib import Path
 
 import numpy as np
@@ -14,9 +15,9 @@ from pygapit.stats.kinship import vanraden_kinship
 from tests.cross_language.r_bridge import RBridge
 
 
-def _r_scalar(r_bridge: RBridge, result: object, name: str) -> float:
+def _r_scalar(r_bridge: RBridge, result: object, name: str) -> np.float64:
     values = r_bridge.float_array(r_bridge.component(result, name)).reshape(-1)
-    return float(values[0])
+    return t.cast(np.float64, values[0])
 
 
 @pytest.mark.parametrize(

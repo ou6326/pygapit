@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import os
 import sys
+from collections.abc import Sequence
 from importlib import import_module
 from pathlib import Path
 from typing import Protocol, cast, final
@@ -52,6 +53,7 @@ class _RObjects(Protocol):
     globalenv: _RGlobalEnv
 
     def FloatVector(self, values: list[float]) -> object: ...
+    def StrVector(self, values: list[str]) -> object: ...
 
 
 @final
@@ -89,6 +91,25 @@ class RBridge:
             raise FileNotFoundError(f"Bundled GAPIT source file is missing: {path}")
         self._robjects.r["source"](str(path))
 
+    def source_for_regular_matrices(self, root: Path, filename: str) -> None:
+        """Source GAPIT code with big.matrix probes fixed to false.
+
+        GAPIT uses ``bigmemory::is.big.matrix`` even when callers supply an
+        ordinary matrix.  Alignment tests do not need the optional bigmemory
+        package, so this in-memory variant preserves the regular-matrix branch
+        without modifying the pinned checkout.
+        """
+        path = root / filename
+        if not path.is_file():
+            raise FileNotFoundError(f"Bundled GAPIT source file is missing: {path}")
+        source = path.read_text(encoding="utf-8")
+        probe = "bigmemory::is.big.matrix"
+        if probe not in source:
+            raise ValueError(f"GAPIT source does not contain {probe}: {path}")
+        source = source.replace(probe, ".pygapit_is_big_matrix")
+        self.evaluate(".pygapit_is_big_matrix <- function(x) FALSE")
+        self.evaluate(source)
+
     def evaluate(self, expression: str) -> object:
         """Evaluate an R expression and return its dynamic value."""
         return self._robjects.r(expression)
@@ -102,7 +123,9 @@ class RBridge:
         flat = np.asarray(values, dtype=np.float64).reshape(-1)
         return self._robjects.FloatVector(flat.tolist())
 
-    def matrix(self, values: FloatArray) -> object:
+    def matrix(
+        self, values: FloatArray, *, column_names: Sequence[str] | None = None
+    ) -> object:
         """Create an R matrix preserving the NumPy row/column arrangement."""
         array = np.asarray(values, dtype=np.float64)
         if array.ndim != 2:
@@ -110,11 +133,18 @@ class RBridge:
                 f"Expected a two-dimensional matrix, got shape {array.shape}"
             )
         vector = self._robjects.FloatVector(array.ravel(order="F").tolist())
-        return self._robjects.r["matrix"](
+        result = self._robjects.r["matrix"](
             vector,
             nrow=int(array.shape[0]),
             ncol=int(array.shape[1]),
         )
+        if column_names is not None:
+            if len(column_names) != array.shape[1]:
+                raise ValueError("column_names must match the matrix column count")
+            result = self._robjects.r["colnames<-"](
+                result, self._robjects.StrVector(list(column_names))
+            )
+        return result
 
     @staticmethod
     def float_array(value: object) -> FloatArray:

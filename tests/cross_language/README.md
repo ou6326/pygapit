@@ -11,13 +11,22 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_compression.py`: CMLM average-linkage groups and compressed kinship
 - `test_multiple_testing.py`: Benjamini–Hochberg adjustment via `stats::p.adjust`, including boundary p-values
 - `test_glm.py`: additive GLM effects and p-values, with and without a covariate
-- `test_farmcpu.py`: static-bin pseudo-QTN selection
-- `test_blink.py`: LD pruning and BIC pseudo-QTN selection
+- `test_farmcpu.py`: static-bin selection plus the complete top-level iterative
+  workflow's pseudo-QTNs, p-values, and effects
+- `test_blink.py`: FDR candidate selection, LD pruning, prefix-BIC selection,
+  and the complete top-level iterative workflow's pseudo-QTNs, p-values, and
+  effects
 - `test_mlm.py`: EMMA null-model REML likelihood, variance components, and heritability, plus SNP-level EMMAX/P3D p-values, effects, standard errors, and test statistics
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
-- `test_prediction.py`: gBLUP fixed effects, breeding values, prediction-error variances, and phenotype predictions
+- `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding
+  values, prediction-error variances, and phenotype predictions
 
-Each comparison sources the smallest relevant GAPIT R file instead of loading the full package.
+Each comparison sources the smallest relevant GAPIT R file instead of loading
+the full package. The complete BLINK and FarmCPU tests execute GAPIT's ordinary
+matrix branches. They replace only the optional
+`bigmemory::is.big.matrix(...)` probes with `FALSE` in memory, leaving the
+pinned source checkout unchanged and avoiding a test-only `bigmemory`
+dependency.
 
 An R runtime is required in addition to the Python `rpy2` package. If either dependency is unavailable, tests are skipped with an explicit reason so the ordinary suite remains usable. Set `PYGAPIT_REQUIRE_R_ALIGNMENT=1` to turn an unavailable R runtime or rpy2 import into a hard failure in a parity CI job.
 
@@ -29,4 +38,8 @@ pixi install -e dev
 pixi run -e dev pytest tests/cross_language -q
 ```
 
-The tests use fixed genotypes, phenotypes, covariates, and p-values from shared fixtures. They do not modify the R checkout or write output files. Missing numeric genotypes are checked under GAPIT's `Middle`, `Major`, and `Minor` imputation policies. Remaining model work is the complete iterative FarmCPU/BLINK workflow and SUPER-based top-level sBLUP selection; their independently testable numerical kernels and public Python dispatch contracts are already covered.
+The tests use fixed genotypes, phenotypes, covariates, and p-values from shared
+fixtures. They do not modify the R checkout or write output files. Missing
+numeric genotypes are checked under GAPIT's `Middle`, `Major`, and `Minor`
+imputation policies. The main remaining prediction workflow gap is GAPIT's
+SUPER-based top-level sBLUP QTN selection.

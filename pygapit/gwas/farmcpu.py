@@ -37,7 +37,7 @@ from .._typing import (
 )
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
-from .glm import glm_scan_with_cofactors
+from .glm import glm_scan_with_cofactors, reward_substitute_cofactor_statistics
 
 
 @dataclass(frozen=True, slots=True)
@@ -101,11 +101,11 @@ def _bin_select_qtns(
     for raw_i in sig_idx:
         i = int(raw_i)
         chrom = str(chromosomes[i])
-        pos = float(positions[i]) if not np.isnan(float(positions[i])) else 0
+        pos = positions[i] if not np.isnan(positions[i]) else 0.0
         bin_num = int(pos // bin_size)
         key = (chrom, bin_num)
         if key not in bin_ids or p_values[i] < bin_ids[key][0]:
-            bin_ids[key] = (float(p_values[i]), i)
+            bin_ids[key] = (p_values[i], i)
 
     selected = np.array([v[1] for v in bin_ids.values()], dtype=int)
 
@@ -232,6 +232,10 @@ def farmcpu_gwas(
             max_qtns=max_qtns,
             p_threshold=p_threshold,
         )
+        if iteration > 0 and len(prev_qtns) > 0:
+            candidate_qtns = np.asarray(
+                list(dict.fromkeys([*candidate_qtns, *prev_qtns])), dtype=int
+            )
 
         if len(candidate_qtns) == 0:
             break
@@ -243,7 +247,13 @@ def farmcpu_gwas(
         current_ve = ve
 
         # ── FEM: Test all markers with pseudo-QTN cofactors ────────────
-        glm_result = glm_scan_with_cofactors(y, X0, GD, current_qtns)
+        glm_result = reward_substitute_cofactor_statistics(
+            glm_scan_with_cofactors(y, X0, GD, current_qtns),
+            y,
+            X0,
+            GD,
+            current_qtns,
+        )
         p_values = glm_result.p_values.copy()
 
         # ── Convergence check ──────────────────────────────────────────
@@ -260,7 +270,13 @@ def farmcpu_gwas(
             break
 
     # Final FEM pass with converged QTN set
-    final_result = glm_scan_with_cofactors(y, X0, GD, current_qtns)
+    final_result = reward_substitute_cofactor_statistics(
+        glm_scan_with_cofactors(y, X0, GD, current_qtns),
+        y,
+        X0,
+        GD,
+        current_qtns,
+    )
     h2 = (
         current_vg / (current_vg + current_ve) if (current_vg + current_ve) > 0 else 0.0
     )

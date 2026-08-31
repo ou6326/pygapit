@@ -148,8 +148,8 @@ def _genomic_axis(
     for index, chrom in enumerate(unique_chroms):
         mask = chroms == chrom
         chrom_positions = pos[mask]
-        minimum = float(np.min(chrom_positions))
-        maximum = float(np.max(chrom_positions))
+        minimum = np.min(chrom_positions)
+        maximum = np.max(chrom_positions)
         span = maximum - minimum
         x_values[mask] = cumulative + chrom_positions - minimum
         centers[index] = cumulative + span / 2.0
@@ -240,7 +240,7 @@ def manhattan_plot(
     )
 
     # Axis formatting
-    ax.set_xlim(0, max(float(x_vals.max()) * 1.01, 1.0))
+    ax.set_xlim(0, max(x_vals.max() * 1.01, 1.0))
     ax.set_ylim(0, max(log_p.max() * 1.1, sig_line * 1.2))
     ax.set_xticks(chrom_centers)
     ax.set_xticklabels(unique_chroms, fontsize=7)
@@ -624,7 +624,7 @@ def gs_scatter(
 
     # Regression line
     m_coef = np.asarray(np.polyfit(obs_v, pred_v, 1), dtype=np.float64)
-    x_min, x_max = float(obs_v.min()), float(obs_v.max())
+    x_min, x_max = obs_v.min(), obs_v.max()
     x_line = np.array(
         [x_min + (x_max - x_min) * i / 99 for i in range(100)], dtype=np.float64
     )

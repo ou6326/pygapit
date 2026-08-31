@@ -87,7 +87,7 @@ def compute_pca(
     scores = U * S  # (n, k) — PC scores (same as R's prcomp$x)
     loadings = Vt.T  # (m, k)
     eigenvalues = S**2 / (n - 1)
-    total_var = float(np.sum(eigenvalues_all))
+    total_var = np.sum(eigenvalues_all)
     var_explained: FloatVector = (
         eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum()
     )

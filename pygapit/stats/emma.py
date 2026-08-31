@@ -14,7 +14,7 @@ for all SNP tests using spectral decomposition for speed.
 
 from __future__ import annotations
 
-import math
+import typing as t
 from dataclasses import dataclass
 
 import numpy as np
@@ -89,30 +89,38 @@ def _eigen_L_wo_Z(K: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
     return eigvals[::-1], eigvecs[:, ::-1]
 
 
-def _reml_ll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> float:
+def _reml_ll(
+    log_delta: float, lambda_R: FloatVector, etas: FloatVector
+) -> np.float64:
     """
     REML log-likelihood as a function of log(delta).
     Equation from Kang et al. (2008) Genetics.
     """
     nq = len(etas)
-    delta = math.exp(log_delta)
+    delta = t.cast(np.float64, np.exp(log_delta))
     denom = lambda_R + delta
-    sse = float(np.sum(etas**2 / denom))
-    log_scale = math.log(nq / (2 * math.pi)) - 1.0 - math.log(sse)
-    log_denom = float(np.sum(np.log(denom)))
-    return 0.5 * (nq * log_scale - log_denom)
+    sse = np.sum(etas**2 / denom)
+    log_scale = t.cast(
+        np.float64, np.log(nq / (2 * np.pi)) - 1.0 - np.log(sse)
+    )
+    log_denom = t.cast(np.float64, np.sum(np.log(denom)))
+    return np.float64(0.5) * (nq * log_scale - log_denom)
 
 
-def _reml_dll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> float:
+def _reml_dll(
+    log_delta: float, lambda_R: FloatVector, etas: FloatVector
+) -> np.float64:
     """Derivative of REML log-likelihood w.r.t. log(delta)."""
     nq = len(etas)
-    delta = math.exp(log_delta)
+    delta = t.cast(np.float64, np.exp(log_delta))
     etasq = etas**2
     denom = lambda_R + delta
-    weighted_sq = float(np.sum(etasq / denom**2))
-    weighted = float(np.sum(etasq / denom))
-    inv_sum = float(np.sum(1.0 / denom))
-    return 0.5 * delta * (nq * weighted_sq / weighted - inv_sum)
+    weighted_sq = np.sum(etasq / denom**2)
+    weighted = np.sum(etasq / denom)
+    inv_sum = np.sum(1.0 / denom)
+    return np.float64(0.5) * delta * (
+        nq * weighted_sq / weighted - inv_sum
+    )
 
 
 def emma_remle(
@@ -201,13 +209,13 @@ def emma_remle(
         opt_lls = [_reml_ll(log_deltas[best_idx], lambda_R, etas)]
 
     best_idx = int(np.argmax(opt_lls))
-    best_delta = float(np.exp(opt_log_deltas[best_idx]))
+    best_delta = t.cast(np.float64, np.exp(opt_log_deltas[best_idx]))
     best_ll = opt_lls[best_idx]
 
     # Recover variance components
     nq = n - q
     denom = lambda_R + best_delta
-    sse = float(np.sum(etas**2 / denom))
+    sse = np.sum(etas**2 / denom)
     vg = sse / nq
     ve = vg * best_delta
     h2 = vg / (vg + ve) if (vg + ve) > 0 else 0.0
@@ -304,7 +312,7 @@ def emmax_p3d(
                 p_values[i] = 1.0
                 continue
             t_stat = beta[q0] / se
-            p_values[i] = float(2.0 * t_dist.sf(abs(t_stat), observed_count - q1))
+            p_values[i] = 2.0 * t_dist.sf(abs(t_stat), observed_count - q1)
             effects[i] = beta[q0]
             se_arr[i] = se
             stats_arr[i] = t_stat

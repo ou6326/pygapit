@@ -174,3 +174,69 @@ def glm_scan_with_cofactors(
         X_ext = X0
 
     return glm_gwas(y, X_ext, GD)
+
+
+def reward_substitute_cofactor_statistics(
+    result: GLMResult,
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    qtns: IntVector,
+) -> GLMResult:
+    """Restore pseudo-QTN statistics using GAPIT 3.5's SUB reward rule."""
+    if len(qtns) == 0:
+        return result
+
+    base_design = np.column_stack([X0, GD[:, qtns]])
+    n = len(y)
+    cofactor_count = len(qtns)
+    cofactor_p = np.full((GD.shape[1], cofactor_count), np.nan, dtype=np.float64)
+    for marker in range(GD.shape[1]):
+        marker_values = GD[:, marker]
+        residualized = marker_values - base_design @ (
+            np.linalg.pinv(base_design) @ marker_values
+        )
+        if residualized @ residualized < 1e-8:
+            continue
+        design = np.column_stack([base_design, marker_values])
+        degrees_of_freedom = n - design.shape[1]
+        beta = np.linalg.pinv(design) @ y
+        residual = y - design @ beta
+        mse = (residual @ residual) / degrees_of_freedom
+        covariance = np.linalg.pinv(design.T @ design) * mse
+        standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
+        statistics = beta / standard_errors
+        p_values = np.asarray(
+            2.0 * t_dist.sf(np.abs(statistics), degrees_of_freedom),
+            dtype=np.float64,
+        )
+        start = X0.shape[1]
+        cofactor_p[marker] = p_values[start : start + cofactor_count]
+
+    reward_p = np.asarray(
+        [
+            np.min(column[np.isfinite(column)])
+            if np.isfinite(column).any()
+            else 1.0
+            for column in cofactor_p.T
+        ],
+        dtype=np.float64,
+    )
+    degrees_of_freedom = n - base_design.shape[1]
+    beta = np.linalg.pinv(base_design) @ y
+    residual = y - base_design @ beta
+    mse = (residual @ residual) / degrees_of_freedom
+    covariance = np.linalg.pinv(base_design.T @ base_design) * mse
+    standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
+    statistics = beta / standard_errors
+    start = X0.shape[1]
+
+    p_values = result.p_values.copy()
+    effects = result.effects.copy()
+    se = result.se.copy()
+    t_stats = result.t_stats.copy()
+    p_values[qtns] = reward_p
+    effects[qtns] = beta[start : start + cofactor_count]
+    se[qtns] = standard_errors[start : start + cofactor_count]
+    t_stats[qtns] = statistics[start : start + cofactor_count]
+    return GLMResult(p_values, effects, se, t_stats, result.r2_full)

@@ -25,8 +25,8 @@ def _inputs(n: int = 12, invariant: bool = False) -> tuple[pd.DataFrame, ...]:
     phenotype = pd.DataFrame(
         {
             "Taxa": taxa,
-            "height": np.linspace(1.0, float(n), n),
-            "yield": np.linspace(float(n), 1.0, n),
+            "height": np.linspace(1.0, n, n),
+            "yield": np.linspace(n, 1.0, n),
         }
     )
     if invariant:

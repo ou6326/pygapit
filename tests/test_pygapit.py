@@ -540,6 +540,23 @@ class TestBLINK:
         r = blink_gwas(y, X0, GD, max_iterations=3)
         assert r.p_values.shape == (m,)
 
+    def test_blink_single_marker_reward_fallback(self) -> None:
+        """A sole pseudo-QTN must not require another marker for substitution."""
+        from pygapit.gwas.blink import blink_gwas
+
+        genotypes = np.array([[0.0], [1.0], [2.0], [0.0], [1.0], [2.0]])
+        phenotype = np.array([0.1, 1.0, 2.2, 0.2, 1.1, 2.0])
+        result = blink_gwas(
+            phenotype,
+            np.ones((len(phenotype), 1)),
+            genotypes,
+            max_iterations=3,
+            p_threshold=1.0,
+        )
+
+        assert result.p_values.shape == (1,)
+        assert 0.0 <= result.p_values[0] <= 1.0
+
     def test_blink_selects_qtns(self, small_dataset: SmallDataset) -> None:
         """BLINK should identify QTNs near the planted signal."""
         from pygapit.gwas.blink import blink_gwas
