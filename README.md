@@ -37,7 +37,7 @@ pip install ".[bigdata]"  # include HDF5, Zarr, and Dask for larger datasets
 ```
 
 **Runtime dependencies** are installed automatically: `numpy`, `scipy`,
-`pandas`, `matplotlib`, `seaborn`, `plotly`, `scikit-learn`, `joblib`,
+`pandas`, `matplotlib`, `seaborn`, `plotly`, `joblib`,
 `biopython`, and `jinja2`.
 
 ### Development
