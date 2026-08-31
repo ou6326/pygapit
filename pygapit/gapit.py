@@ -359,7 +359,9 @@ def GAPIT(
             )
 
             elapsed = time.time() - t_model
-            print(f"[pyGAPIT] {model_name} done in {elapsed:.1f}s | h^2={result.h2:.3f}")
+            print(
+                f"[pyGAPIT] {model_name} done in {elapsed:.1f}s | h^2={result.h2:.3f}"
+            )
             all_results[f"{trait_name}_{model_name}"] = _assemble_result(
                 prepared=prepared,
                 model_result=result,

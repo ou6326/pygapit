@@ -232,10 +232,7 @@ mlm_r = mlm_gwas(y, X0, GD_arr, K)
 gwas_results["MLM"] = mlm_r.p_values
 lam = genomic_inflation_factor(mlm_r.p_values)
 sig = (mlm_r.p_values <= thresh_bon).sum()
-print(
-    f"lambda={lam:.3f}, h^2={mlm_r.h2:.3f}, "
-    f"{sig} sig SNPs [{time.time() - t0:.1f}s]"
-)
+print(f"lambda={lam:.3f}, h^2={mlm_r.h2:.3f}, {sig} sig SNPs [{time.time() - t0:.1f}s]")
 
 # FarmCPU
 print("FarmCPU...", end=" ", flush=True)

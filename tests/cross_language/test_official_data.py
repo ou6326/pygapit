@@ -43,7 +43,9 @@ def _load_official_dataset(r_root: Path) -> OfficialDataset:
     genotype_by_taxon = genotype.set_index(genotype.columns[0])
     phenotype_taxa = phenotype["Taxa"].astype(str)
     trait_values = pd.to_numeric(phenotype["EarHT"], errors="coerce")
-    valid = phenotype_taxa.isin(genotype_by_taxon.index.astype(str)) & trait_values.notna()
+    valid = (
+        phenotype_taxa.isin(genotype_by_taxon.index.astype(str)) & trait_values.notna()
+    )
     taxa_index = pd.Index(phenotype_taxa[valid], dtype="str")
     taxa = taxa_index.to_numpy(dtype=np.str_)
     values = genotype_by_taxon.loc[taxa_index].to_numpy(dtype=np.float64)

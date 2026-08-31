@@ -218,9 +218,7 @@ def reward_substitute_cofactor_statistics(
     # non-significant value 1.0 while preserving GAPIT's finite rewards.
     reward_p = np.asarray(
         [
-            np.min(column[np.isfinite(column)])
-            if np.isfinite(column).any()
-            else 1.0
+            np.min(column[np.isfinite(column)]) if np.isfinite(column).any() else 1.0
             for column in cofactor_p.T
         ],
         dtype=np.float64,

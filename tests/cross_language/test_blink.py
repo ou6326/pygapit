@@ -115,9 +115,7 @@ def test_blink_degenerate_no_qtn_calibration_normalizes_gapit_nan(
     )
 
     for p_values in (np.ones(4, dtype=np.float64), np.zeros(4, dtype=np.float64)):
-        r_result = r_bridge.float_array(
-            r_calibrate(r_bridge.float_vector(p_values))
-        )
+        r_result = r_bridge.float_array(r_calibrate(r_bridge.float_vector(p_values)))
         py_result = _calibrate_no_qtn_p_values(p_values)
 
         assert np.isnan(r_result).all()
@@ -202,9 +200,7 @@ def test_blink_no_substitute_reward_normalizes_gapit_infinity(
     phenotype = np.column_stack(
         [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
     )
-    marker_map = np.array(
-        [[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64
-    )
+    marker_map = np.array([[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64)
 
     r_bridge.source(r_root, "GAPIT.Specify.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
@@ -349,9 +345,7 @@ def test_blink_single_qtn_with_one_substitute_matches_bundled_r_gapit(
     phenotype = np.column_stack(
         [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
     )
-    marker_map = np.array(
-        [[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64
-    )
+    marker_map = np.array([[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64)
     r_bridge.source(r_root, "GAPIT.Specify.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.Blink.R")

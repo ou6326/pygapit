@@ -68,9 +68,7 @@ def _reml_delta(
         df = n - X.shape[1]
         s2 = np.sum(res**2 / d) / df
         sum_log_d = t.cast(np.float64, np.sum(np.log(d)))
-        ll = t.cast(
-            np.float64, sum_log_d + df * np.log(max(s2, 1e-15)) + n
-        )
+        ll = t.cast(np.float64, sum_log_d + df * np.log(max(s2, 1e-15)) + n)
         return ll
 
     with warnings.catch_warnings():
