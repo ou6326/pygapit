@@ -24,6 +24,8 @@ The suite is divided by function so a failure identifies the affected layer dire
   valid p-values.
 - `test_mlm.py`: EMMA null-model REML likelihood, variance components, and heritability, plus SNP-level EMMAX/P3D p-values, effects, standard errors, and test statistics
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
+- `test_workflows.py`: public GLM and MLM orchestration with PCA, covariates,
+  supplied kinship, shuffled labels, and missing phenotype observations
 - `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding
   values, prediction-error variances, and phenotype predictions
 
