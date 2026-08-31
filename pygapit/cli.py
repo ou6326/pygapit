@@ -257,8 +257,8 @@ Examples:
 
 def _print_summary(label: str, result: GAPITResult) -> None:
     print(f"\n  {label}")
-    print(f"    h²      = {result.h2:.4f}")
-    print(f"    λ (GC)  = {result.lambda_gc:.4f}")
+    print(f"    h^2     = {result.h2:.4f}")
+    print(f"    lambda (GC) = {result.lambda_gc:.4f}")
     if result.GWAS is not None:
         print(f"    SNPs    = {len(result.GWAS):,}")
     if result.significant is not None and len(result.significant) > 0:

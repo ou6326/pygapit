@@ -305,7 +305,7 @@ def GAPIT(
             raise ValueError(
                 f"NQTN ({NQTN}) cannot exceed the marker count ({geno.GD.shape[1]})"
             )
-        print(f"[pyGAPIT] Simulation mode: h²={h2}, NQTN={NQTN}")
+        print(f"[pyGAPIT] Simulation mode: h^2={h2}, NQTN={NQTN}")
         pheno = _simulate_phenotype(pheno, geno, h2=h2, n_qtn=NQTN)
 
     # ── Select trait ─────────────────────────────────────────────────────
@@ -324,7 +324,7 @@ def GAPIT(
     all_results: dict[str, GAPITResult] = {}
 
     for trait_name in traits_to_run:
-        print(f"\n[pyGAPIT] ──── Trait: {trait_name} ────")
+        print(f"\n[pyGAPIT] ---- Trait: {trait_name} ----")
         prepared = _prepare_trait(
             aligned,
             trait_name,
@@ -359,7 +359,7 @@ def GAPIT(
             )
 
             elapsed = time.time() - t_model
-            print(f"[pyGAPIT] {model_name} done in {elapsed:.1f}s | h²={result.h2:.3f}")
+            print(f"[pyGAPIT] {model_name} done in {elapsed:.1f}s | h^2={result.h2:.3f}")
             all_results[f"{trait_name}_{model_name}"] = _assemble_result(
                 prepared=prepared,
                 model_result=result,
@@ -839,7 +839,7 @@ def _assemble_result(
     significant = gwas[significant_mask].copy()
     significant_count = significant_mask.sum()
     print(
-        f"[pyGAPIT] λ={lambda_gc:.3f} | {significant_count} significant SNPs "
+        f"[pyGAPIT] lambda={lambda_gc:.3f} | {significant_count} significant SNPs "
         f"(threshold={threshold:.2e})"
     )
 

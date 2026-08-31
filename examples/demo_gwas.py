@@ -113,7 +113,7 @@ print("=" * 65)
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 1: Load and inspect data
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 1: Loading data ──────────────────────────────────")
+print("\n-- Section 1: Loading data ----------------------------------")
 
 Y = pd.read_csv(PHENO_FILE, sep="\t")
 GD = pd.read_csv(GD_FILE, sep="\t")
@@ -134,7 +134,7 @@ print(
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 2: GAPIT() one-liner — matches R tutorial exactly
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 2: Multi-model GWAS via GAPIT() ─────────────────")
+print("\n-- Section 2: Multi-model GWAS via GAPIT() -----------------")
 print("Running GLM, MLM, FarmCPU, BLINK on EarHT (mirrors R tutorial)...")
 
 t0 = time.time()
@@ -158,14 +158,14 @@ for r in results.values():
     n_sig = len(r.significant) if r.significant is not None else 0
     qtns = len(r.QTNs) if r.QTNs is not None else "n/a"
     print(
-        f"  {r.model:10s}  h²={r.h2:.3f}  λ={r.lambda_gc:.3f}  "
+        f"  {r.model:10s}  h^2={r.h2:.3f}  lambda={r.lambda_gc:.3f}  "
         f"sig_SNPs={n_sig}  QTNs={qtns}"
     )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 3: Low-level API — step by step, mimicking R GAPIT internals
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 3: Low-level API (step by step) ─────────────────")
+print("\n-- Section 3: Low-level API (step by step) -----------------")
 
 pheno = read_phenotype(PHENO_FILE)
 geno = read_numeric(GD_FILE, GM_FILE)
@@ -199,12 +199,15 @@ print(
 # REML
 print("Estimating variance components (REML)...")
 remle = emma_remle(y, X0, K)
-print(f"  h²={remle.h2:.4f}, vg={remle.vg:.2f}, ve={remle.ve:.2f}, δ={remle.delta:.4f}")
+print(
+    f"  h^2={remle.h2:.4f}, vg={remle.vg:.2f}, "
+    f"ve={remle.ve:.2f}, delta={remle.delta:.4f}"
+)
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 4: GWAS model comparison
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 4: GWAS model comparison ────────────────────────")
+print("\n-- Section 4: GWAS model comparison ------------------------")
 
 chromosomes = GM_arr["Chromosome"].values
 positions = GM_arr["Position"].values.astype(float)
@@ -220,7 +223,7 @@ glm_r = glm_gwas(y, X0, GD_arr)
 gwas_results["GLM"] = glm_r.p_values
 lam = genomic_inflation_factor(glm_r.p_values)
 sig = (glm_r.p_values <= thresh_bon).sum()
-print(f"λ={lam:.3f}, {sig} sig SNPs [{time.time() - t0:.1f}s]")
+print(f"lambda={lam:.3f}, {sig} sig SNPs [{time.time() - t0:.1f}s]")
 
 # MLM
 print("MLM...", end=" ", flush=True)
@@ -229,7 +232,10 @@ mlm_r = mlm_gwas(y, X0, GD_arr, K)
 gwas_results["MLM"] = mlm_r.p_values
 lam = genomic_inflation_factor(mlm_r.p_values)
 sig = (mlm_r.p_values <= thresh_bon).sum()
-print(f"λ={lam:.3f}, h²={mlm_r.h2:.3f}, {sig} sig SNPs [{time.time() - t0:.1f}s]")
+print(
+    f"lambda={lam:.3f}, h^2={mlm_r.h2:.3f}, "
+    f"{sig} sig SNPs [{time.time() - t0:.1f}s]"
+)
 
 # FarmCPU
 print("FarmCPU...", end=" ", flush=True)
@@ -244,7 +250,8 @@ if len(farm_r.selected_qtns) > 0:
 lam = genomic_inflation_factor(farm_r.p_values[non_qtn])
 sig = (farm_r.p_values <= thresh_bon).sum()
 print(
-    f"λ={lam:.3f}, {len(farm_r.selected_qtns)} QTNs, {sig} sig [{time.time() - t0:.1f}s]"
+    f"lambda={lam:.3f}, {len(farm_r.selected_qtns)} QTNs, "
+    f"{sig} sig [{time.time() - t0:.1f}s]"
 )
 
 # BLINK
@@ -258,19 +265,20 @@ if len(blink_r.selected_qtns) > 0:
 lam = genomic_inflation_factor(blink_r.p_values[non_qtn_b])
 sig = (blink_r.p_values <= thresh_bon).sum()
 print(
-    f"λ={lam:.3f}, {len(blink_r.selected_qtns)} QTNs, {sig} sig [{time.time() - t0:.1f}s]"
+    f"lambda={lam:.3f}, {len(blink_r.selected_qtns)} QTNs, "
+    f"{sig} sig [{time.time() - t0:.1f}s]"
 )
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 5: Genomic selection
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 5: Genomic selection (gBLUP) ────────────────────")
+print("\n-- Section 5: Genomic selection (gBLUP) --------------------")
 
 print("Running gBLUP...", end=" ", flush=True)
 t0 = time.time()
 gs = gblup(y, X0, K, taxa=taxa)
 r_acc = np.corrcoef(y, gs.prediction)[0, 1]
-print(f"h²={gs.h2:.3f}, r={r_acc:.4f} [{time.time() - t0:.1f}s]")
+print(f"h^2={gs.h2:.3f}, r={r_acc:.4f} [{time.time() - t0:.1f}s]")
 
 print("\nTop 5 individuals by GEBV:")
 top5 = np.argsort(gs.gebv)[-5:][::-1]
@@ -284,12 +292,12 @@ print("\nsBLUP (using BLINK QTNs)...", end=" ", flush=True)
 t0 = time.time()
 gs_s = sblup(y, X0, GD_arr, qtn_indices=blink_r.selected_qtns, taxa=taxa)
 r_acc_s = np.corrcoef(y, gs_s.prediction)[0, 1]
-print(f"h²={gs_s.h2:.3f}, r={r_acc_s:.4f} [{time.time() - t0:.1f}s]")
+print(f"h^2={gs_s.h2:.3f}, r={r_acc_s:.4f} [{time.time() - t0:.1f}s]")
 
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 6: Visualizations
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 6: Generating plots ─────────────────────────────")
+print("\n-- Section 6: Generating plots -----------------------------")
 
 # Manhattan plots for all models
 fig, raw_axes = plt.subplots(4, 1, figsize=(14, 18))
@@ -398,7 +406,7 @@ print(f"  Saved: {OUT}/demo_gs_scatter.pdf")
 # ─────────────────────────────────────────────────────────────────────────────
 # SECTION 7: Simulation study (power comparison)
 # ─────────────────────────────────────────────────────────────────────────────
-print("\n── Section 7: Simulation (h²=0.7, 20 QTNs) ─────────────────")
+print("\n-- Section 7: Simulation (h^2=0.7, 20 QTNs) ----------------")
 print("Simulating phenotype from genotype data...")
 
 np.random.seed(198521)  # same seed as GAPIT's demo
@@ -444,9 +452,10 @@ print("  Demo complete!")
 print("=" * 65)
 print(f"\nOutput files written to: {OUT.resolve()}/")
 print("\nKey results (EarHT trait):")
-print(f"  Heritability (h²):     {remle.h2:.4f}")
+print(f"  Heritability (h^2):    {remle.h2:.4f}")
 print(
-    f"  Genomic inflation (λ): {genomic_inflation_factor(glm_r.p_values):.3f} [GLM]  "
+    f"  Genomic inflation (lambda): "
+    f"{genomic_inflation_factor(glm_r.p_values):.3f} [GLM]  "
     f"{genomic_inflation_factor(mlm_r.p_values):.3f} [MLM]"
 )
 print(f"  BLINK QTNs selected:   {len(blink_r.selected_qtns)}")
