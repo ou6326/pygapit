@@ -30,6 +30,9 @@ The suite is divided by function so a failure identifies the affected layer dire
   incidence-matrix REML/EMMAX statistics, and automatic group selection
 - `test_cmlm_boundaries.py`: redundant incidence levels, near-collinear fixed
   effects, and singular-design behavior in native-incidence REML
+- `test_mlmm.py`: public MLMM orchestration with PCA, covariates, supplied
+  kinship, missing phenotypes, forward/backward QTN selection, and final
+  marker p-values and effects
 - `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding
   values, prediction-error variances, and phenotype predictions
 
@@ -65,3 +68,10 @@ GAPIT also returns an all-zero REML sentinel for a singular fixed-effect
 design; pyGAPIT raises `ValueError` because those values do not describe a
 fitted model. Redundant or empty incidence levels remain accepted when their
 marginal model is numerically defined and matches GAPIT.
+For MLMM extended BIC, GAPIT includes ordinary covariates in the
+combinatorial marker-selection penalty. pyGAPIT counts only selected marker
+cofactors, preserving the intended statistical meaning when user covariates
+or principal components are present. The public MLMM result is the extended
+BIC model, so the generic `p_threshold` option does not truncate its forward
+path; GAPIT's similarly named `thresh` selects a separate report rather than
+controlling forward selection.

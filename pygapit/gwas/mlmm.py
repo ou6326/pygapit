@@ -7,8 +7,8 @@ Algorithm (stepwise forward/backward selection):
   2. Add most significant marker as fixed cofactor
   3. Re-run MLM conditioned on all cofactors
   4. Repeat up to max_steps times
-  5. Select optimal model by extended BIC (extBIC)
-  6. Backward elimination: remove cofactors that become non-significant
+  5. Build a backward path by removing the least significant cofactor
+  6. Select the optimal forward/backward model by extended BIC (extBIC)
 
 Key difference from FarmCPU:
   K stays FIXED throughout (all-marker kinship).
@@ -23,9 +23,13 @@ import typing as t
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.optimize import minimize_scalar
+from scipy.special import gammaln
+from scipy.stats import f as f_dist
+from scipy.stats import t as t_dist
 
 from .._typing import FloatMatrix, FloatVector, IntVector, readonly_copy
-from ..stats.emma import emma_remle, emmax_p3d
+from ..stats.emma import GWASResult, emma_remle
 
 
 @dataclass(frozen=True, slots=True)
@@ -46,19 +50,216 @@ class MLMMResult:
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
-def _ext_bic(log_lik: float, n: int, k: int, m: int) -> np.float64:
+def _normalize_kinship(K: FloatMatrix) -> FloatMatrix:
+    """Apply the GAPIT MLMM kinship scaling without changing its structure."""
+    n = K.shape[0]
+    centering = np.eye(n) - np.full((n, n), 1.0 / n)
+    scale = np.sum(centering * K)
+    if not np.isfinite(scale) or scale <= 0.0:
+        raise ValueError("MLMM kinship matrix must have positive centered variation")
+    return t.cast(FloatMatrix, (n - 1) * K / scale)
+
+
+def _profile_ml_log_likelihood(
+    y: FloatVector,
+    X: FloatMatrix,
+    eigenvalues: FloatVector,
+    eigenvectors: FloatMatrix,
+) -> np.float64:
+    """Profile the ordinary ML likelihood used by GAPIT's extBIC."""
+    n = len(y)
+    rotated_y = eigenvectors.T @ y
+    rotated_X = eigenvectors.T @ X
+
+    def log_likelihood(log_delta: float) -> np.float64:
+        delta = t.cast(np.float64, np.exp(log_delta))
+        denominator = eigenvalues + delta
+        weights = 1.0 / np.sqrt(denominator)
+        weighted_X = rotated_X * weights[:, np.newaxis]
+        weighted_y = rotated_y * weights
+        beta, *_ = np.linalg.lstsq(weighted_X, weighted_y, rcond=None)
+        residual = rotated_y - rotated_X @ beta
+        sse = np.sum(residual**2 / denominator)
+        return t.cast(
+            np.float64,
+            0.5
+            * (
+                n * (np.log(n / (2.0 * np.pi)) - 1.0 - np.log(sse))
+                - np.sum(np.log(denominator))
+            ),
+        )
+
+    def objective(value: float) -> np.float64:
+        return -log_likelihood(value)
+
+    optimum = minimize_scalar(
+        objective,
+        bounds=(-10.0, 10.0),
+        method="bounded",
+        options={"xatol": 1e-10},
+    )
+    candidates = [
+        log_likelihood(-10.0),
+        log_likelihood(10.0),
+        log_likelihood(optimum.x),
+    ]
+    return np.max(candidates)
+
+
+def _ext_bic(
+    log_lik: float,
+    n: int,
+    n_fixed: int,
+    m: int,
+    n_selected: int,
+) -> np.float64:
     """
     Extended BIC for multi-locus model selection.
-    extBIC = -2*logL + k*log(n) + 2*k*log(m-1)
-    where m = number of markers, k = number of parameters.
-    Penalizes model complexity more heavily than standard BIC.
-    Translates the opt_extBIC criterion from GAPIT.Bus.R
+    Uses the exact combinatorial penalty for choosing ``n_selected`` markers
+    from ``m`` candidates. GAPIT's covariate branch incorrectly includes
+    ordinary covariates in this combination count; pyGAPIT deliberately counts
+    selected markers only.
     """
-    bic = t.cast(
-        np.float64,
-        -2.0 * log_lik + k * np.log(n) + 2.0 * k * np.log(max(m - 1, 1)),
+    log_combinations = (
+        gammaln(m + 1) - gammaln(n_selected + 1) - gammaln(m - n_selected + 1)
     )
-    return bic
+    return t.cast(
+        np.float64,
+        -2.0 * log_lik + (n_fixed + 1) * np.log(n) + 2.0 * log_combinations,
+    )
+
+
+def _restore_cofactor_statistics(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
+    cofactors: list[int],
+    result: GWASResult,
+    ngrids: int,
+) -> GWASResult:
+    """Replace collinear scan placeholders with joint GLS cofactor statistics."""
+    if not cofactors:
+        return result
+    design = np.column_stack([X0] + [GD[:, index] for index in cofactors])
+    remle = emma_remle(y, design, K, ngrids=ngrids)
+    covariance = K + remle.delta * np.eye(len(y))
+    precision = np.linalg.pinv(covariance)
+    information_inverse = np.linalg.pinv(design.T @ precision @ design)
+    beta = information_inverse @ design.T @ precision @ y
+    standard_errors = np.sqrt(np.maximum(np.diag(information_inverse) * remle.vg, 0.0))
+    statistics = beta / standard_errors
+    degrees_of_freedom = len(y) - design.shape[1]
+    p_values = t.cast(
+        FloatVector,
+        2.0 * t_dist.sf(np.abs(statistics), degrees_of_freedom),
+    )
+    result_p_values = result.p_values.copy()
+    result_effects = result.effects.copy()
+    result_se = result.se.copy()
+    result_stats = result.stats.copy()
+    offset = X0.shape[1]
+    for position, marker in enumerate(cofactors):
+        coefficient = offset + position
+        result_p_values[marker] = p_values[coefficient]
+        result_effects[marker] = beta[coefficient]
+        result_se[marker] = standard_errors[coefficient]
+        result_stats[marker] = statistics[coefficient]
+    return GWASResult(
+        p_values=result_p_values,
+        effects=result_effects,
+        se=result_se,
+        stats=result_stats,
+        vg=result.vg,
+        ve=result.ve,
+        h2=result.h2,
+    )
+
+
+def _least_significant_cofactor(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
+    cofactors: list[int],
+    ngrids: int,
+) -> int:
+    """Return the marker with GAPIT's smallest absolute joint GLS t statistic."""
+    design = np.column_stack([X0] + [GD[:, index] for index in cofactors])
+    remle = emma_remle(y, design, K, ngrids=ngrids)
+    covariance = K + remle.delta * np.eye(len(y))
+    precision = np.linalg.pinv(covariance)
+    information_inverse = np.linalg.pinv(design.T @ precision @ design)
+    beta = information_inverse @ design.T @ precision @ y
+    standard_errors = np.sqrt(np.maximum(np.diag(information_inverse) * remle.vg, 0.0))
+    marker_statistics = np.abs(beta[X0.shape[1] :] / standard_errors[X0.shape[1] :])
+    return cofactors[int(np.nanargmin(marker_statistics))]
+
+
+def _conditioned_marker_scan(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
+    cofactors: list[int],
+    ngrids: int,
+) -> GWASResult:
+    """Run the RSS/F marker scan used by GAPIT's MLMM implementation."""
+    design = (
+        np.column_stack([X0] + [GD[:, index] for index in cofactors])
+        if cofactors
+        else X0
+    )
+    remle = emma_remle(y, design, K, ngrids=ngrids)
+    covariance = remle.vg * K + remle.ve * np.eye(len(y))
+    cholesky = np.linalg.cholesky(covariance)
+    transformed_y = np.linalg.solve(cholesky, y)
+    transformed_design = np.linalg.solve(cholesky, design)
+    design_beta, *_ = np.linalg.lstsq(transformed_design, transformed_y, rcond=None)
+    residual = transformed_y - transformed_design @ design_beta
+    projection = np.eye(len(y)) - transformed_design @ np.linalg.pinv(
+        transformed_design
+    )
+    transformed_genotypes = projection @ np.linalg.solve(cholesky, GD)
+    null_rss = np.sum(residual**2)
+    degrees_of_freedom = len(y) - design.shape[1] - 1
+
+    p_values = np.ones(GD.shape[1])
+    effects = np.full(GD.shape[1], np.nan)
+    standard_errors = np.full(GD.shape[1], np.nan)
+    statistics = np.full(GD.shape[1], np.nan)
+    for marker in range(GD.shape[1]):
+        if marker in cofactors:
+            continue
+        genotype = transformed_genotypes[:, marker]
+        genotype_sum_squares = np.sum(genotype**2)
+        if genotype_sum_squares < 1e-12:
+            continue
+        effect = np.sum(genotype * residual) / genotype_sum_squares
+        marker_rss = np.sum((residual - genotype * effect) ** 2)
+        f_statistic = t.cast(
+            np.float64,
+            np.maximum(
+                (null_rss / marker_rss - 1.0) * degrees_of_freedom,
+                0.0,
+            ),
+        )
+        statistic = np.sign(effect) * np.sqrt(f_statistic)
+        p_values[marker] = f_dist.sf(f_statistic, 1, degrees_of_freedom)
+        effects[marker] = effect
+        statistics[marker] = statistic
+        if f_statistic > 0.0:
+            standard_errors[marker] = abs(effect) / np.sqrt(f_statistic)
+
+    return GWASResult(
+        p_values=p_values,
+        effects=effects,
+        se=standard_errors,
+        stats=statistics,
+        vg=remle.vg,
+        ve=remle.ve,
+        h2=remle.h2,
+    )
 
 
 def mlmm_gwas(
@@ -67,7 +268,6 @@ def mlmm_gwas(
     GD: FloatMatrix,
     K: FloatMatrix,
     max_steps: int = 10,
-    p_threshold: float = 1.2e-5,
     ngrids: int = 100,
 ) -> MLMMResult:
     """
@@ -81,108 +281,78 @@ def mlmm_gwas(
     GD         : (n, m) genotype matrix
     K          : (n, n) kinship matrix (fixed throughout)
     max_steps  : maximum forward selection steps (maxsteps=10 in R)
-    p_threshold: threshold for adding cofactors (thresh=1.2e-5 in R)
 
     Returns
     -------
     MLMMResult with final p-values and selected QTN indices
     """
     n, m = GD.shape
+    K = _normalize_kinship(K)
+    eigenvalues, eigenvectors = np.linalg.eigh(K)
+    model_candidates: list[tuple[np.float64, list[int]]] = []
 
-    cofactors: list[int] = []  # list of selected SNP indices
-    best_result = None  # best GLMResult from emmax_p3d
-    best_bic = np.inf
-    best_cofactors: list[int] = []
-    best_vg, best_ve = 0.0, 0.0
+    def record_model(selected: list[int]) -> None:
+        design = (
+            np.column_stack([X0] + [GD[:, index] for index in selected])
+            if selected
+            else X0
+        )
+        log_likelihood = _profile_ml_log_likelihood(
+            y, design, eigenvalues, eigenvectors
+        )
+        model_candidates.append(
+            (
+                _ext_bic(
+                    log_likelihood,
+                    n,
+                    design.shape[1],
+                    m,
+                    len(selected),
+                ),
+                selected.copy(),
+            )
+        )
+
+    cofactors: list[int] = []
+    record_model(cofactors)
 
     # ── Initial scan without cofactors ───────────────────────────────────
-    result = emmax_p3d(y, X0, GD, K, ngrids=ngrids)
-    current_vg = result.vg
-    current_ve = result.ve
-    best_result = result
-    best_vg = current_vg
-    best_ve = current_ve
+    result = _conditioned_marker_scan(y, X0, GD, K, cofactors, ngrids)
 
-    # Compute extBIC for null model
-    null_reml = emma_remle(y, X0, K, ngrids=ngrids)
-    current_bic = _ext_bic(null_reml.reml, n, X0.shape[1], m)
-    best_bic = current_bic
-    best_cofactors = []
-
-    for _step in range(max_steps):
-        # Find most significant SNP not already a cofactor
-        p_vals = result.p_values.copy()
-        p_vals[cofactors] = 1.0  # mask already-selected SNPs
-        if np.nanmin(p_vals) > p_threshold:
+    # GAPIT's maxsteps counts the null model.
+    for _step in range(max(max_steps - 1, 0)):
+        p_values = result.p_values.copy()
+        p_values[cofactors] = np.nan
+        if not np.isfinite(p_values).any():
             break
-
-        new_snp = int(np.nanargmin(p_vals))
-        cofactors.append(new_snp)
-
-        # Build new X0 with cofactors added as fixed effects
-        X_with_cof = np.column_stack([X0] + [GD[:, c] for c in cofactors])
-
-        # Re-run EMMAX with extended X and same K
+        cofactors.append(int(np.nanargmin(p_values)))
         try:
-            result = emmax_p3d(y, X_with_cof, GD, K, ngrids=ngrids)
-            current_vg = result.vg
-            current_ve = result.ve
+            result = _conditioned_marker_scan(y, X0, GD, K, cofactors, ngrids)
+            record_model(cofactors)
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             cofactors.pop()
             break
-
-        # Compute REML LL for extBIC
-        try:
-            reml_result = emma_remle(y, X_with_cof, K, ngrids=ngrids)
-            k_params = X_with_cof.shape[1]
-            step_bic = _ext_bic(reml_result.reml, n, k_params, m)
-        except (ValueError, np.linalg.LinAlgError, FloatingPointError):
-            step_bic = best_bic + 1  # worse than current best
-
-        if step_bic < best_bic - 1e-6:
-            best_bic = step_bic
-            best_result = result
-            best_cofactors = cofactors.copy()
-            best_vg = current_vg
-            best_ve = current_ve
+        if result.h2 < 0.01:
+            break
 
     # ── Backward elimination ─────────────────────────────────────────────
-    # Remove cofactors that no longer contribute given the others
-    if len(best_cofactors) > 1:
-        improved = True
-        while improved and len(best_cofactors) > 0:
-            improved = False
-            for c in list(best_cofactors):
-                test_cofs = [x for x in best_cofactors if x != c]
-                X_test = (
-                    np.column_stack([X0] + [GD[:, cc] for cc in test_cofs])
-                    if test_cofs
-                    else X0
-                )
-                try:
-                    reml_test = emma_remle(y, X_test, K, ngrids=ngrids)
-                    k_test = X_test.shape[1]
-                    bic_test = _ext_bic(reml_test.reml, n, k_test, m)
-                    if bic_test < best_bic - 1e-6:
-                        best_bic = bic_test
-                        best_cofactors = test_cofs
-                        improved = True
-                        break
-                except (ValueError, np.linalg.LinAlgError, FloatingPointError):
-                    reml_test = None
+    # GAPIT builds a complete backward path from the final forward model.
+    backward_cofactors = cofactors.copy()
+    while len(backward_cofactors) > 1:
+        dropped = _least_significant_cofactor(y, X0, GD, K, backward_cofactors, ngrids)
+        backward_cofactors.remove(dropped)
+        record_model(backward_cofactors)
+
+    def criterion(candidate: tuple[np.float64, list[int]]) -> np.float64:
+        return candidate[0]
+
+    _, best_cofactors = min(model_candidates, key=criterion)
 
     # ── Final scan with best cofactor set ────────────────────────────────
-    if best_cofactors:
-        X_final = np.column_stack([X0] + [GD[:, c] for c in best_cofactors])
-    else:
-        X_final = X0
-
-    try:
-        final_result = emmax_p3d(y, X_final, GD, K, ngrids=ngrids)
-    except (ValueError, np.linalg.LinAlgError, FloatingPointError):
-        final_result = best_result
-
-    h2 = best_vg / (best_vg + best_ve) if (best_vg + best_ve) > 0 else 0.0
+    final_result = _conditioned_marker_scan(y, X0, GD, K, best_cofactors, ngrids)
+    final_result = _restore_cofactor_statistics(
+        y, X0, GD, K, best_cofactors, final_result, ngrids
+    )
 
     return MLMMResult(
         p_values=final_result.p_values,
@@ -190,9 +360,9 @@ def mlmm_gwas(
         se=final_result.se,
         stats=final_result.stats,
         selected_qtns=np.array(best_cofactors, dtype=int),
-        vg=best_vg,
-        ve=best_ve,
-        h2=h2,
+        vg=final_result.vg,
+        ve=final_result.ve,
+        h2=final_result.h2,
         n_steps=len(best_cofactors),
         method="MLMM",
     )

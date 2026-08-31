@@ -925,7 +925,7 @@ def _run_model(
         return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
 
     elif model_name == "MLMM":
-        r = mlmm_gwas(y, X0, GD, K, p_threshold=p_thresh)
+        r = mlmm_gwas(y, X0, GD, K)
         return ModelRunResult(
             r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
         )
