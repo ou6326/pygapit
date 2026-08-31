@@ -51,7 +51,7 @@ jobs:
         run: pyrefly check -p all
 
       - name: Python tests
-        run: pytest tests/test_pygapit.py -q
+        run: pytest tests -q --ignore=tests/cross_language
 
   windows:
     name: Windows Python ${{ matrix.python-version }}
@@ -75,7 +75,7 @@ jobs:
           python -m pip install -e . "pytest>=9.1.1"
 
       - name: Python tests
-        run: pytest tests/test_pygapit.py -q
+        run: pytest tests -q --ignore=tests/cross_language
 
   parity:
     name: GAPIT 3.5 parity
