@@ -167,9 +167,11 @@ def _candidate_mask(
 
 def _calibrate_no_qtn_p_values(p_values: FloatVector) -> FloatVector:
     """Apply GAPIT 3.5's BLINK fallback when no pseudo-QTN is selected."""
-    p_glm_log = -np.log10(np.nanquantile(p_values, 0.05))
-    bonferroni_comparison = p_glm_log / 1.3
     with np.errstate(divide="ignore", invalid="ignore"):
+        p_glm_log = -np.log10(np.nanquantile(p_values, 0.05))
+        bonferroni_comparison = p_glm_log / 1.3
+        if not np.isfinite(bonferroni_comparison) or bonferroni_comparison <= 0.0:
+            return p_values.copy()
         farmcpu_log = -np.log10(p_values) / bonferroni_comparison
         calibrated = t.cast(FloatVector, np.power(10.0, -farmcpu_log))
     calibrated[calibrated > 1.0] = 1.0

@@ -19,7 +19,9 @@ The suite is divided by function so a failure identifies the affected layer dire
   includes one and multiple valid substitutes. It also characterizes GAPIT's
   infinite reward when no independent substitute exists; pyGAPIT intentionally
   normalizes that invalid p-value to the equivalent non-significant value `1.0`
-  and an undefined duplicate-marker effect to `0.0`.
+  and an undefined duplicate-marker effect to `0.0`. Degenerate no-QTN
+  calibration scales that make GAPIT return `NaN` retain pyGAPIT's original,
+  valid p-values.
 - `test_mlm.py`: EMMA null-model REML likelihood, variance components, and heritability, plus SNP-level EMMAX/P3D p-values, effects, standard errors, and test statistics
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
 - `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding

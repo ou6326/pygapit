@@ -12,6 +12,7 @@ from numpy.typing import NDArray
 from pygapit.gapit import GAPIT
 from pygapit.gwas.blink import (
     _bic_select_cofactors,
+    _calibrate_no_qtn_p_values,
     _candidate_mask,
     _ld_prune,
 )
@@ -99,6 +100,28 @@ def test_blink_fdr_candidate_mask_matches_gapit_3_5(r_bridge: RBridge) -> None:
     )
 
     nt.assert_array_equal(py_mask, r_mask)
+
+
+def test_blink_degenerate_no_qtn_calibration_normalizes_gapit_nan(
+    r_bridge: RBridge,
+) -> None:
+    """Keep valid p-values when GAPIT's fallback scale degenerates to NaN."""
+    r_calibrate = r_bridge.function(
+        "function(p) {"
+        " p.glm.log <- -log10(stats::quantile(p, na.rm=TRUE, 0.05));"
+        " bonf.compare <- p.glm.log / 1.3;"
+        " 10^(-(-log10(p) / bonf.compare))"
+        "}"
+    )
+
+    for p_values in (np.ones(4, dtype=np.float64), np.zeros(4, dtype=np.float64)):
+        r_result = r_bridge.float_array(
+            r_calibrate(r_bridge.float_vector(p_values))
+        )
+        py_result = _calibrate_no_qtn_p_values(p_values)
+
+        assert np.isnan(r_result).all()
+        nt.assert_array_equal(py_result, p_values)
 
 
 def test_blink_iterative_workflow_matches_bundled_r_gapit(
