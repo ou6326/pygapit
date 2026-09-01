@@ -22,6 +22,7 @@ htmlcov/
 pygapit_demo_output/
 *.pdf
 GAPIT.*.csv
+benchmarks/results/
 
 # OS
 .DS_Store

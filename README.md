@@ -138,6 +138,19 @@ pip install -e ".[dev]"
 pytest tests/cross_language -q
 ```
 
+### Performance baseline
+
+A deterministic manual benchmark covers PCA, VanRaden kinship, GLM, MLM,
+FarmCPU, and BLINK without adding machine-dependent timing thresholds to CI:
+
+```bash
+pixi run -e full python benchmarks/run_baseline.py --output benchmarks/results/baseline.json
+```
+
+See [`benchmarks/README.md`](benchmarks/README.md) for workload and memory
+measurement details. Benchmark reports are evidence for comparing commits on
+the same machine; they are not universal performance guarantees.
+
 ---
 
 ## Quick start
