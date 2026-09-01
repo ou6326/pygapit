@@ -105,6 +105,47 @@ def _emma_blup(
     return beta, u, pev
 
 
+def _emma_blup_with_incidence(
+    y: FloatVector,
+    X: FloatMatrix,
+    K: FloatMatrix,
+    Z: FloatMatrix,
+    vg: float,
+    ve: float,
+) -> tuple[FloatVector, FloatVector, FloatVector]:
+    """Solve GAPIT's native incidence-matrix BLUE, BLUP, and PEV system."""
+    genetic_covariance = vg * K
+    covariance = Z @ genetic_covariance @ Z.T + ve * np.eye(len(y))
+    precision = np.linalg.inv(covariance)
+    information = X.T @ precision @ X
+    try:
+        information_inverse = np.linalg.inv(information)
+    except np.linalg.LinAlgError:
+        information_inverse = np.linalg.pinv(information)
+    beta = information_inverse @ X.T @ precision @ y
+    random_effect = genetic_covariance @ Z.T @ precision @ (y - X @ beta)
+
+    kinship_inverse = np.linalg.pinv(K)
+    random_information = Z.T @ Z / ve + kinship_inverse / vg
+    try:
+        conditional_covariance = np.linalg.inv(random_information)
+    except np.linalg.LinAlgError:
+        conditional_covariance = np.linalg.pinv(random_information)
+    fixed_effect_correction = (
+        genetic_covariance
+        @ Z.T
+        @ precision
+        @ X
+        @ information_inverse
+        @ X.T
+        @ precision
+        @ Z
+        @ genetic_covariance
+    )
+    pev = np.diag(conditional_covariance + fixed_effect_correction)
+    return beta, random_effect, pev
+
+
 def gblup(
     y: FloatVector,
     X0: FloatMatrix,
@@ -242,24 +283,52 @@ def cblup(
         np.round(np.linspace(1, group_to, min(15, group_to))).astype(int)
     )
     best_reml = -np.inf
-    best_K_eff = K_full.copy()
+    best_K_c = K_full.copy()
+    best_Z = np.eye(n)
 
     for g in candidates:
         compression_failed = False
         try:
             K_c, Z = compress_kinship(K_full, int(g))
-            K_eff = Z @ K_c @ Z.T + np.eye(n) * 1e-6
             reml = reml_for_groups(y, X0, K_c, Z)
             if reml > best_reml:
                 best_reml = reml
-                best_K_eff = K_eff.copy()
+                best_K_c = K_c.copy()
+                best_Z = Z.copy()
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             compression_failed = True
         if compression_failed:
             continue
 
-    result = gblup(y, X0, best_K_eff, taxa=taxa, ngrids=ngrids)
-    return replace(result, method="cBLUP")
+    remle = emma_remle(y, X0, best_K_c, ngrids=ngrids, Z=best_Z)
+    beta, group_blup, group_pev = _emma_blup_with_incidence(
+        y,
+        X0,
+        best_K_c,
+        best_Z,
+        remle.vg,
+        remle.ve,
+    )
+    if taxa is None:
+        taxa = np.arange(n).astype(str)
+    else:
+        taxa = as_str_vector(taxa, name="taxa")
+        require_length(taxa, n, name="taxa")
+    blue = X0 @ beta
+    blup = best_Z @ group_blup
+    pev = best_Z @ group_pev
+    return GBLUPResult(
+        taxa=taxa,
+        blue=blue,
+        blup=blup,
+        pev=pev,
+        gebv=blup,
+        prediction=blue + blup,
+        vg=remle.vg,
+        ve=remle.ve,
+        h2=remle.h2,
+        method="cBLUP",
+    )
 
 
 def sblup(

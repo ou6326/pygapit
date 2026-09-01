@@ -41,8 +41,9 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_mlmm.py`: public MLMM orchestration with PCA, covariates, supplied
   kinship, missing phenotypes, forward/backward QTN selection, and final
   marker p-values and effects
-- `test_prediction.py`: direct and top-level gBLUP fixed effects, breeding
-  values, prediction-error variances, and phenotype predictions
+- `test_prediction.py`: direct and top-level gBLUP and cBLUP fixed effects,
+  breeding values, prediction-error variances, phenotype predictions, variance
+  components, and cBLUP compression selection
 
 Each comparison sources the smallest relevant GAPIT R file instead of loading
 the full package. The complete BLINK and FarmCPU tests execute GAPIT's ordinary

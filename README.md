@@ -38,7 +38,7 @@ failure.
 | FarmCPU | `GAPIT(model="FarmCPU")` | R-validated complete iterative workflow | Full MAF-filtered marker set | Static-bin selection, pseudo-QTNs, final p-values, and effects |
 | BLINK | `GAPIT(model="BLINK")` | R-validated iterative workflow with the upstream missing-CV BIC call characterized | Full MAF-filtered marker set against the corrected-CV reference | PCA-aware BIC, FDR candidates, LD pruning, zero/one/multiple-QTN paths, and invalid-statistic normalization |
 | gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Not yet | BLUE, BLUP, PEV, predictions, and variance components |
-| cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | Python-only | Not yet | Compressed-kinship prediction and top-level result contracts |
+| cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | R-validated direct and top-level workflows | Not yet | Compression selection, native-incidence BLUE/BLUP/PEV, predictions, and variance components |
 | sBLUP | `sblup()` or a GWAS prediction override | Python-only | Not yet | Explicit pseudo-QTN validation; standalone top-level `model="sBLUP"` and GAPIT SUPER-based QTN selection are not implemented |
 
 The official-data column currently refers to GAPIT's bundled maize diversity

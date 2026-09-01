@@ -369,6 +369,7 @@ def GAPIT(
                 cut_off=cutOff,
                 buspred=buspred,
                 prediction_model=normalized_prediction_model,
+                group_to=group_to,
                 file_output=file_output,
                 output_dir=output_dir,
                 started_at=t_start,
@@ -817,6 +818,7 @@ def _assemble_result(
     cut_off: float | None,
     buspred: bool,
     prediction_model: str | None,
+    group_to: int | None,
     file_output: bool,
     output_dir: str | Path,
     started_at: float,
@@ -856,6 +858,7 @@ def _assemble_result(
             model_name=model_name,
             qtn_indices=model_result.selected_qtns,
             prediction_model=prediction_model,
+            group_to=group_to,
         )
 
     output_files = None
@@ -1030,17 +1033,19 @@ def _run_gs_and_build_pred(
     model_name: str,
     qtn_indices: IntVector | None = None,
     prediction_model: str | None = None,
+    group_to: int | None = None,
 ) -> pd.DataFrame | None:
     """Run genomic prediction and build prediction DataFrame."""
     selected_model = prediction_model
     if selected_model is None:
-        selected_model = (
-            "SBLUP"
-            if qtn_indices is not None
-            and len(qtn_indices) > 0
-            and model_name == "FARMCPU"
-            else "GBLUP"
-        )
+        if model_name == "CBLUP":
+            selected_model = "CBLUP"
+        elif (
+            qtn_indices is not None and len(qtn_indices) > 0 and model_name == "FARMCPU"
+        ):
+            selected_model = "SBLUP"
+        else:
+            selected_model = "GBLUP"
     if selected_model == "SBLUP" and (qtn_indices is None or len(qtn_indices) == 0):
         raise ValueError(
             "prediction_model='sBLUP' requires selected QTNs from the GWAS model"
@@ -1050,7 +1055,13 @@ def _run_gs_and_build_pred(
         if selected_model == "SBLUP" and qtn_indices is not None:
             gs_result = sblup(y, X0, GD, qtn_indices=qtn_indices, taxa=taxa)
         elif selected_model == "CBLUP":
-            gs_result = cblup(y, X0, GD, taxa=taxa)
+            gs_result = cblup(
+                y,
+                X0,
+                GD,
+                taxa=taxa,
+                group_to=group_to,
+            )
         else:
             gs_result = gblup(y, X0, K, taxa=taxa)
 
