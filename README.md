@@ -39,7 +39,7 @@ failure.
 | BLINK | `GAPIT(model="BLINK")` | R-validated iterative workflow with the upstream missing-CV BIC call characterized | Full MAF-filtered marker set against the corrected-CV reference | PCA-aware BIC, FDR candidates, LD pruning, zero/one/multiple-QTN paths, and invalid-statistic normalization |
 | gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Full EarHT prediction set | BLUE, BLUP, PEV, predictions, and variance components |
 | cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | R-validated direct and top-level workflows | Not yet | Compression selection, native-incidence BLUE/BLUP/PEV, predictions, and variance components |
-| sBLUP | `sblup()` or a GWAS prediction override | Python-only | Not yet | Explicit pseudo-QTN validation; standalone top-level `model="sBLUP"` and GAPIT SUPER-based QTN selection are not implemented |
+| sBLUP | `sblup()`, `GAPIT(model="sBLUP")`, or a prediction override | R-validated corrected SUPER selection and direct/top-level prediction | Not yet | Stable genomic-bin selection, configurable QTN counts, single-QTN support, BLUE/BLUP/PEV, predictions, and variance components |
 
 The official-data column currently refers to GAPIT's bundled maize diversity
 panel and the `EarHT` trait. GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK
@@ -65,6 +65,13 @@ materially indefinite supplied kinship matrices. The detailed test inventory
 and divergence rationale are maintained in
 [`tests/cross_language/README.md`](tests/cross_language/README.md); the required
 R-backed suite runs in [`.github/workflows/ci.yml`](.github/workflows/ci.yml).
+
+SUPER selection is another intentional modernization. GAPIT 3.5 ranks
+pseudo-QTN sets with the legacy `GAPIT.get.LL` approximation but fits the final
+sBLUP with a kinship mixed model. pyGAPIT uses the same EMMA REML objective for
+selection and final prediction, groups bins by chromosome labels rather than a
+numeric chromosome-offset encoding, and preserves one-marker matrices that R
+otherwise drops to vectors.
 
 ---
 
@@ -263,6 +270,17 @@ result = GAPIT(Y=Y, GD=GD, GM=GM, model="gBLUP", trait="EarHT")
 # cBLUP — compressed-kinship prediction
 result = GAPIT(Y=Y, GD=GD, GM=GM, model="cBLUP", trait="EarHT")
 
+# sBLUP — MLM scan followed by SUPER pseudo-QTN selection and prediction
+result = GAPIT(
+    Y=Y,
+    GD=GD,
+    GM=GM,
+    model="sBLUP",
+    trait="EarHT",
+    super_bin_size=10_000,
+    super_qtn_counts=[10, 20, 40, 60, 80, 100],
+)
+
 # Run gBLUP prediction after BLINK
 result = GAPIT(Y=Y, GD=GD, GM=GM, model="BLINK", trait="EarHT", buspred=True)
 
@@ -320,6 +338,8 @@ The main supported GAPIT-style parameters are:
 | `group.from` | `group_from` | `1` | Min groups for CMLM |
 | `group.to` | `group_to` | n | Max groups for CMLM |
 | `bin.size` | `bin_size` | `5000000` | Bin size (bp) for FarmCPU |
+| — | `super_bin_size` | `10000` | Bin size (bp) for SUPER pseudo-QTN selection |
+| — | `super_qtn_counts` | `10,20,...,100` | Candidate pseudo-QTN counts evaluated by REML |
 | `h2` | `h2` | `None` | Heritability for simulation |
 | `NQTN` | `NQTN` | `None` | QTNs for simulation |
 | `buspred` | `buspred` | `False` | Run GS after GWAS |

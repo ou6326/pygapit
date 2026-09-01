@@ -10,7 +10,15 @@ __author__ = "pyGAPIT contributors (based on GAPIT by Jiabo Wang & Zhiwu Zhang)"
 __license__ = "GPL-3.0"
 
 from .gapit import GAPIT, GAPITOutputFiles, GAPITResult, ModelRunResult
-from .gs.blup import GBLUPResult, cblup, gblup, predict_new, sblup
+from .gs.blup import (
+    GBLUPResult,
+    SUPERSelectionResult,
+    cblup,
+    gblup,
+    predict_new,
+    sblup,
+    select_super_qtns,
+)
 from .gwas.blink import BLINKResult, blink_gwas
 from .gwas.farmcpu import FarmCPUResult, farmcpu_gwas
 from .gwas.glm import GLMResult, glm_gwas
@@ -61,6 +69,7 @@ __all__ = [
     "MLMResult",
     "ModelRunResult",
     "PhenotypeData",
+    "SUPERSelectionResult",
     "align_inputs",
     "align_taxa",
     "benjamini_hochberg",
@@ -93,6 +102,7 @@ __all__ = [
     "read_numeric",
     "read_phenotype",
     "sblup",
+    "select_super_qtns",
     "vanraden_kinship",
     "zhang_kinship",
 ]

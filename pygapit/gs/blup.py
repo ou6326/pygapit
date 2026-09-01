@@ -18,6 +18,7 @@ PEV  = diag(C22) where C22 is the (2,2) block of the MME inverse
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
@@ -25,6 +26,7 @@ import numpy as np
 from .._typing import (
     FloatMatrix,
     FloatVector,
+    IntVector,
     StrVector,
     Vector,
     as_float_matrix,
@@ -56,6 +58,19 @@ class GBLUPResult:
 
     def __post_init__(self) -> None:
         for field in ("taxa", "blue", "blup", "pev", "gebv", "prediction"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
+
+
+@dataclass(frozen=True, slots=True)
+class SUPERSelectionResult:
+    """Pseudo-QTN sets evaluated by the SUPER selection stage."""
+
+    qtn_indices: IntVector
+    candidate_counts: IntVector
+    reml: FloatVector
+
+    def __post_init__(self) -> None:
+        for field in ("qtn_indices", "candidate_counts", "reml"):
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
@@ -331,6 +346,99 @@ def cblup(
     )
 
 
+def select_super_qtns(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    chromosomes: Vector,
+    positions: FloatVector,
+    p_values: FloatVector,
+    *,
+    bin_size: int = 10_000,
+    candidate_counts: Sequence[int] | None = None,
+    ngrids: int = 100,
+) -> SUPERSelectionResult:
+    """Select a pseudo-QTN kinship by binning markers and maximizing REML."""
+    y = as_float_vector(y, name="phenotype")
+    X0 = as_float_matrix(X0, name="covariate matrix")
+    GD = as_float_matrix(GD, name="genotype matrix")
+    chromosomes = as_str_vector(chromosomes, name="marker chromosomes")
+    positions = as_float_vector(positions, name="marker positions")
+    p_values = as_float_vector(p_values, name="marker p-values")
+    n = len(y)
+    marker_count = GD.shape[1]
+    require_row_count(X0, n, name="covariate matrix")
+    require_row_count(GD, n, name="genotype matrix")
+    for values, name in (
+        (chromosomes, "marker chromosomes"),
+        (positions, "marker positions"),
+        (p_values, "marker p-values"),
+    ):
+        require_length(values, marker_count, name=name)
+    if bin_size <= 0:
+        raise ValueError("SUPER bin_size must be positive")
+    if not np.isfinite(positions).all():
+        raise ValueError("SUPER marker positions must be finite")
+
+    finite_markers = np.flatnonzero(np.isfinite(p_values))
+    if len(finite_markers) == 0:
+        raise ValueError("SUPER selection requires at least one finite marker p-value")
+    if np.any((p_values[finite_markers] < 0.0) | (p_values[finite_markers] > 1.0)):
+        raise ValueError("SUPER marker p-values must be between 0 and 1")
+
+    representatives: dict[tuple[str, int], int] = {}
+    for marker_value in finite_markers:
+        marker = marker_value.item()
+        key = (chromosomes[marker], int(np.floor(positions[marker] / bin_size)))
+        current = representatives.get(key)
+        if current is None or p_values[marker] < p_values[current]:
+            representatives[key] = marker
+    ranked = np.asarray(tuple(representatives.values()), dtype=np.int_)
+    ranked = ranked[np.lexsort((ranked, p_values[ranked]))]
+
+    requested_counts = (
+        tuple(range(10, 101, 10))
+        if candidate_counts is None
+        else tuple(candidate_counts)
+    )
+    if not requested_counts:
+        raise ValueError("SUPER candidate_counts must contain at least one value")
+    if any(type(count) is not int for count in requested_counts):
+        raise TypeError("SUPER candidate_counts must contain integers")
+    if any(count <= 0 for count in requested_counts):
+        raise ValueError("SUPER candidate_counts must be positive")
+    counts = np.unique(
+        np.minimum(np.asarray(requested_counts, dtype=np.int_), len(ranked))
+    )
+
+    fitted_counts: list[int] = []
+    fitted_reml: list[float] = []
+    fitted_qtns: list[IntVector] = []
+    for count in counts:
+        qtns = ranked[:count]
+        varying = np.var(GD[:, qtns], axis=0) > 0.0
+        qtns = qtns[varying]
+        if len(qtns) == 0:
+            continue
+        try:
+            pseudo_kinship = vanraden_kinship(GD[:, qtns])
+            fit = emma_remle(y, X0, pseudo_kinship, ngrids=ngrids)
+        except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+            continue
+        fitted_counts.append(int(count))
+        fitted_reml.append(fit.reml)
+        fitted_qtns.append(np.sort(qtns))
+
+    if not fitted_qtns:
+        raise ValueError("SUPER selection could not fit any pseudo-QTN candidate set")
+    best = int(np.argmax(fitted_reml))
+    return SUPERSelectionResult(
+        qtn_indices=np.asarray(fitted_qtns[best], dtype=np.int_),
+        candidate_counts=np.asarray(fitted_counts, dtype=np.int_),
+        reml=np.asarray(fitted_reml, dtype=np.float64),
+    )
+
+
 def sblup(
     y: FloatVector,
     X0: FloatMatrix,
@@ -367,8 +475,6 @@ def sblup(
 
     unique_indices = np.unique(integer_indices)
     K_pseudo = vanraden_kinship(GD[:, unique_indices])
-
-    K_pseudo += np.eye(len(y)) * 1e-6
 
     result = gblup(y, X0, K_pseudo, taxa=taxa, ngrids=ngrids)
     return replace(result, method="sBLUP")

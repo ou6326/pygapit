@@ -64,8 +64,7 @@ def test_model_normalization_rejects_empty_duplicate_and_unknown_models() -> Non
         _normalize_models(["glm", "GLM"])
     with pytest.raises(ValueError, match="Unknown model"):
         _normalize_models(["unknown"])
-    with pytest.raises(ValueError, match=r"pygapit\.sblup"):
-        _normalize_models(["sBLUP"])
+    assert _normalize_models(["sBLUP"]) == ("SBLUP",)
 
 
 def test_invalid_numeric_options_fail_before_input_loading() -> None:
@@ -77,6 +76,10 @@ def test_invalid_numeric_options_fail_before_input_loading() -> None:
         GAPIT(p_threshold=0.0)
     with pytest.raises(ValueError, match="maxLoop"):
         GAPIT(maxLoop=0)
+    with pytest.raises(ValueError, match="super_bin_size"):
+        GAPIT(super_bin_size=0)
+    with pytest.raises(ValueError, match="super_qtn_counts"):
+        GAPIT(super_qtn_counts=[])
     with pytest.raises(ValueError, match="provided together"):
         GAPIT(h2=0.5)
 

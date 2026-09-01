@@ -42,9 +42,10 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_mlmm.py`: public MLMM orchestration with PCA, covariates, supplied
   kinship, missing phenotypes, forward/backward QTN selection, and final
   marker p-values and effects
-- `test_prediction.py`: direct and top-level gBLUP and cBLUP fixed effects,
-  breeding values, prediction-error variances, phenotype predictions, variance
-  components, and cBLUP compression selection
+- `test_prediction.py`: direct and top-level gBLUP, cBLUP, and sBLUP fixed
+  effects, breeding values, prediction-error variances, phenotype predictions,
+  variance components, cBLUP compression, and corrected SUPER pseudo-QTN
+  selection
 
 Each comparison sources the smallest relevant GAPIT R file instead of loading
 the full package. The complete BLINK and FarmCPU tests execute GAPIT's ordinary
@@ -54,6 +55,10 @@ avoiding a test-only `bigmemory` dependency. The official BLINK regression
 additionally creates an in-memory corrected reference that forwards `CV1` into
 both `Blink.BICselection()` calls; it runs the unmodified function first so
 this intentional divergence remains characterized against the pinned source.
+The SUPER characterization compares genomic-bin representatives and candidate
+REML scores directly with R, while also recording that GAPIT's legacy
+`GAPIT.get.LL` selection scores use a different objective from its final
+kinship prediction model.
 
 An R runtime is required in addition to the Python `rpy2` package. If either dependency is unavailable, tests are skipped with an explicit reason so the ordinary suite remains usable. Set `PYGAPIT_REQUIRE_R_ALIGNMENT=1` to turn an unavailable R runtime or rpy2 import into a hard failure in a parity CI job.
 
@@ -68,8 +73,7 @@ pixi run -e dev pytest tests/cross_language -q
 The tests use fixed genotypes, phenotypes, covariates, and p-values from shared
 fixtures. They do not modify the R checkout or write output files. Missing
 numeric genotypes are checked under GAPIT's `Middle`, `Major`, and `Minor`
-imputation policies. The main remaining prediction workflow gap is GAPIT's
-SUPER-based top-level sBLUP QTN selection.
+imputation policies.
 
 Intentional divergences are kept explicit and tested. In particular, GAPIT
 accepts PCA covariates in `Blink()` but omits `CV1` when it calls

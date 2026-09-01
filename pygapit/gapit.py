@@ -39,7 +39,7 @@ from ._typing import (
     readonly_copy,
     require_square,
 )
-from .gs.blup import cblup, gblup, sblup
+from .gs.blup import cblup, gblup, sblup, select_super_qtns
 from .gwas.blink import blink_gwas
 from .gwas.farmcpu import farmcpu_gwas
 from .gwas.glm import glm_gwas
@@ -158,7 +158,7 @@ class PreparedTrait:
 
 
 _SUPPORTED_MODELS = frozenset(
-    {"GLM", "MLM", "CMLM", "MLMM", "BLINK", "FARMCPU", "GBLUP", "CBLUP"}
+    {"GLM", "MLM", "CMLM", "MLMM", "BLINK", "FARMCPU", "GBLUP", "CBLUP", "SBLUP"}
 )
 
 
@@ -225,6 +225,8 @@ def GAPIT(
     # ── FarmCPU/BLINK parameters ─────────────────────────────────────────
     bin_size: int = 5_000_000,  # R: bin.size (bp)
     maxLoop: int = 10,  # max iterations
+    super_bin_size: int = 10_000,
+    super_qtn_counts: Sequence[int] | None = None,
     # ── Genomic Selection ────────────────────────────────────────────────
     buspred: bool = False,  # predict after GWAS
     prediction_model: str | None = None,
@@ -245,7 +247,7 @@ def GAPIT(
 
     GAPIT-style Python pipeline targeting selected GAPIT 3.5 workflows.
     Currently dispatches GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP,
-    and cBLUP. Top-level sBLUP and SUPER dispatch are not yet available.
+    cBLUP, and sBLUP.
 
     Examples
     --------
@@ -291,6 +293,8 @@ def GAPIT(
         group_to=group_to,
         bin_size=bin_size,
         maxLoop=maxLoop,
+        super_bin_size=super_bin_size,
+        super_qtn_counts=super_qtn_counts,
         h2=h2,
         NQTN=NQTN,
     )
@@ -356,6 +360,8 @@ def GAPIT(
                 LD_threshold=LD,
                 fdr_cut=FDRcut,
                 fdr_alpha=cutOff or 0.05,
+                super_bin_size=super_bin_size,
+                super_qtn_counts=super_qtn_counts,
             )
 
             elapsed = time.time() - t_model
@@ -444,14 +450,9 @@ def _normalize_models(model: str | Sequence[object]) -> tuple[str, ...]:
         raise ValueError("model must not contain duplicate analysis models")
     unknown = [name for name in normalized if name not in _SUPPORTED_MODELS]
     if unknown:
-        suffix = (
-            " Standalone sBLUP is available as pygapit.sblup(...)."
-            if "SBLUP" in unknown
-            else ""
-        )
         raise ValueError(
             f"Unknown model(s): {', '.join(unknown)}. Choose from: "
-            f"{', '.join(sorted(_SUPPORTED_MODELS))}.{suffix}"
+            f"{', '.join(sorted(_SUPPORTED_MODELS))}."
         )
     return normalized
 
@@ -467,6 +468,8 @@ def _validate_analysis_options(
     group_to: int | None,
     bin_size: int,
     maxLoop: int,
+    super_bin_size: int,
+    super_qtn_counts: Sequence[int] | None,
     h2: float | None,
     NQTN: int | None,
 ) -> None:
@@ -488,6 +491,16 @@ def _validate_analysis_options(
         raise ValueError("bin_size must be positive")
     if maxLoop < 1:
         raise ValueError("maxLoop must be at least 1")
+    if super_bin_size <= 0:
+        raise ValueError("super_bin_size must be positive")
+    if super_qtn_counts is not None:
+        counts = tuple(super_qtn_counts)
+        if not counts:
+            raise ValueError("super_qtn_counts must contain at least one value")
+        if any(type(count) is not int for count in counts):
+            raise TypeError("super_qtn_counts must contain integers")
+        if any(count <= 0 for count in counts):
+            raise ValueError("super_qtn_counts must be positive")
     if (h2 is None) != (NQTN is None):
         raise ValueError("h2 and NQTN must be provided together for simulation")
     if h2 is not None and not 0.0 < h2 <= 1.0:
@@ -848,7 +861,16 @@ def _assemble_result(
     )
 
     prediction = None
-    if buspred or prediction_model is not None or model_name in ("GBLUP", "CBLUP"):
+    if (
+        buspred
+        or prediction_model is not None
+        or model_name
+        in (
+            "GBLUP",
+            "CBLUP",
+            "SBLUP",
+        )
+    ):
         prediction = _run_gs_and_build_pred(
             y=prepared.y,
             X0=prepared.design,
@@ -909,6 +931,8 @@ def _run_model(
     LD_threshold: float,
     fdr_cut: bool,
     fdr_alpha: float,
+    super_bin_size: int,
+    super_qtn_counts: Sequence[int] | None,
 ) -> ModelRunResult:
     """Dispatch to the correct GWAS/GS model."""
     m = GD.shape[1]
@@ -978,11 +1002,34 @@ def _run_model(
             p_vals, np.zeros(GD.shape[1]), np.ones(GD.shape[1]), r.h2, r.vg, r.ve
         )
 
+    elif model_name == "SBLUP":
+        scan = mlm_gwas(y, X0, GD, K)
+        selection = select_super_qtns(
+            y,
+            X0,
+            GD,
+            chromosomes,
+            positions,
+            scan.p_values,
+            bin_size=super_bin_size,
+            candidate_counts=super_qtn_counts,
+        )
+        r = sblup(y, X0, GD, selection.qtn_indices)
+        return ModelRunResult(
+            scan.p_values,
+            scan.effects,
+            scan.se,
+            r.h2,
+            r.vg,
+            r.ve,
+            selection.qtn_indices,
+        )
+
     else:
         raise ValueError(
             f"Unknown model: {model_name}. "
-            "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, gBLUP, cBLUP. "
-            "Standalone sBLUP is available as pygapit.sblup(...)."
+            "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, "
+            "gBLUP, cBLUP, sBLUP."
         )
 
 
@@ -1040,7 +1087,7 @@ def _run_gs_and_build_pred(
     if selected_model is None:
         if model_name == "CBLUP":
             selected_model = "CBLUP"
-        elif (
+        elif model_name == "SBLUP" or (
             qtn_indices is not None and len(qtn_indices) > 0 and model_name == "FARMCPU"
         ):
             selected_model = "SBLUP"

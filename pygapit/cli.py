@@ -74,6 +74,7 @@ Examples:
             "BLINK",
             "gBLUP",
             "cBLUP",
+            "sBLUP",
         ],
         help="GWAS/GS model(s) to run (default: BLINK)",
     )
@@ -142,6 +143,21 @@ Examples:
         type=int,
         default=5_000_000,
         help="Bin size in bp for FarmCPU (default: 5000000)",
+    )
+
+    super_group = parser.add_argument_group("SUPER/sBLUP parameters")
+    super_group.add_argument(
+        "--super_bin_size",
+        type=int,
+        default=10_000,
+        help="Genomic bin size in bp for SUPER selection (default: 10000)",
+    )
+    super_group.add_argument(
+        "--super_qtn_counts",
+        type=int,
+        nargs="+",
+        default=None,
+        help="Pseudo-QTN counts evaluated by SUPER (default: 10,20,...,100)",
     )
 
     # Simulation
@@ -234,6 +250,8 @@ Examples:
         group_from=args.group_from,
         group_to=args.group_to,
         bin_size=args.bin_size,
+        super_bin_size=args.super_bin_size,
+        super_qtn_counts=args.super_qtn_counts,
         h2=args.h2,
         NQTN=args.NQTN,
         file_output=not args.no_file_output,

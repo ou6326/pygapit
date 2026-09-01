@@ -789,13 +789,17 @@ class TestGBLUP:
         qtn_idx = np.array([0, 10, 50, 100, 200])
         r = sblup(real_data["y"], real_data["X0"], real_data["GD"], qtn_indices=qtn_idx)
         pseudo_kinship = vanraden_kinship(real_data["GD"][:, qtn_idx])
-        pseudo_kinship += np.eye(len(real_data["y"])) * 1e-6
         expected = gblup(real_data["y"], real_data["X0"], pseudo_kinship)
 
         assert r.method == "sBLUP"
         assert np.all(np.isfinite(r.blup))
         np.testing.assert_allclose(r.blup, expected.blup, rtol=1e-12, atol=1e-12)
         np.testing.assert_allclose(r.pev, expected.pev, rtol=1e-12, atol=1e-12)
+
+        single_qtn = sblup(
+            real_data["y"], real_data["X0"], real_data["GD"], qtn_indices=np.array([0])
+        )
+        assert np.all(np.isfinite(single_qtn.prediction))
 
     @pytest.mark.parametrize(
         "qtn_indices",
@@ -864,54 +868,56 @@ class TestModelContracts:
         with pytest.raises(TypeError, match="boolean"):
             GAPIT(FDRcut=cast(bool, 0.05))
 
-    def test_top_level_sblup_error_points_to_supported_api(
+    def test_top_level_sblup_selects_qtns_and_predicts(
         self, small_dataset: SmallDataset
     ) -> None:
-        """The top-level dispatcher must not advertise an absent SUPER path."""
+        """The top-level dispatcher selects pseudo-QTNs for sBLUP."""
         from pygapit.gapit import _run_model
         from pygapit.stats.kinship import vanraden_kinship
 
         genotypes = small_dataset["GD"]
         marker_count = genotypes.shape[1]
         positions: NDArray[np.float64] = np.arange(marker_count, dtype=np.float64)
-        with pytest.raises(ValueError, match=r"pygapit\.sblup"):
-            _run_model(
-                model_name="SBLUP",
-                y=small_dataset["y"],
-                X0=np.ones((small_dataset["n"], 1)),
-                GD=genotypes,
-                K=vanraden_kinship(genotypes),
-                chromosomes=np.ones(marker_count),
-                positions=positions,
-                p_threshold=None,
-                group_from=1,
-                group_to=None,
-                bin_size=5_000_000,
-                maxLoop=1,
-                LD_threshold=0.7,
-                fdr_cut=False,
-                fdr_alpha=0.05,
-            )
+        result = _run_model(
+            model_name="SBLUP",
+            y=small_dataset["y"],
+            X0=np.ones((small_dataset["n"], 1)),
+            GD=genotypes,
+            K=vanraden_kinship(genotypes),
+            chromosomes=np.ones(marker_count),
+            positions=positions,
+            p_threshold=None,
+            group_from=1,
+            group_to=None,
+            bin_size=5_000_000,
+            maxLoop=1,
+            LD_threshold=0.7,
+            fdr_cut=False,
+            fdr_alpha=0.05,
+            super_bin_size=10,
+            super_qtn_counts=(1, 2, 3),
+        )
 
-    def test_cli_rejects_unimplemented_top_level_sblup(self) -> None:
+        assert result.selected_qtns is not None
+        assert len(result.selected_qtns) > 0
+        assert 0.0 <= result.h2 <= 1.0
+
+    def test_cli_advertises_top_level_sblup(self) -> None:
         """CLI choices must match the models accepted by GAPIT()."""
         completed = subprocess.run(
             [
                 sys.executable,
                 "-m",
                 "pygapit.cli",
-                "--Y",
-                "unused.txt",
-                "--model",
-                "sBLUP",
+                "--help",
             ],
             check=False,
             capture_output=True,
             text=True,
         )
 
-        assert completed.returncode == 2
-        assert "invalid choice" in completed.stderr
+        assert completed.returncode == 0
+        assert "sBLUP" in completed.stdout
 
 
 # ─────────────────────────────────────────────────────────────────────────────
