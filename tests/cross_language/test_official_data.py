@@ -95,6 +95,20 @@ def _r_pca_scores(
     return scores_with_taxa[:, 1 : component_count + 1]
 
 
+def _r_vanraden_kinship(
+    r_bridge: RBridge,
+    r_root: Path,
+    genotype_values: FloatMatrix,
+) -> FloatMatrix:
+    r_kinship_function = r_bridge.source_function(
+        r_root,
+        "GAPIT.kinship.VanRaden.R",
+        "GAPIT.kinship.VanRaden",
+        returns=RMatrix,
+    )
+    return r_bridge.float_array(r_kinship_function(r_bridge.matrix(genotype_values)))
+
+
 def _iterative_workflow_matrices(
     r_bridge: RBridge,
     r_root: Path,
@@ -258,15 +272,7 @@ def test_official_maize_mlm_workflow_matches_gapit(
         "GAPIT.Memory.R",
     ):
         r_bridge.source(r_root, filename)
-    r_kinship_function = r_bridge.source_function(
-        r_root,
-        "GAPIT.kinship.VanRaden.R",
-        "GAPIT.kinship.VanRaden",
-        returns=RMatrix,
-    )
-    r_kinship = r_bridge.float_array(
-        r_kinship_function(r_bridge.matrix(inputs.genotype_values))
-    )
+    r_kinship = _r_vanraden_kinship(r_bridge, r_root, inputs.genotype_values)
     r_mlm = r_bridge.source_function(
         r_root,
         "GAPIT.EMMAxP3D.R",
@@ -303,6 +309,126 @@ def test_official_maize_mlm_workflow_matches_gapit(
     assert isinstance(py_result, GAPITResult)
     assert py_result.GWAS is not None
     assert py_result.kinship is not None
+    nt.assert_allclose(py_result.kinship, r_kinship, rtol=1e-12, atol=1e-12)
+    r_p_values = r_bridge.float_array(r_bridge.component(r_result, "ps")).reshape(-1)
+    r_effects = r_bridge.float_array(
+        r_bridge.component(r_result, "effect.est")
+    ).reshape(-1)
+    r_standard_errors = r_bridge.float_array(
+        r_bridge.component(r_result, "stderr")
+    ).reshape(-1)
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["P.value"], dtype=np.float64),
+        r_p_values[inputs.output_order],
+        rtol=5e-5,
+        atol=2e-8,
+    )
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["effect"], dtype=np.float64),
+        r_effects[inputs.output_order],
+        rtol=5e-5,
+        atol=4e-5,
+    )
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["se"], dtype=np.float64),
+        r_standard_errors[inputs.output_order],
+        rtol=5e-5,
+        atol=4e-5,
+    )
+    r_vg = r_scalar(r_bridge, r_result, "vgs")
+    r_ve = r_scalar(r_bridge, r_result, "ves")
+    nt.assert_allclose(py_result.vg, r_vg, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_result.ve, r_ve, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
+
+
+def test_official_maize_cmlm_workflow_matches_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+):
+    """Compare fixed-compression CMLM on GAPIT's bundled maize data."""
+    inputs = _load_official_dataset(r_root)
+    group_count = 40
+    r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
+    design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
+    covariates_with_taxa = np.column_stack(
+        [np.arange(len(inputs.taxa), dtype=np.float64), r_scores]
+    )
+    for filename in (
+        "GAPIT.emma.R",
+        "GAPIT.replaceNaN.R",
+        "GAPIT.emma.REMLE.R",
+        "GAPIT.Timmer.R",
+        "GAPIT.Memory.R",
+        "GAPIT.Compress.R",
+    ):
+        r_bridge.source(r_root, filename)
+    r_kinship = _r_vanraden_kinship(r_bridge, r_root, inputs.genotype_values)
+    r_compress = r_bridge.function(
+        "function(KI, groups) {"
+        " out <- GAPIT.Compress(KI, GN=groups, Timmer=NULL, Memory=NULL);"
+        " list(labels=as.numeric(out$GA[,2]), kinship=out$KG)"
+        "}",
+        returns=RList,
+    )
+    kinship_with_taxa = np.column_stack(
+        [np.arange(len(inputs.taxa), dtype=np.float64), r_kinship]
+    )
+    r_compression = r_compress(
+        r_bridge.matrix(kinship_with_taxa),
+        groups=group_count,
+    )
+    r_labels = r_bridge.float_array(r_bridge.component(r_compression, "labels")).astype(
+        int
+    )
+    r_group_kinship = r_bridge.float_array(r_bridge.component(r_compression, "kinship"))
+    r_incidence = np.zeros((len(inputs.taxa), group_count), dtype=np.float64)
+    r_incidence[np.arange(len(inputs.taxa)), r_labels - 1] = 1.0
+
+    r_mlm = r_bridge.source_function(
+        r_root,
+        "GAPIT.EMMAxP3D.R",
+        "GAPIT.EMMAxP3D",
+        returns=RList,
+    )
+    r_null = r_bridge.evaluate("NULL")
+    r_result = r_mlm(
+        ys=r_bridge.matrix(inputs.phenotype_values[np.newaxis, :]),
+        xs=r_bridge.matrix(inputs.genotype_values),
+        K=r_bridge.matrix(r_group_kinship),
+        Z=r_bridge.matrix(r_incidence),
+        X0=r_bridge.matrix(design),
+        CVI=r_bridge.matrix(covariates_with_taxa),
+        file_from=1,
+        file_to=1,
+        file_fragment=inputs.genotype_values.shape[1],
+        fullGD=True,
+        SNP_P3D=True,
+        Timmer=r_null,
+        Memory=r_null,
+        optOnly=False,
+    )
+    py_result = GAPIT(
+        Y=inputs.phenotype,
+        GD=inputs.genotype,
+        GM=inputs.marker_map,
+        model="CMLM",
+        trait="EarHT",
+        PCA_total=3,
+        maf_threshold=0.05,
+        group_from=group_count,
+        group_to=group_count,
+        file_output=False,
+    )
+
+    assert isinstance(py_result, GAPITResult)
+    assert py_result.GWAS is not None
+    assert py_result.kinship is not None
+    assert py_result.model == "CMLM"
+    nt.assert_array_equal(
+        py_result.GWAS["SNP"],
+        inputs.marker_names[inputs.output_order],
+    )
     nt.assert_allclose(py_result.kinship, r_kinship, rtol=1e-12, atol=1e-12)
     r_p_values = r_bridge.float_array(r_bridge.component(r_result, "ps")).reshape(-1)
     r_effects = r_bridge.float_array(
