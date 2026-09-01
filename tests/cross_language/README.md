@@ -26,9 +26,10 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
 - `test_workflows.py`: public GLM and MLM orchestration with PCA, covariates,
   supplied kinship, shuffled labels, and missing phenotype observations
-- `test_official_data.py`: public GLM and MLM workflows on GAPIT's bundled
-  maize diversity panel, comparing every MAF-filtered marker together with
-  PCA, VanRaden kinship, and MLM variance components
+- `test_official_data.py`: public GLM, MLM, and FarmCPU workflows on GAPIT's
+  bundled maize diversity panel. Comparisons cover every MAF-filtered marker,
+  PCA, GLM/FarmCPU effects and p-values, FarmCPU pseudo-QTNs, VanRaden kinship,
+  and MLM variance components
 - `test_cmlm.py`: public CMLM orchestration with fixed compression, native
   incidence-matrix REML/EMMAX statistics, and automatic group selection
 - `test_cmlm_boundaries.py`: redundant incidence levels, near-collinear fixed

@@ -239,3 +239,102 @@ def test_official_maize_mlm_workflow_matches_gapit(
     nt.assert_allclose(py_result.vg, r_vg, rtol=2e-5, atol=1e-8)
     nt.assert_allclose(py_result.ve, r_ve, rtol=2e-5, atol=1e-8)
     nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
+
+
+def test_official_maize_farmcpu_workflow_matches_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+) -> None:
+    """Compare the public FarmCPU workflow on GAPIT's bundled maize data."""
+    inputs = _load_official_dataset(r_root)
+    marker_count = inputs.genotype_values.shape[1]
+    r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
+    marker_index = pd.Index(inputs.marker_names, dtype="str")
+    filtered_map = inputs.marker_map.set_index("SNP").loc[marker_index]
+    chromosomes = filtered_map["Chromosome"].to_numpy(dtype=np.float64)
+    positions = filtered_map["Position"].to_numpy(dtype=np.float64)
+    phenotype = np.column_stack(
+        [
+            np.arange(len(inputs.phenotype_values), dtype=np.float64),
+            inputs.phenotype_values,
+        ]
+    )
+    genotype = np.column_stack(
+        [
+            np.arange(len(inputs.phenotype_values), dtype=np.float64),
+            inputs.genotype_values,
+        ]
+    )
+    marker_map = np.column_stack(
+        [
+            np.arange(1, marker_count + 1, dtype=np.float64),
+            chromosomes,
+            positions,
+        ]
+    )
+
+    r_bridge.source(r_root, "GAPIT.Specify.R")
+    r_bridge.source(r_root, "GAPIT.Power.R")
+    r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
+    r_farmcpu = r_bridge.function("FarmCPU")
+    r_marker_map = r_bridge.function("as.data.frame")(
+        r_bridge.matrix(marker_map, column_names=["SNP", "Chr", "Pos"])
+    )
+    candidate_threshold = 1.0 / marker_count
+    r_result = r_farmcpu(
+        Y=r_bridge.matrix(phenotype, column_names=["Taxa", "EarHT"]),
+        GD=r_bridge.matrix(genotype),
+        GM=r_marker_map,
+        CV=r_bridge.matrix(r_scores),
+        file_output=False,
+        method_bin="static",
+        bin_size=r_bridge.float_vector(np.full(3, 5_000_000.0, dtype=np.float64)),
+        bin_selection=r_bridge.float_vector(np.array([1.0], dtype=np.float64)),
+        maxLoop=5,
+        p_threshold=candidate_threshold,
+        QTN_threshold=candidate_threshold,
+        maf_threshold=0.0,
+        converge=1.0,
+        ncpus=1,
+    )
+    py_result = GAPIT(
+        Y=inputs.phenotype,
+        GD=inputs.genotype,
+        GM=inputs.marker_map,
+        model="FarmCPU",
+        trait="EarHT",
+        PCA_total=3,
+        maf_threshold=0.05,
+        maxLoop=5,
+        bin_size=5_000_000,
+        p_threshold=candidate_threshold,
+        file_output=False,
+    )
+
+    r_gwas = r_bridge.float_array(r_bridge.component(r_result, "GWAS")).T
+    r_gwas = r_gwas[np.argsort(r_gwas[:, 0])][inputs.output_order]
+    r_qtns = (
+        r_bridge.float_array(r_bridge.component(r_result, "seqQTN")).astype(int) - 1
+    )
+    assert isinstance(py_result, GAPITResult)
+    assert py_result.GWAS is not None
+    assert py_result.QTNs is not None
+    nt.assert_array_equal(np.sort(py_result.QTNs), np.sort(r_qtns))
+    nt.assert_array_equal(
+        np.asarray(py_result.GWAS["Chr"], dtype=np.float64), r_gwas[:, 1]
+    )
+    nt.assert_array_equal(
+        np.asarray(py_result.GWAS["Pos"], dtype=np.float64), r_gwas[:, 2]
+    )
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["P.value"], dtype=np.float64),
+        r_gwas[:, 3],
+        rtol=1e-8,
+        atol=1e-12,
+    )
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["effect"], dtype=np.float64),
+        r_gwas[:, 5],
+        rtol=1e-8,
+        atol=5e-7,
+    )

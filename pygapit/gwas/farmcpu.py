@@ -207,8 +207,8 @@ def farmcpu_gwas(
     if p_threshold is None:
         p_threshold = 1.0 / m
 
-    # Maximum QTNs: bound = sqrt(n) / sqrt(log10(n)) (from FarmCPU.BIN)
-    max_qtns = max(1, int(np.sqrt(n) / np.sqrt(max(1, np.log10(n)))))
+    # GAPIT uses R's round() for the FarmCPU.BIN upper bound.
+    max_qtns = max(1, round(np.sqrt(n) / np.sqrt(max(1, np.log10(n)))))
 
     # ── Initial FEM scan: no cofactors ─────────────────────────────────
     glm_result = glm_scan_with_cofactors(y, X0, GD, None)

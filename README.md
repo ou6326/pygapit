@@ -35,16 +35,16 @@ failure.
 | MLM | `GAPIT(model="MLM")` | R-validated top-level workflow and EMMA/P3D statistics | Full MAF-filtered marker set | Variance components, monomorphic markers, missing genotypes, and data alignment |
 | CMLM | `GAPIT(model="CMLM")` | R-validated top-level workflow | Not yet | Fixed and automatic compression, native incidence matrices, redundant levels, near-collinear covariates, and invalid designs |
 | MLMM | `GAPIT(model="MLMM")` | R-validated top-level workflow | Not yet | Forward/backward selection, final marker statistics, corrected extended BIC, and indefinite-kinship rejection |
-| FarmCPU | `GAPIT(model="FarmCPU")` | R-validated complete iterative workflow | Not yet | Static-bin selection, pseudo-QTNs, final p-values, and effects |
+| FarmCPU | `GAPIT(model="FarmCPU")` | R-validated complete iterative workflow | Full MAF-filtered marker set | Static-bin selection, pseudo-QTNs, final p-values, and effects |
 | BLINK | `GAPIT(model="BLINK")` | R-validated complete iterative workflow | Not yet | FDR candidates, LD pruning, prefix BIC, zero/one/multiple-QTN paths, and invalid-statistic normalization |
 | gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Not yet | BLUE, BLUP, PEV, predictions, and variance components |
 | cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | Python-only | Not yet | Compressed-kinship prediction and top-level result contracts |
 | sBLUP | `sblup()` or a GWAS prediction override | Python-only | Not yet | Explicit pseudo-QTN validation; standalone top-level `model="sBLUP"` and GAPIT SUPER-based QTN selection are not implemented |
 
 The official-data column currently refers to GAPIT's bundled maize diversity
-panel and the `EarHT` trait. GLM and MLM comparisons cover every marker retained
-by the shared MAF filter; other rows must not be interpreted as official-data
-parity until a corresponding regression is added.
+panel and the `EarHT` trait. GLM, MLM, and FarmCPU comparisons cover every
+marker retained by the shared MAF filter; other rows must not be interpreted as
+official-data parity until a corresponding regression is added.
 
 Intentional divergences are tested rather than hidden. They include replacing
 GAPIT's invalid BLINK `NaN`/infinite statistics with documented valid outputs,
