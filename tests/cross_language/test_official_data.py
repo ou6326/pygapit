@@ -462,6 +462,101 @@ def test_official_maize_cmlm_workflow_matches_gapit(
     nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
 
 
+def test_official_maize_mlmm_workflow_matches_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+):
+    """Compare covariate-free MLMM on GAPIT's bundled maize data."""
+    inputs = _load_official_dataset(r_root)
+    r_bridge.source(r_root, "GAPIT.emma.R")
+    r_bridge.source(r_root, "GAPIT.mlmm.R")
+    r_mlmm = r_bridge.function(
+        "function(y, X, K, nbchunks, maxsteps) {"
+        " fit <- mlmm(y, X, K, nbchunks=nbchunks, maxsteps=maxsteps);"
+        " list(opt_extBIC=fit$opt_extBIC,"
+        "      h2=fit$step_table$h2[which.min(fit$step_table$extBIC)],"
+        "      seq_all_na=as.numeric(all(is.na(fit$seqQTN))),"
+        "      cof_all_na=as.numeric(all(is.na(fit$opt_extBIC$cof))))"
+        "}",
+        returns=RList,
+    )
+    r_kinship = _r_vanraden_kinship(r_bridge, r_root, inputs.genotype_values)
+    marker_names = inputs.marker_names.tolist()
+    r_result = r_mlmm(
+        r_bridge.float_vector(inputs.phenotype_values),
+        r_bridge.matrix(inputs.genotype_values, column_names=marker_names),
+        r_bridge.matrix(r_kinship),
+        nbchunks=10,
+        maxsteps=10,
+    )
+    py_result = GAPIT(
+        Y=inputs.phenotype,
+        GD=inputs.genotype,
+        GM=inputs.marker_map,
+        model="MLMM",
+        trait="EarHT",
+        PCA_total=0,
+        maf_threshold=0.05,
+        file_output=False,
+    )
+
+    assert isinstance(py_result, GAPITResult)
+    assert py_result.GWAS is not None
+    assert py_result.QTNs is not None
+    assert py_result.kinship is not None
+    assert py_result.model == "MLMM"
+    nt.assert_array_equal(
+        py_result.GWAS["SNP"],
+        inputs.marker_names[inputs.output_order],
+    )
+    nt.assert_allclose(py_result.kinship, r_kinship, rtol=1e-12, atol=1e-12)
+
+    r_optimum = r_bridge.component(r_result, "opt_extBIC")
+    r_markers = np.asarray(
+        r_bridge.component(r_bridge.component(r_optimum, "out"), "SNP"),
+        dtype=np.str_,
+    )
+    missing_markers = iter(name for name in marker_names if name not in r_markers)
+    r_markers = np.asarray(
+        [name if name else next(missing_markers) for name in r_markers],
+        dtype=np.str_,
+    )
+    canonical_order = np.asarray(
+        [int(np.flatnonzero(r_markers == name)[0]) for name in marker_names],
+        dtype=np.intp,
+    )
+    r_p_values = r_bridge.float_array(
+        r_bridge.component(r_bridge.component(r_optimum, "out"), "pval")
+    )[canonical_order]
+    r_effects = r_bridge.float_array(
+        r_bridge.component(r_bridge.component(r_optimum, "out"), "effect")
+    )[canonical_order]
+    r_h2 = r_bridge.float_array(r_bridge.component(r_result, "h2"))[0]
+    r_sequence_all_na = r_bridge.float_array(
+        r_bridge.component(r_result, "seq_all_na")
+    )[0]
+    r_cofactor_all_na = r_bridge.float_array(
+        r_bridge.component(r_result, "cof_all_na")
+    )[0]
+
+    assert r_sequence_all_na == 1.0
+    assert r_cofactor_all_na == 1.0
+    assert len(py_result.QTNs) == 0
+    nt.assert_allclose(py_result.h2, r_h2, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["P.value"], dtype=np.float64),
+        r_p_values[inputs.output_order],
+        rtol=5e-5,
+        atol=1e-12,
+    )
+    nt.assert_allclose(
+        np.asarray(py_result.GWAS["effect"], dtype=np.float64),
+        np.round(r_effects[inputs.output_order], 6),
+        rtol=5e-5,
+        atol=4e-5,
+    )
+
+
 def test_official_maize_farmcpu_workflow_matches_gapit(
     r_bridge: RBridge,
     r_root: Path,

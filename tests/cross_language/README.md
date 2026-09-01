@@ -26,11 +26,12 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
 - `test_workflows.py`: public GLM and MLM orchestration with PCA, covariates,
   supplied kinship, shuffled labels, and missing phenotype observations
-- `test_official_data.py`: public GLM, MLM, CMLM, FarmCPU, and BLINK workflows on
-  GAPIT's bundled maize diversity panel. Comparisons cover every MAF-filtered
-  marker, PCA, iterative-model pseudo-QTNs, effects and p-values, VanRaden
-  kinship, MLM variance components, and fixed 40-group CMLM compression. The
-  BLINK regression also
+- `test_official_data.py`: public GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK
+  workflows on GAPIT's bundled maize diversity panel. Comparisons cover every
+  MAF-filtered marker, PCA, iterative-model pseudo-QTNs, effects and p-values,
+  VanRaden kinship, MLM variance components, fixed 40-group CMLM compression,
+  and covariate-free MLMM selection. The MLMM regression characterizes GAPIT's
+  all-`NA` `seqQTN` result for a null-model optimum; the BLINK regression also
   characterizes GAPIT's omission of supplied PCA covariates from BIC selection
   and validates pyGAPIT against the corrected-CV R workflow.
 - `test_cmlm.py`: public CMLM orchestration with fixed compression, native

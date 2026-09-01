@@ -34,7 +34,7 @@ failure.
 | GLM | `GAPIT(model="GLM")` | R-validated top-level workflow | Full MAF-filtered marker set | PCA, covariates, supplied kinship alignment, shuffled labels, and missing phenotypes |
 | MLM | `GAPIT(model="MLM")` | R-validated top-level workflow and EMMA/P3D statistics | Full MAF-filtered marker set | Variance components, monomorphic markers, missing genotypes, and data alignment |
 | CMLM | `GAPIT(model="CMLM")` | R-validated top-level workflow | Full MAF-filtered marker set with fixed 40-group compression | Fixed and automatic compression, native incidence matrices, redundant levels, near-collinear covariates, and invalid designs |
-| MLMM | `GAPIT(model="MLMM")` | R-validated top-level workflow | Not yet | Forward/backward selection, final marker statistics, corrected extended BIC, and indefinite-kinship rejection |
+| MLMM | `GAPIT(model="MLMM")` | R-validated top-level workflow | Full MAF-filtered marker set without added covariates | Forward/backward selection, final marker statistics, corrected extended BIC, and indefinite-kinship rejection |
 | FarmCPU | `GAPIT(model="FarmCPU")` | R-validated complete iterative workflow | Full MAF-filtered marker set | Static-bin selection, pseudo-QTNs, final p-values, and effects |
 | BLINK | `GAPIT(model="BLINK")` | R-validated iterative workflow with the upstream missing-CV BIC call characterized | Full MAF-filtered marker set against the corrected-CV reference | PCA-aware BIC, FDR candidates, LD pruning, zero/one/multiple-QTN paths, and invalid-statistic normalization |
 | gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Not yet | BLUE, BLUP, PEV, predictions, and variance components |
@@ -42,10 +42,13 @@ failure.
 | sBLUP | `sblup()` or a GWAS prediction override | Python-only | Not yet | Explicit pseudo-QTN validation; standalone top-level `model="sBLUP"` and GAPIT SUPER-based QTN selection are not implemented |
 
 The official-data column currently refers to GAPIT's bundled maize diversity
-panel and the `EarHT` trait. GLM, MLM, CMLM, FarmCPU, and BLINK comparisons
-cover every marker retained by the shared MAF filter. The CMLM regression uses
-a fixed 40-group compression; automatic compression selection remains covered
-by the smaller cross-language workflow test. The BLINK reference forwards
+panel and the `EarHT` trait. GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK
+comparisons cover every marker retained by the shared MAF filter. The CMLM
+regression uses a fixed 40-group compression; automatic compression selection
+remains covered by the smaller cross-language workflow test. The MLMM
+regression omits added covariates so GAPIT's extended-BIC penalty is valid; its
+broken all-`NA` `seqQTN` output for this null-model optimum is characterized,
+while pyGAPIT returns an empty QTN array. The BLINK reference forwards
 the already supplied PCA covariates into GAPIT's two BIC calls; the unmodified
 upstream path is also executed to lock its different QTN selection as an
 intentional divergence. Other rows must not be interpreted as official-data
@@ -55,7 +58,8 @@ Intentional divergences are tested rather than hidden. They include replacing
 GAPIT's invalid BLINK `NaN`/infinite statistics with documented valid outputs,
 retaining PCA covariates during BLINK BIC selection,
 rejecting CMLM requests that silently change the model or return a singular-fit
-sentinel, correcting MLMM's extended-BIC marker penalty, and rejecting
+sentinel, correcting MLMM's extended-BIC marker penalty and invalid null-model
+QTN sentinel, and rejecting
 materially indefinite supplied kinship matrices. The detailed test inventory
 and divergence rationale are maintained in
 [`tests/cross_language/README.md`](tests/cross_language/README.md); the required
