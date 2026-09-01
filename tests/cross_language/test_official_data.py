@@ -12,6 +12,7 @@ import pandas as pd
 
 from pygapit._typing import FloatMatrix, FloatVector, StrVector
 from pygapit.gapit import GAPIT, GAPITResult
+from pygapit.gs.blup import gblup
 from tests.cross_language.r_bridge import RBridge, RList, RMatrix
 from tests.cross_language.workflow import r_scalar
 
@@ -340,6 +341,94 @@ def test_official_maize_mlm_workflow_matches_gapit(
     nt.assert_allclose(py_result.vg, r_vg, rtol=2e-5, atol=1e-8)
     nt.assert_allclose(py_result.ve, r_ve, rtol=2e-5, atol=1e-8)
     nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
+
+
+def test_official_maize_gblup_workflow_matches_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+):
+    """Compare official-data BLUE, BLUP, PEV, and prediction with GAPIT."""
+    inputs = _load_official_dataset(r_root)
+    r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
+    design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
+    covariates_with_taxa = np.column_stack(
+        [np.arange(len(inputs.taxa), dtype=np.float64), r_scores]
+    )
+    for filename in (
+        "GAPIT.emma.R",
+        "GAPIT.replaceNaN.R",
+        "GAPIT.emma.REMLE.R",
+        "GAPIT.Timmer.R",
+        "GAPIT.Memory.R",
+    ):
+        r_bridge.source(r_root, filename)
+    r_kinship = _r_vanraden_kinship(r_bridge, r_root, inputs.genotype_values)
+    r_gblup = r_bridge.source_function(
+        r_root,
+        "GAPIT.EMMAxP3D.R",
+        "GAPIT.EMMAxP3D",
+        returns=RList,
+    )
+    r_null = r_bridge.evaluate("NULL")
+    r_result = r_gblup(
+        ys=r_bridge.matrix(inputs.phenotype_values[np.newaxis, :]),
+        xs=r_bridge.matrix(inputs.genotype_values[:, :1]),
+        K=r_bridge.matrix(r_kinship),
+        X0=r_bridge.matrix(design),
+        CVI=r_bridge.matrix(covariates_with_taxa),
+        file_from=1,
+        file_to=1,
+        file_fragment=1,
+        fullGD=True,
+        SNP_P3D=True,
+        Timmer=r_null,
+        Memory=r_null,
+        optOnly=True,
+    )
+    py_direct = gblup(
+        inputs.phenotype_values,
+        design,
+        r_kinship,
+        taxa=inputs.taxa,
+    )
+
+    r_blue = np.sum(r_bridge.float_array(r_bridge.component(r_result, "BLUE")), axis=1)
+    r_blup = r_bridge.float_array(r_bridge.component(r_result, "BLUP")).reshape(-1)
+    r_pev = r_bridge.float_array(r_bridge.component(r_result, "PEV")).reshape(-1)
+    r_vg = r_scalar(r_bridge, r_result, "vgs")
+    r_ve = r_scalar(r_bridge, r_result, "ves")
+
+    nt.assert_array_equal(py_direct.taxa, inputs.taxa)
+    nt.assert_allclose(py_direct.blue, r_blue, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.blup, r_blup, rtol=2e-5, atol=2e-4)
+    nt.assert_allclose(py_direct.pev, r_pev, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.prediction, r_blue + r_blup, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.vg, r_vg, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.ve, r_ve, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
+
+    workflow_result = GAPIT(
+        Y=inputs.phenotype,
+        GD=inputs.genotype,
+        GM=inputs.marker_map,
+        model="gBLUP",
+        trait="EarHT",
+        PCA_total=3,
+        maf_threshold=0.05,
+        file_output=False,
+    )
+
+    assert isinstance(workflow_result, GAPITResult)
+    assert workflow_result.Pred is not None
+    assert workflow_result.kinship is not None
+    nt.assert_array_equal(workflow_result.Pred["Taxa"], inputs.taxa)
+    nt.assert_allclose(workflow_result.kinship, r_kinship, rtol=1e-12, atol=1e-12)
+    nt.assert_array_equal(workflow_result.Pred["BLUE"], np.round(py_direct.blue, 4))
+    nt.assert_array_equal(workflow_result.Pred["BLUP"], np.round(py_direct.blup, 4))
+    nt.assert_array_equal(workflow_result.Pred["PEV"], np.round(py_direct.pev, 6))
+    nt.assert_array_equal(
+        workflow_result.Pred["Prediction"], np.round(py_direct.prediction, 4)
+    )
 
 
 def test_official_maize_cmlm_workflow_matches_gapit(
