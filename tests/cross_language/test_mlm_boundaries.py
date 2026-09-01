@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from pygapit.stats.emma import emmax_p3d
 from pygapit.stats.kinship import vanraden_kinship
-from tests.cross_language.r_bridge import RBridge
+from tests.cross_language.r_bridge import RBridge, RList
 
 
 def _run_r_p3d(
@@ -22,7 +22,7 @@ def _run_r_p3d(
     genotypes: NDArray[np.float64],
     kinship: NDArray[np.float64],
     snp_impute: str = "Middle",
-) -> object:
+) -> RList:
     design = np.column_stack([np.ones(len(phenotype)), covariate])
     covariates_with_taxa = np.column_stack(
         [np.arange(len(phenotype), dtype=float), covariate]
@@ -35,7 +35,12 @@ def _run_r_p3d(
         "GAPIT.Memory.R",
     ):
         r_bridge.source(r_root, filename)
-    r_emmax_p3d = r_bridge.source_function(r_root, "GAPIT.EMMAxP3D.R", "GAPIT.EMMAxP3D")
+    r_emmax_p3d = r_bridge.source_function(
+        r_root,
+        "GAPIT.EMMAxP3D.R",
+        "GAPIT.EMMAxP3D",
+        returns=RList,
+    )
     r_null = r_bridge.evaluate("NULL")
     return r_emmax_p3d(
         ys=r_bridge.matrix(phenotype[np.newaxis, :]),

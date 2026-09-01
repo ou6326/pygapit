@@ -4,19 +4,23 @@ from __future__ import annotations
 
 import os
 import sys
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from importlib import import_module
 from pathlib import Path
-from typing import Protocol, cast, final
+from typing import Literal, Protocol, TypeVar, cast, final, overload
 
 import numpy as np
 from numpy.typing import NDArray
 
+from pygapit._typing import FloatMatrix, FloatVector
+
 FloatArray = NDArray[np.float64]
 _DLL_DIRECTORY_HANDLES: list[object] = []
+RResultT = TypeVar("RResultT", bound="RObject")
+RResultT_co = TypeVar("RResultT_co", bound="RObject", covariant=True)
 
 
-def _configure_pixi_r() -> None:
+def _configure_pixi_r():
     """Point embedded rpy2 at the R installation in the active Pixi prefix."""
     r_home = Path(sys.prefix) / "Lib" / "R"
     if not r_home.is_dir():
@@ -32,35 +36,77 @@ class RUnavailableError(RuntimeError):
     """Raised when rpy2 cannot connect to a working R runtime."""
 
 
-class _RCallable(Protocol):
-    def __call__(self, *args: object, **kwargs: object) -> object: ...
+class RObject(Protocol):
+    """Opaque base type for values owned by the embedded R runtime."""
+
+    @property
+    def rclass(self) -> Sequence[str]: ...
 
 
-class _RAccessor(_RCallable, Protocol):
-    def __getitem__(self, name: str) -> _RCallable: ...
+class RVector(RObject, Protocol):
+    """R vector value."""
+
+
+class RMatrix(RVector, Protocol):
+    """R matrix value."""
+
+
+class RDataFrame(RObject, Protocol):
+    """R data.frame value."""
+
+
+class RList(RObject, Protocol):
+    """Named R list value."""
+
+    def rx2(self, name: str) -> RObject: ...
+
+
+class RNull(RObject, Protocol):
+    """R NULL value."""
+
+
+class RCallable(Protocol[RResultT_co]):
+    """Callable R function with a statically known result type."""
+
+    def __call__(self, *args: object, **kwargs: object) -> RResultT_co: ...
+
+
+class _RAccessor(Protocol):
+    @overload
+    def __call__(self, expression: Literal["NULL"]) -> RNull: ...
+
+    @overload
+    def __call__(self, expression: str) -> RObject: ...
+
+    @overload
+    def __getitem__(
+        self, name: Literal["matrix", "colnames<-"]
+    ) -> RCallable[RMatrix]: ...
+
+    @overload
+    def __getitem__(self, name: Literal["is.null"]) -> RCallable[RVector]: ...
+
+    @overload
+    def __getitem__(self, name: str) -> RCallable[RObject]: ...
 
 
 class _RGlobalEnv(Protocol):
-    def __getitem__(self, name: str) -> _RCallable: ...
-
-
-class _RList(Protocol):
-    def rx2(self, name: str) -> object: ...
+    def __getitem__(self, name: str) -> RCallable[RObject]: ...
 
 
 class _RObjects(Protocol):
     r: _RAccessor
     globalenv: _RGlobalEnv
 
-    def FloatVector(self, values: list[float]) -> object: ...
-    def StrVector(self, values: list[str]) -> object: ...
+    def FloatVector(self, values: list[float]) -> RVector: ...
+    def StrVector(self, values: list[str]) -> RVector: ...
 
 
 @final
 class RBridge:
     """Convert typed NumPy values at the Python/R boundary."""
 
-    def __init__(self, robjects: _RObjects, version: str) -> None:
+    def __init__(self, robjects: _RObjects, version: str):
         self._robjects = robjects
         self.version = version
 
@@ -79,25 +125,57 @@ class RBridge:
                 f"R runtime is unavailable through rpy2: {exc}"
             ) from exc
 
-    def source_function(self, root: Path, filename: str, symbol: str) -> _RCallable:
+    @overload
+    def source_function(
+        self,
+        root: Path,
+        filename: str,
+        symbol: str,
+        *,
+        returns: type[RResultT],
+    ) -> RCallable[RResultT]: ...
+
+    @overload
+    def source_function(
+        self,
+        root: Path,
+        filename: str,
+        symbol: str,
+    ) -> RCallable[RObject]: ...
+
+    def source_function(
+        self,
+        root: Path,
+        filename: str,
+        symbol: str,
+        *,
+        returns: type[RObject] | None = None,
+    ) -> RCallable[RObject]:
         """Source one GAPIT file and return a function defined by it."""
         self.source(root, filename)
         return self._robjects.globalenv[symbol]
 
-    def source(self, root: Path, filename: str) -> None:
+    def source(self, root: Path, filename: str):
         """Source one GAPIT file into the shared R global environment."""
         path = root / filename
         if not path.is_file():
             raise FileNotFoundError(f"Bundled GAPIT source file is missing: {path}")
         self._robjects.r["source"](str(path))
 
-    def source_for_regular_matrices(self, root: Path, filename: str) -> None:
+    def source_for_regular_matrices(
+        self,
+        root: Path,
+        filename: str,
+        *,
+        replacements: Mapping[str, str] | None = None,
+    ):
         """Source GAPIT code with big.matrix probes fixed to false.
 
         GAPIT uses ``bigmemory::is.big.matrix`` even when callers supply an
         ordinary matrix.  Alignment tests do not need the optional bigmemory
         package, so this in-memory variant preserves the regular-matrix branch
-        without modifying the pinned checkout.
+        without modifying the pinned checkout. Optional replacements support
+        narrowly characterized divergences and must each match exactly once.
         """
         path = root / filename
         if not path.is_file():
@@ -107,25 +185,69 @@ class RBridge:
         if probe not in source:
             raise ValueError(f"GAPIT source does not contain {probe}: {path}")
         source = source.replace(probe, ".pygapit_is_big_matrix")
+        if replacements is not None:
+            for original, replacement in replacements.items():
+                match_count = source.count(original)
+                if match_count != 1:
+                    raise ValueError(
+                        "GAPIT source replacement must match exactly once; "
+                        f"found {match_count} matches for {original!r}"
+                    )
+                source = source.replace(original, replacement)
         self.evaluate(".pygapit_is_big_matrix <- function(x) FALSE")
         self.evaluate(source)
 
-    def evaluate(self, expression: str) -> object:
+    @overload
+    def evaluate(self, expression: Literal["NULL"]) -> RNull: ...
+
+    @overload
+    def evaluate(self, expression: str) -> RObject: ...
+
+    def evaluate(self, expression: str) -> RObject:
         """Evaluate an R expression and return its dynamic value."""
         return self._robjects.r(expression)
 
-    def function(self, expression: str) -> _RCallable:
-        """Resolve an R function expression such as ``stats::p.adjust``."""
-        return cast(_RCallable, self._robjects.r(expression))
+    @overload
+    def function(
+        self, expression: Literal["as.data.frame"]
+    ) -> RCallable[RDataFrame]: ...
 
-    def float_vector(self, values: FloatArray) -> object:
+    @overload
+    def function(self, expression: Literal["Blink", "FarmCPU"]) -> RCallable[RList]: ...
+
+    @overload
+    def function(
+        self, expression: Literal["stats::p.adjust"]
+    ) -> RCallable[RVector]: ...
+
+    @overload
+    def function(
+        self,
+        expression: str,
+        *,
+        returns: type[RResultT],
+    ) -> RCallable[RResultT]: ...
+
+    @overload
+    def function(self, expression: str) -> RCallable[RObject]: ...
+
+    def function(
+        self,
+        expression: str,
+        *,
+        returns: type[RObject] | None = None,
+    ) -> RCallable[RObject]:
+        """Resolve an R function expression such as ``stats::p.adjust``."""
+        return cast(RCallable[RObject], cast(object, self._robjects.r(expression)))
+
+    def float_vector(self, values: FloatVector) -> RVector:
         """Create an R numeric vector without implicit NumPy conversion."""
         flat = np.asarray(values, dtype=np.float64).reshape(-1)
         return self._robjects.FloatVector(flat.tolist())
 
     def matrix(
-        self, values: FloatArray, *, column_names: Sequence[str] | None = None
-    ) -> object:
+        self, values: FloatMatrix, *, column_names: Sequence[str] | None = None
+    ) -> RMatrix:
         """Create an R matrix preserving the NumPy row/column arrangement."""
         array = np.asarray(values, dtype=np.float64)
         if array.ndim != 2:
@@ -135,8 +257,8 @@ class RBridge:
         vector = self._robjects.FloatVector(array.ravel(order="F").tolist())
         result = self._robjects.r["matrix"](
             vector,
-            nrow=int(array.shape[0]),
-            ncol=int(array.shape[1]),
+            nrow=array.shape[0],
+            ncol=array.shape[1],
         )
         if column_names is not None:
             if len(column_names) != array.shape[1]:
@@ -147,16 +269,16 @@ class RBridge:
         return result
 
     @staticmethod
-    def float_array(value: object) -> FloatArray:
+    def float_array(value: RObject) -> FloatArray:
         """Convert an R numeric vector or matrix to a float64 NumPy array."""
         return np.asarray(value, dtype=np.float64)
 
-    def is_null(self, value: object) -> bool:
+    def is_null(self, value: RObject) -> bool:
         """Return whether an R value is ``NULL`` without coercing it to NumPy."""
         result = np.asarray(self._robjects.r["is.null"](value), dtype=np.bool_)
         return bool(result[0])
 
     @staticmethod
-    def component(value: object, name: str) -> object:
+    def component(value: RObject, name: str) -> RObject:
         """Extract a named component from an R list result."""
-        return cast(_RList, value).rx2(name)
+        return cast(RList, value).rx2(name)

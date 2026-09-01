@@ -12,7 +12,7 @@ from numpy.typing import NDArray
 
 from pygapit.gapit import GAPITResult
 from pygapit.stats.kinship import vanraden_kinship
-from tests.cross_language.r_bridge import RBridge
+from tests.cross_language.r_bridge import RBridge, RObject
 
 FloatArray = NDArray[np.float64]
 StringArray = NDArray[np.str_]
@@ -34,10 +34,11 @@ class WorkflowInputs:
     kinship_values: FloatArray
 
 
-def r_scalar(r_bridge: RBridge, result: object, name: str) -> np.float64:
+def r_scalar(r_bridge: RBridge, result: RObject, name: str):
     """Extract one numeric scalar from a named R list component."""
     values = r_bridge.float_array(r_bridge.component(result, name)).reshape(-1)
-    return np.float64(values[0])
+    value: np.float64 = values[0]
+    return value
 
 
 def assert_top_level_preparation(

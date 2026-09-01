@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing as t
 from pathlib import Path
 
 import numpy as np
@@ -12,12 +11,13 @@ from numpy.typing import NDArray
 
 from pygapit.stats.emma import emma_remle, emmax_p3d
 from pygapit.stats.kinship import vanraden_kinship
-from tests.cross_language.r_bridge import RBridge
+from tests.cross_language.r_bridge import RBridge, RObject
 
 
-def _r_scalar(r_bridge: RBridge, result: object, name: str) -> np.float64:
+def _r_scalar(r_bridge: RBridge, result: RObject, name: str):
     values = r_bridge.float_array(r_bridge.component(result, name)).reshape(-1)
-    return t.cast(np.float64, values[0])
+    value: np.float64 = values[0]
+    return value
 
 
 @pytest.mark.parametrize(

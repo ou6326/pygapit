@@ -130,6 +130,7 @@ implicit-any-parameter = false
 unused-call-result = false
 implicit-bool = false
 implicit-any-type-argument = false
+unannotated-return = false
 
 [tool.basedpyright]
 include = ["pygapit", "tests", "examples"]
