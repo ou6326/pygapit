@@ -3,7 +3,7 @@
 from importlib.metadata import PackageNotFoundError, version
 
 try:
-    __version__ = version("pygapit")
+    __version__ = version("pygapit-ng")
 except PackageNotFoundError:  # source tree imported without installation
     __version__ = "0+unknown"
 __author__ = "pyGAPIT contributors (based on GAPIT by Jiabo Wang & Zhiwu Zhang)"

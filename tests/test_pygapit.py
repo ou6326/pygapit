@@ -848,7 +848,7 @@ class TestModelContracts:
         """The runtime and build metadata must expose one package version."""
         import pygapit
 
-        assert pygapit.__version__ == version("pygapit")
+        assert pygapit.__version__ == version("pygapit-ng")
 
     def test_compatibility_options_reject_invalid_values(self) -> None:
         """Implemented GAPIT-style options retain explicit value contracts."""

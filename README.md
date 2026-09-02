@@ -79,14 +79,14 @@ otherwise drops to vectors.
 
 ### Regular use
 
-pyGAPIT requires Python 3.10 or newer. Install it from this source checkout.
-This installs only the Python runtime dependencies; R and the GAPIT reference
-repository are not required.
+pyGAPIT requires Python 3.10 or newer. Install the `pygapit-ng` distribution
+from PyPI; the Python import package and command-line entry point remain
+`pygapit`. R and the GAPIT reference repository are not required.
 
 ```bash
-pip install .
+pip install pygapit-ng
 
-pip install ".[bigdata]"  # include HDF5, Zarr, and Dask for larger datasets
+pip install "pygapit-ng[bigdata]"  # include HDF5, Zarr, and Dask for larger datasets
 ```
 
 **Runtime dependencies** are installed automatically: `numpy`, `scipy`,

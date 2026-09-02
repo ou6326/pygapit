@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [1.2.1] - 2026-09-02
+
+### Changed
+
+- Publish the distribution as `pygapit-ng` while retaining `pygapit` as the
+  import package and command-line entry point.
+
 ## [1.2.0] - 2026-09-02
 
 ### Added
@@ -32,5 +39,6 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.0...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.1...main
+[1.2.1]: https://github.com/ou6326/pygapit/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ou6326/pygapit/releases/tag/v1.2.0
