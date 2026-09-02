@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-09-02
+
 ### Added
 
 - GAPIT-style GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK association workflows.
@@ -30,4 +32,5 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/commits/main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.0...main
+[1.2.0]: https://github.com/ou6326/pygapit/releases/tag/v1.2.0

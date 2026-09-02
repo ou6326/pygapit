@@ -3,8 +3,12 @@ message: "If you use pyGAPIT, please cite this software and the relevant GAPIT m
 title: "pyGAPIT: Genome Association and Prediction Integrated Tool for Python"
 type: software
 authors:
+  - family-names: "Ouyang"
+    given-names: "Yiwu"
+    orcid: "https://orcid.org/0009-0009-0200-8843"
   - name: "pyGAPIT Contributors"
-version: 1.1.0
+version: 1.2.0
+date-released: 2026-09-02
 repository-code: "https://github.com/ou6326/pygapit"
 url: "https://github.com/ou6326/pygapit"
 license: GPL-3.0-or-later

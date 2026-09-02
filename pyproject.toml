@@ -4,14 +4,14 @@ build-backend = "hatchling.build"
 
 [project]
 name        = "pygapit"
-version     = "1.1.0"
+version     = "1.2.0"
 description = "Python implementation of GAPIT: Genome Association and Prediction Integrated Tool (GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP, cBLUP, sBLUP)"
 readme      = "README.md"
 license     = "GPL-3.0-or-later"
 license-files = ["LICENSE"]
 requires-python = ">=3.10"
 
-authors = [{ name = "PyGAPIT Contributors" }]
+authors = [{ name = "Yiwu Ouyang" }, { name = "PyGAPIT Contributors" }]
 
 keywords = [
     "GWAS",
