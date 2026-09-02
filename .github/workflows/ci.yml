@@ -57,29 +57,27 @@ jobs:
 
       - uses: r-lib/actions/setup-r@v2
 
-      - uses: actions/setup-python@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
-          python-version: "3.12"
-          cache: pip
-
-      - name: Install project and development tools
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
+          pixi-version: v0.78.0
+          environments: full
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          frozen: true
 
       - name: Ruff
         run: |
-          ruff check .
-          ruff format --check .
+          pixi run -e full ruff check .
+          pixi run -e full ruff format --check .
 
       - name: BasedPyright
-        run: basedpyright
+        run: pixi run -e full basedpyright
 
       - name: Pyrefly
-        run: pyrefly check -p all
+        run: pixi run -e full pyrefly check -p all
 
       - name: Python tests
-        run: pytest tests -q --ignore=tests/cross_language
+        run: pixi run -e full pytest tests -q --ignore=tests/cross_language
 
   windows:
     name: Windows Python ${{ matrix.python-version }}
@@ -126,22 +124,20 @@ jobs:
           echo "R_HOME=$r_home" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$r_home/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
-      - uses: actions/setup-python@v7
+      - uses: prefix-dev/setup-pixi@v0.10.2
         with:
-          python-version: "3.12"
-          cache: pip
+          pixi-version: v0.78.0
+          environments: full
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          frozen: true
 
       - name: Ensure R dependencies
         run: |
           Rscript -e "if (!requireNamespace('MASS', quietly = TRUE)) install.packages('MASS', repos = 'https://cloud.r-project.org')"
 
-      - name: Install project and parity dependencies
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[dev]"
-
       - name: Show pinned GAPIT source
         run: git submodule status GAPIT
 
       - name: Cross-language tests
-        run: pytest tests/cross_language -q
+        run: pixi run -e full pytest tests/cross_language -q

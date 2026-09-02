@@ -28,6 +28,5 @@ benchmarks/results/
 .DS_Store
 Thumbs.db
 # pixi environments
-pixi.lock
 .pixi/*
 !.pixi/config.toml
