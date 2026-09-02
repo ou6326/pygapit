@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import gc
+import io
 import json
 import os
 import platform
@@ -19,6 +21,7 @@ import pandas as pd
 import scipy
 
 from pygapit._typing import FloatMatrix, FloatVector, IntVector
+from pygapit.gapit import GAPIT
 from pygapit.gwas.blink import blink_gwas
 from pygapit.gwas.farmcpu import farmcpu_gwas
 from pygapit.gwas.glm import glm_gwas
@@ -131,10 +134,32 @@ def run_baseline(
         n_markers,
         seed,
     )
+    taxa = np.asarray([f"T{i:05d}" for i in range(n_individuals)], dtype=str)
+    marker_names = np.asarray([f"SNP{i:06d}" for i in range(n_markers)], dtype=str)
+    phenotype_frame = pd.DataFrame({"Taxa": taxa, "trait": phenotype})
+    genotype_frame = pd.DataFrame(genotype, columns=marker_names)
+    genotype_frame.insert(0, "Taxa", taxa)
+    marker_map = pd.DataFrame(
+        {
+            "SNP": marker_names,
+            "Chromosome": chromosomes,
+            "Position": positions,
+        }
+    )
     pca = compute_pca(genotype, n_components=3)
     design = build_covariate_matrix(pca, n_pcs=3)
     kinship = vanraden_kinship(genotype)
     candidate_threshold = 1.0 / n_markers
+
+    def run_pipeline(model: str) -> object:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return GAPIT(
+                Y=phenotype_frame,
+                GD=genotype_frame,
+                GM=marker_map,
+                model=model,
+                file_output=False,
+            )
 
     operations: Sequence[tuple[str, Callable[[], object]]] = (
         ("pca", lambda: compute_pca(genotype, n_components=3)),
@@ -162,6 +187,14 @@ def run_baseline(
                 max_iterations=5,
                 p_threshold=candidate_threshold,
             ),
+        ),
+        (
+            "pipeline_glm",
+            lambda: run_pipeline("GLM"),
+        ),
+        (
+            "pipeline_mlm",
+            lambda: run_pipeline("MLM"),
         ),
     )
     results = [

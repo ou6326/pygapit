@@ -119,11 +119,9 @@ class ModelRunResult:
 
 
 @dataclass(frozen=True, slots=True)
-class PreparedTrait:
-    """Arrays and annotations shared by every model for one trait."""
+class PreparedGenotype:
+    """Genotype-derived preparation shared by traits with the same taxa."""
 
-    name: str
-    y: FloatVector
     genotypes: FloatMatrix
     kinship: FloatMatrix
     design: FloatMatrix
@@ -136,7 +134,6 @@ class PreparedTrait:
 
     def __post_init__(self) -> None:
         for field in (
-            "y",
             "genotypes",
             "kinship",
             "design",
@@ -147,6 +144,54 @@ class PreparedTrait:
             "maf",
         ):
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
+
+
+@dataclass(frozen=True, slots=True)
+class PreparedTrait:
+    """Phenotype values paired with shared genotype-derived preparation."""
+
+    name: str
+    y: FloatVector
+    shared: PreparedGenotype
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "y", readonly_copy(self.y))
+
+    @property
+    def genotypes(self) -> FloatMatrix:
+        return self.shared.genotypes
+
+    @property
+    def kinship(self) -> FloatMatrix:
+        return self.shared.kinship
+
+    @property
+    def design(self) -> FloatMatrix:
+        return self.shared.design
+
+    @property
+    def taxa(self) -> StrVector:
+        return self.shared.taxa
+
+    @property
+    def pca(self) -> PCAResult:
+        return self.shared.pca
+
+    @property
+    def snp_names(self) -> StrVector:
+        return self.shared.snp_names
+
+    @property
+    def chromosomes(self) -> LabelVector:
+        return self.shared.chromosomes
+
+    @property
+    def positions(self) -> FloatVector:
+        return self.shared.positions
+
+    @property
+    def maf(self) -> FloatVector:
+        return self.shared.maf
 
     @property
     def n_obs(self) -> int:
@@ -326,6 +371,7 @@ def GAPIT(
     aligned = align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df)
 
     all_results: dict[str, GAPITResult] = {}
+    prepared_cache: dict[tuple[int, ...], PreparedGenotype] = {}
 
     for trait_name in traits_to_run:
         print(f"\n[pyGAPIT] ---- Trait: {trait_name} ----")
@@ -335,6 +381,7 @@ def GAPIT(
             PCA_total,
             maf_threshold,
             normalized_kinship_algorithm,
+            cache=prepared_cache,
         )
         if prepared is None:
             continue
@@ -763,6 +810,7 @@ def _prepare_trait(
     pca_total: int,
     maf_threshold: float,
     kinship_algorithm: str,
+    cache: dict[tuple[int, ...], PreparedGenotype] | None = None,
 ) -> PreparedTrait | None:
     """Prepare the taxa, markers, kinship, PCA, and design for one trait."""
     y_column = np.asarray(aligned.phenotypes[trait_name], dtype=float)
@@ -774,6 +822,12 @@ def _prepare_trait(
             f"Only {len(y)} individuals with phenotype for {trait_name}. Skipping."
         )
         return None
+
+    # Traits with the same observed-taxa mask share all genotype-derived
+    # preparation. The phenotype vector and trait name remain trait-specific.
+    cache_key = tuple(int(index) for index in valid_indices)
+    if cache is not None and cache_key in cache:
+        return PreparedTrait(name=trait_name, y=y, shared=cache[cache_key])
 
     genotypes = aligned.genotypes[valid_indices, :]
     taxa = aligned.taxa[valid_indices]
@@ -808,9 +862,7 @@ def _prepare_trait(
     )
     design = build_covariate_matrix(pca_result, pca_total, extra_covariates)
 
-    return PreparedTrait(
-        name=trait_name,
-        y=y,
+    shared = PreparedGenotype(
         genotypes=filtered_genotypes,
         kinship=kinship,
         design=design,
@@ -821,6 +873,9 @@ def _prepare_trait(
         positions=np.asarray(marker_map["Position"], dtype=np.float64),
         maf=_compute_maf(filtered_genotypes),
     )
+    if cache is not None:
+        cache[cache_key] = shared
+    return PreparedTrait(name=trait_name, y=y, shared=shared)
 
 
 def _assemble_result(

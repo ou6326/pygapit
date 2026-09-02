@@ -8,6 +8,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from pygapit._typing import FloatMatrix
 from pygapit.gapit import (
     GAPIT,
     GAPITResult,
@@ -17,7 +18,8 @@ from pygapit.gapit import (
     _select_traits,
 )
 from pygapit.gwas.blink import _candidate_mask
-from pygapit.stats.kinship import zhang_kinship
+from pygapit.stats.kinship import vanraden_kinship, zhang_kinship
+from pygapit.stats.pca import PCAResult, compute_pca
 
 
 def _inputs(n: int = 12, invariant: bool = False) -> tuple[pd.DataFrame, ...]:
@@ -138,6 +140,102 @@ def test_multiple_traits_and_models_return_named_results() -> None:
 
     assert isinstance(result, dict)
     assert set(result) == {"height_GLM", "height_MLM", "yield_GLM", "yield_MLM"}
+
+
+@pytest.mark.parametrize(
+    ("missing_cells", "expected_calls"),
+    [
+        ((), 1),
+        (((0, "height"), (1, "yield")), 2),
+    ],
+)
+def test_trait_preparation_cache_respects_observed_taxa(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_cells: tuple[tuple[int, str], ...],
+    expected_calls: int,
+) -> None:
+    phenotype, genotype, marker_map = _inputs()
+    for row, column in missing_cells:
+        phenotype.loc[row, column] = np.nan
+
+    pca_calls = 0
+    kinship_calls = 0
+
+    def counting_pca(
+        GD: FloatMatrix,
+        n_components: int = 3,
+        maf_filter: float = 0.05,
+    ) -> PCAResult:
+        nonlocal pca_calls
+        pca_calls += 1
+        return compute_pca(GD, n_components=n_components, maf_filter=maf_filter)
+
+    def counting_kinship(GD: FloatMatrix) -> FloatMatrix:
+        nonlocal kinship_calls
+        kinship_calls += 1
+        return vanraden_kinship(GD)
+
+    monkeypatch.setattr("pygapit.gapit.compute_pca", counting_pca)
+    monkeypatch.setattr("pygapit.gapit.vanraden_kinship", counting_kinship)
+
+    result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        PCA_total=1,
+        file_output=False,
+    )
+
+    assert isinstance(result, dict)
+    assert set(result) == {"height_GLM", "yield_GLM"}
+    assert pca_calls == expected_calls
+    assert kinship_calls == expected_calls
+
+
+def test_cached_trait_results_match_independent_runs() -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    combined = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        PCA_total=1,
+        file_output=False,
+    )
+    height = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        trait="height",
+        PCA_total=1,
+        file_output=False,
+    )
+    yield_result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        trait="yield",
+        PCA_total=1,
+        file_output=False,
+    )
+
+    assert isinstance(combined, dict)
+    assert isinstance(height, GAPITResult)
+    assert isinstance(yield_result, GAPITResult)
+    combined_height = combined["height_GLM"]
+    combined_yield = combined["yield_GLM"]
+    assert combined_height.GWAS is not None
+    assert combined_yield.GWAS is not None
+    assert height.GWAS is not None
+    assert yield_result.GWAS is not None
+    pd.testing.assert_frame_equal(combined_height.GWAS, height.GWAS)
+    pd.testing.assert_frame_equal(combined_yield.GWAS, yield_result.GWAS)
+    assert combined_height.kinship is combined_yield.kinship
+    assert combined_height.pca is combined_yield.pca
 
 
 def test_blink_fdr_cut_uses_gapit_threshold() -> None:
