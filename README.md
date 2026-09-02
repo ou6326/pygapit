@@ -474,7 +474,9 @@ PEV  = diag(C⁻¹)ᵤᵤ · σ²g
 
 ## Citation
 
-If you use pyGAPIT, please also cite the original GAPIT papers:
+Citation metadata for pyGAPIT is available in
+[`CITATION.cff`](CITATION.cff). If you use pyGAPIT, please also cite the
+original GAPIT papers:
 
 - Wang J., Zhang Z. (2021) GAPIT Version 3. *Genomics, Proteomics & Bioinformatics* https://doi.org/10.1016/j.gpb.2021.08.005
 - Huang M. et al. (2019) BLINK. *GigaScience* https://doi.org/10.1093/gigascience/giy154
@@ -486,4 +488,6 @@ If you use pyGAPIT, please also cite the original GAPIT papers:
 
 ## License
 
-GPL-3.0 — consistent with original R GAPIT license.
+pyGAPIT is distributed under the
+[GNU General Public License v3.0 or later](LICENSE), consistent with the
+original R GAPIT license.

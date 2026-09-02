@@ -20,11 +20,28 @@ jobs:
       - name: Install build tools
         run: pip install build twine
 
+      - name: Verify tag matches package version
+        if: github.ref_type == 'tag'
+        shell: bash
+        run: |
+          package_version="$(python -c 'import tomllib; print(tomllib.load(open("pyproject.toml", "rb"))["project"]["version"])')"
+          tag_version="${GITHUB_REF_NAME#v}"
+          test "$tag_version" = "$package_version"
+
       - name: Build package
         run: python -m build
 
       - name: Check package
         run: python -m twine check dist/*
+
+      - name: Install and smoke-test wheel
+        shell: bash
+        run: |
+          python -m venv "$RUNNER_TEMP/pygapit-wheel-test"
+          "$RUNNER_TEMP/pygapit-wheel-test/bin/python" -m pip install dist/*.whl
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/pygapit-wheel-test/bin/python" -c "import pygapit; print(pygapit.__version__)"
+          "$RUNNER_TEMP/pygapit-wheel-test/bin/pygapit" --help
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
@@ -33,6 +50,7 @@ jobs:
           path: dist/
 
   publish-pypi:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
     needs: build
     runs-on: ubuntu-latest
     environment:

@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use pyGAPIT, please cite this software and the relevant GAPIT method papers."
+title: "pyGAPIT: Genome Association and Prediction Integrated Tool for Python"
+type: software
+authors:
+  - name: "pyGAPIT Contributors"
+version: 1.1.0
+repository-code: "https://github.com/ou6326/pygapit"
+url: "https://github.com/ou6326/pygapit"
+license: GPL-3.0-or-later
+keywords:
+  - GWAS
+  - genomic selection
+  - quantitative genetics
+  - plant breeding
+  - mixed models
+references:
+  - type: article
+    authors:
+      - family-names: Wang
+        given-names: Jiabo
+      - family-names: Zhang
+        given-names: Zhiwu
+    title: "GAPIT Version 3: Boosting Power and Accuracy for Genomic Association and Prediction"
+    journal: "Genomics, Proteomics & Bioinformatics"
+    year: 2021
+    doi: "10.1016/j.gpb.2021.08.005"
