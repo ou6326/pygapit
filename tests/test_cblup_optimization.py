@@ -8,6 +8,7 @@ import pytest
 from pygapit._typing import FloatMatrix, FloatVector
 from pygapit.gs.blup import _emma_blup_with_incidence, cblup
 from pygapit.gwas import mlm
+from pygapit.stats.emma import _eigen_R_w_Z
 
 
 def _reference_incidence_blup(
@@ -93,3 +94,45 @@ def test_cblup_builds_kinship_cluster_tree_once(
     cblup(phenotype, design, genotype, group_to=12, ngrids=10)
 
     assert call_count == 1
+
+
+def test_incidence_partial_eigendecomposition_matches_full_basis() -> None:
+    rng = np.random.default_rng(20260903)
+    n, groups = 30, 8
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    Z = np.zeros((n, groups), dtype=np.float64)
+    Z[np.arange(n), np.arange(n) % groups] = 1.0
+    factors = rng.normal(size=(groups, groups))
+    K: FloatMatrix = factors @ factors.T + np.eye(groups)
+
+    projection_coefficients, *_ = np.linalg.lstsq(X, Z, rcond=None)
+    residualized_Z = Z - X @ projection_coefficients
+    residual_covariance = residualized_Z @ K @ residualized_Z.T
+    residual_covariance = (residual_covariance + residual_covariance.T) / 2.0
+    expected_values, expected_random_basis = np.linalg.eigh(residual_covariance)
+    expected_values = expected_values[::-1]
+    expected_random_basis = expected_random_basis[:, ::-1]
+    random_rank = groups - X.shape[1]
+    fixed_basis, _ = np.linalg.qr(X, mode="reduced")
+    combined: FloatMatrix = np.column_stack(
+        [expected_random_basis[:, :random_rank], fixed_basis]
+    )
+    expected_basis, _ = np.linalg.qr(combined, mode="complete")
+    selected = [*range(random_rank), *range(groups, n)]
+    expected_basis = expected_basis[:, selected]
+
+    actual_values, actual_basis = _eigen_R_w_Z(Z, K, X)
+
+    np.testing.assert_allclose(actual_values, expected_values[:random_rank])
+    for column in range(random_rank):
+        assert abs(
+            actual_basis[:, column] @ expected_basis[:, column]
+        ) == pytest.approx(1.0)
+    actual_null = actual_basis[:, random_rank:]
+    expected_null = expected_basis[:, random_rank:]
+    np.testing.assert_allclose(
+        actual_null @ actual_null.T,
+        expected_null @ expected_null.T,
+        rtol=1e-10,
+        atol=1e-11,
+    )

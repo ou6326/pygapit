@@ -18,6 +18,7 @@ import typing as t
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.linalg import eigh as scipy_eigh
 from scipy.optimize import brentq
 from scipy.stats import t as t_dist
 
@@ -130,7 +131,15 @@ def _eigen_R_w_Z(
     # observation-space form to avoid platform-dependent complex eigenvectors.
     residual_covariance = residualized_Z @ K @ residualized_Z.T
     residual_covariance = (residual_covariance + residual_covariance.T) / 2.0
-    values, random_basis = np.linalg.eigh(residual_covariance)
+    values: FloatVector
+    random_basis: FloatMatrix
+    if random_rank * 2 < n:
+        values, random_basis = scipy_eigh(
+            residual_covariance,
+            subset_by_index=(n - random_rank, n - 1),
+        )
+    else:
+        values, random_basis = np.linalg.eigh(residual_covariance)
     values = values[::-1]
     random_basis = random_basis[:, ::-1]
     fixed_basis, _ = np.linalg.qr(X, mode="reduced")
