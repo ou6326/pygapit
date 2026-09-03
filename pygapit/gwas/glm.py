@@ -167,6 +167,7 @@ def glm_scan_with_cofactors(
 
     Builds X_extended = [X0 | GD[:, cofactor_indices]] and runs GLM.
     """
+    X_ext: FloatMatrix
     if cofactor_indices is not None and len(cofactor_indices) > 0:
         cofactors = GD[:, cofactor_indices]
         X_ext = np.column_stack([X0, cofactors])
@@ -187,23 +188,24 @@ def reward_substitute_cofactor_statistics(
     if len(qtns) == 0:
         return result
 
-    base_design = np.column_stack([X0, GD[:, qtns]])
+    base_design: FloatMatrix = np.column_stack([X0, GD[:, qtns]])
+    base_design_pinv = np.linalg.pinv(base_design)
     n = len(y)
     cofactor_count = len(qtns)
     cofactor_p = np.full((GD.shape[1], cofactor_count), np.nan, dtype=np.float64)
+    standard_errors: FloatVector
     for marker in range(GD.shape[1]):
         marker_values = GD[:, marker]
-        residualized = marker_values - base_design @ (
-            np.linalg.pinv(base_design) @ marker_values
-        )
+        residualized = marker_values - base_design @ (base_design_pinv @ marker_values)
         if residualized @ residualized < 1e-8:
             continue
-        design = np.column_stack([base_design, marker_values])
+        design: FloatMatrix = np.column_stack([base_design, marker_values])
         degrees_of_freedom = n - design.shape[1]
-        beta = np.linalg.pinv(design) @ y
+        design_pinv = np.linalg.pinv(design)
+        beta = design_pinv @ y
         residual = y - design @ beta
         mse = (residual @ residual) / degrees_of_freedom
-        covariance = np.linalg.pinv(design.T @ design) * mse
+        covariance = design_pinv @ design_pinv.T * mse
         standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
         statistics = beta / standard_errors
         p_values = np.asarray(
@@ -224,10 +226,10 @@ def reward_substitute_cofactor_statistics(
         dtype=np.float64,
     )
     degrees_of_freedom = n - base_design.shape[1]
-    beta = np.linalg.pinv(base_design) @ y
+    beta = base_design_pinv @ y
     residual = y - base_design @ beta
     mse = (residual @ residual) / degrees_of_freedom
-    covariance = np.linalg.pinv(base_design.T @ base_design) * mse
+    covariance = base_design_pinv @ base_design_pinv.T * mse
     standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
     statistics = beta / standard_errors
     start = X0.shape[1]

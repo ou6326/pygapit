@@ -24,3 +24,17 @@ a separate invocation using Python's `tracemalloc`; it can exclude memory used
 internally by native BLAS libraries and should not be presented as whole-process
 peak RSS. The script deliberately remains outside the regular pytest and CI
 suites so noisy machine-dependent timings cannot fail correctness checks.
+
+## Hotspot profiles
+
+After recording a baseline, use deterministic profiler scenarios to separate
+marker-heavy iterative work from sample-heavy mixed-model work:
+
+```powershell
+pixi run -e full python benchmarks/profile_hotspots.py --scenario marker-heavy --models farmcpu blink
+pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm cblup
+```
+
+Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`
+files for `python -m pstats` or another compatible viewer. Compare profiles
+only on the same machine and thread configuration used for the baseline.

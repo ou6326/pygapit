@@ -148,13 +148,15 @@ def _restore_cofactor_statistics(
     """Replace collinear scan placeholders with joint GLS cofactor statistics."""
     if not cofactors:
         return result
-    design = np.column_stack([X0] + [GD[:, index] for index in cofactors])
+    design: FloatMatrix = np.column_stack([X0] + [GD[:, index] for index in cofactors])
     remle = emma_remle(y, design, K, ngrids=ngrids)
     covariance = K + remle.delta * np.eye(len(y))
     precision = np.linalg.pinv(covariance)
     information_inverse = np.linalg.pinv(design.T @ precision @ design)
     beta = information_inverse @ design.T @ precision @ y
-    standard_errors = np.sqrt(np.maximum(np.diag(information_inverse) * remle.vg, 0.0))
+    standard_errors: FloatVector = np.sqrt(
+        np.maximum(np.diag(information_inverse) * remle.vg, 0.0)
+    )
     statistics = beta / standard_errors
     degrees_of_freedom = len(y) - design.shape[1]
     p_values = t.cast(
@@ -192,13 +194,15 @@ def _least_significant_cofactor(
     ngrids: int,
 ) -> int:
     """Return the marker with GAPIT's smallest absolute joint GLS t statistic."""
-    design = np.column_stack([X0] + [GD[:, index] for index in cofactors])
+    design: FloatMatrix = np.column_stack([X0] + [GD[:, index] for index in cofactors])
     remle = emma_remle(y, design, K, ngrids=ngrids)
     covariance = K + remle.delta * np.eye(len(y))
     precision = np.linalg.pinv(covariance)
     information_inverse = np.linalg.pinv(design.T @ precision @ design)
     beta = information_inverse @ design.T @ precision @ y
-    standard_errors = np.sqrt(np.maximum(np.diag(information_inverse) * remle.vg, 0.0))
+    standard_errors: FloatVector = np.sqrt(
+        np.maximum(np.diag(information_inverse) * remle.vg, 0.0)
+    )
     marker_statistics = np.abs(beta[X0.shape[1] :] / standard_errors[X0.shape[1] :])
     return cofactors[int(np.nanargmin(marker_statistics))]
 
@@ -212,7 +216,7 @@ def _conditioned_marker_scan(
     ngrids: int,
 ) -> GWASResult:
     """Run the RSS/F marker scan used by GAPIT's MLMM implementation."""
-    design = (
+    design: FloatMatrix = (
         np.column_stack([X0] + [GD[:, index] for index in cofactors])
         if cofactors
         else X0
@@ -299,7 +303,7 @@ def mlmm_gwas(
     model_candidates: list[tuple[np.float64, list[int]]] = []
 
     def record_model(selected: list[int]) -> None:
-        design = (
+        design: FloatMatrix = (
             np.column_stack([X0] + [GD[:, index] for index in selected])
             if selected
             else X0
