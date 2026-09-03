@@ -26,6 +26,9 @@ from .._typing import (
     require_row_count,
 )
 
+_REWARD_MARKER_BATCH_SIZE = 4096
+_REWARD_MAX_BASE_CONDITION = np.finfo(np.float64).eps ** -0.25
+
 
 @dataclass(frozen=True, slots=True)
 class GLMResult:
@@ -193,27 +196,87 @@ def reward_substitute_cofactor_statistics(
     n = len(y)
     cofactor_count = len(qtns)
     cofactor_p = np.full((GD.shape[1], cofactor_count), np.nan, dtype=np.float64)
-    standard_errors: FloatVector
-    for marker in range(GD.shape[1]):
-        marker_values = GD[:, marker]
-        residualized = marker_values - base_design @ (base_design_pinv @ marker_values)
-        if residualized @ residualized < 1e-8:
-            continue
-        design: FloatMatrix = np.column_stack([base_design, marker_values])
-        degrees_of_freedom = n - design.shape[1]
-        design_pinv = np.linalg.pinv(design)
-        beta = design_pinv @ y
-        residual = y - design @ beta
-        mse = (residual @ residual) / degrees_of_freedom
-        covariance = design_pinv @ design_pinv.T * mse
-        standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
-        statistics = beta / standard_errors
-        p_values = np.asarray(
-            2.0 * t_dist.sf(np.abs(statistics), degrees_of_freedom),
-            dtype=np.float64,
-        )
-        start = X0.shape[1]
-        cofactor_p[marker] = p_values[start : start + cofactor_count]
+    start = X0.shape[1]
+    beta = base_design_pinv @ y
+    residual = y - base_design @ beta
+    covariance_factor = base_design_pinv @ base_design_pinv.T
+
+    base_condition = np.linalg.cond(base_design)
+    if not np.isfinite(base_condition) or base_condition > _REWARD_MAX_BASE_CONDITION:
+        # Rank-deficient augmented designs do not obey the full-rank block
+        # inverse update below, while ill-conditioned ones amplify its rounding
+        # error. Preserve their Moore-Penrose solution exactly.
+        for marker in range(GD.shape[1]):
+            marker_values = GD[:, marker]
+            residualized = marker_values - base_design @ (
+                base_design_pinv @ marker_values
+            )
+            if residualized @ residualized < 1e-8:
+                continue
+            design: FloatMatrix = np.column_stack([base_design, marker_values])
+            degrees_of_freedom = n - design.shape[1]
+            design_pinv = np.linalg.pinv(design)
+            marker_beta = design_pinv @ y
+            marker_residual = y - design @ marker_beta
+            mse = (marker_residual @ marker_residual) / degrees_of_freedom
+            marker_covariance = design_pinv @ design_pinv.T * mse
+            standard_errors = np.sqrt(np.maximum(np.diag(marker_covariance), 0.0))
+            statistics = marker_beta / standard_errors
+            p_values = np.asarray(
+                2.0 * t_dist.sf(np.abs(statistics), degrees_of_freedom),
+                dtype=np.float64,
+            )
+            cofactor_p[marker] = p_values[start : start + cofactor_count]
+    else:
+        # Frisch-Waugh-Lovell plus the block inverse of [B | g]'[B | g]
+        # gives every substitute-marker fit from one pseudoinverse of B.
+        # Work in batches so the temporary residualized genotype matrix stays
+        # bounded for large marker sets.
+        degrees_of_freedom = n - base_design.shape[1] - 1
+        cofactor_beta = beta[start : start + cofactor_count]
+        cofactor_variance = np.diag(covariance_factor)[start : start + cofactor_count]
+        for batch_start in range(0, GD.shape[1], _REWARD_MARKER_BATCH_SIZE):
+            batch_stop = min(batch_start + _REWARD_MARKER_BATCH_SIZE, GD.shape[1])
+            marker_values = GD[:, batch_start:batch_stop]
+            projection_coefficients = base_design_pinv @ marker_values
+            residualized = marker_values - base_design @ projection_coefficients
+            residualized_ss = np.sum(residualized**2, axis=0)
+            valid = residualized_ss >= 1e-8
+            if not valid.any():
+                continue
+
+            valid_residualized = residualized[:, valid]
+            valid_ss = residualized_ss[valid]
+            marker_effects = (valid_residualized.T @ residual) / valid_ss
+            marker_residuals = residual[:, np.newaxis] - (
+                valid_residualized * marker_effects[np.newaxis, :]
+            )
+            mse = np.sum(marker_residuals**2, axis=0) / degrees_of_freedom
+
+            cofactor_projection = projection_coefficients[
+                start : start + cofactor_count, valid
+            ]
+            substitute_effects = cofactor_beta[:, np.newaxis] - (
+                cofactor_projection * marker_effects[np.newaxis, :]
+            )
+            substitute_variances = (
+                cofactor_variance[:, np.newaxis]
+                + cofactor_projection**2 / valid_ss[np.newaxis, :]
+            )
+            substitute_se = np.sqrt(
+                np.maximum(substitute_variances * mse[np.newaxis, :], 0.0)
+            )
+            substitute_statistics = substitute_effects / substitute_se
+            substitute_p = np.asarray(
+                2.0
+                * t_dist.sf(
+                    np.abs(substitute_statistics),
+                    degrees_of_freedom,
+                ),
+                dtype=np.float64,
+            )
+            batch_rows = np.flatnonzero(valid) + batch_start
+            cofactor_p[batch_rows] = substitute_p.T
 
     # GAPIT's min(..., na.rm=TRUE) returns Inf when every substitute is
     # unavailable. Normalize that invalid p-value to the equivalent
@@ -226,13 +289,10 @@ def reward_substitute_cofactor_statistics(
         dtype=np.float64,
     )
     degrees_of_freedom = n - base_design.shape[1]
-    beta = base_design_pinv @ y
-    residual = y - base_design @ beta
     mse = (residual @ residual) / degrees_of_freedom
-    covariance = base_design_pinv @ base_design_pinv.T * mse
+    covariance = covariance_factor * mse
     standard_errors = np.sqrt(np.maximum(np.diag(covariance), 0.0))
     statistics = beta / standard_errors
-    start = X0.shape[1]
 
     p_values = result.p_values.copy()
     effects = result.effects.copy()
