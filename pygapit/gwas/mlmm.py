@@ -312,18 +312,16 @@ def mlmm_gwas(
         log_likelihood = _profile_ml_log_likelihood(
             y, design, eigenvalues, eigenvectors
         )
-        model_candidates.append(
-            (
-                _ext_bic(
-                    log_likelihood,
-                    n,
-                    design.shape[1],
-                    m,
-                    len(selected),
-                ),
-                selected.copy(),
-            )
-        )
+        model_candidates.append((
+            _ext_bic(
+                log_likelihood,
+                n,
+                design.shape[1],
+                m,
+                len(selected),
+            ),
+            selected.copy(),
+        ))
 
     cofactors: list[int] = []
     record_model(cofactors)

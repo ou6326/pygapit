@@ -100,13 +100,11 @@ def small_dataset(rng: RandomState) -> SmallDataset:
     return {
         "y": y,
         "GD": GD,
-        "GM": pd.DataFrame(
-            {
-                "SNP": snp_names,
-                "Chromosome": chromosomes,
-                "Position": positions,
-            }
-        ),
+        "GM": pd.DataFrame({
+            "SNP": snp_names,
+            "Chromosome": chromosomes,
+            "Position": positions,
+        }),
         "taxa": taxa,
         "qtn_idx": qtn_idx,
         "alpha_true": alpha_true,
@@ -1006,21 +1004,20 @@ class TestIO:
         from pygapit.io.formats import GenotypeData, PhenotypeData, align_taxa
 
         # Phenotype: 5 individuals
-        Y = pd.DataFrame(
-            {"Taxa": ["A", "B", "C", "D", "E"], "trait": [1.0, 2.0, 3.0, 4.0, 5.0]}
-        )
+        Y = pd.DataFrame({
+            "Taxa": ["A", "B", "C", "D", "E"],
+            "trait": [1.0, 2.0, 3.0, 4.0, 5.0],
+        })
         pheno = PhenotypeData(
             Y=Y, taxa=np.array(["A", "B", "C", "D", "E"]), trait_names=["trait"]
         )
         # Genotype: 4 individuals (missing D, extra F)
         GD = np.random.rand(4, 10)
-        GM = pd.DataFrame(
-            {
-                "SNP": [f"s{i}" for i in range(10)],
-                "Chromosome": [1] * 10,
-                "Position": range(10),
-            }
-        )
+        GM = pd.DataFrame({
+            "SNP": [f"s{i}" for i in range(10)],
+            "Chromosome": [1] * 10,
+            "Position": range(10),
+        })
         geno = GenotypeData(GD=GD, GM=GM, taxa=np.array(["A", "B", "C", "F"]))
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")

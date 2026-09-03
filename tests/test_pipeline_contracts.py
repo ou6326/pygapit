@@ -24,33 +24,27 @@ from pygapit.stats.pca import PCAResult, compute_pca
 
 def _inputs(n: int = 12, invariant: bool = False) -> tuple[pd.DataFrame, ...]:
     taxa = [f"T{i:02d}" for i in range(n)]
-    phenotype = pd.DataFrame(
-        {
-            "Taxa": taxa,
-            "height": np.linspace(1.0, n, n),
-            "yield": np.linspace(n, 1.0, n),
-        }
-    )
+    phenotype = pd.DataFrame({
+        "Taxa": taxa,
+        "height": np.linspace(1.0, n, n),
+        "yield": np.linspace(n, 1.0, n),
+    })
     if invariant:
         marker_values = np.zeros((n, 4))
     else:
-        marker_values = np.column_stack(
-            [
-                np.arange(n) % 3,
-                (np.arange(n) + 1) % 3,
-                np.arange(n) % 2,
-                (np.arange(n) // 2) % 3,
-            ]
-        )
+        marker_values = np.column_stack([
+            np.arange(n) % 3,
+            (np.arange(n) + 1) % 3,
+            np.arange(n) % 2,
+            (np.arange(n) // 2) % 3,
+        ])
     genotype = pd.DataFrame(marker_values, columns=["s1", "s2", "s3", "s4"])
     genotype.insert(0, "Taxa", taxa)
-    marker_map = pd.DataFrame(
-        {
-            "SNP": ["s1", "s2", "s3", "s4"],
-            "Chromosome": [1, 1, 2, 2],
-            "Position": [10, 20, 10, 20],
-        }
-    )
+    marker_map = pd.DataFrame({
+        "SNP": ["s1", "s2", "s3", "s4"],
+        "Chromosome": [1, 1, 2, 2],
+        "Position": [10, 20, 10, 20],
+    })
     return phenotype, genotype, marker_map
 
 
@@ -406,25 +400,21 @@ def test_multiple_analysis_writes_combined_plots(tmp_path: Path) -> None:
 
 def test_multiple_analysis_aligns_models_by_marker_coordinates() -> None:
     first = GAPITResult(
-        GWAS=pd.DataFrame(
-            {
-                "SNP": ["s1", "s2"],
-                "Chr": ["1", "1"],
-                "Pos": [10.0, 20.0],
-                "P.value": [0.01, 0.02],
-            }
-        ),
+        GWAS=pd.DataFrame({
+            "SNP": ["s1", "s2"],
+            "Chr": ["1", "1"],
+            "Pos": [10.0, 20.0],
+            "P.value": [0.01, 0.02],
+        }),
         model="GLM",
     )
     second = GAPITResult(
-        GWAS=pd.DataFrame(
-            {
-                "SNP": ["s3", "s2"],
-                "Chr": ["2", "1"],
-                "Pos": [5.0, 20.0],
-                "P.value": [0.03, 0.2],
-            }
-        ),
+        GWAS=pd.DataFrame({
+            "SNP": ["s3", "s2"],
+            "Chr": ["2", "1"],
+            "Pos": [5.0, 20.0],
+            "P.value": [0.03, 0.2],
+        }),
         model="MLM",
     )
 

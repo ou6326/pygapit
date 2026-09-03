@@ -17,13 +17,11 @@ def _phenotype() -> pd.DataFrame:
 
 
 def _marker_map(*snps: str) -> pd.DataFrame:
-    return pd.DataFrame(
-        {
-            "SNP": list(snps),
-            "Chromosome": [1] * len(snps),
-            "Position": np.arange(1, len(snps) + 1),
-        }
-    )
+    return pd.DataFrame({
+        "SNP": list(snps),
+        "Chromosome": [1] * len(snps),
+        "Position": np.arange(1, len(snps) + 1),
+    })
 
 
 def _hapmap(position: object = 10) -> pd.DataFrame:

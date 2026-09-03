@@ -25,9 +25,10 @@ def test_gblup_matches_bundled_r_gapit(
 ) -> None:
     """Compare GAPIT's null-model BLUE, BLUP, PEV, and variance components."""
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_covariate]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_covariate,
+    ])
     kinship = vanraden_kinship(fixed_genotypes)
 
     for filename in (
@@ -105,13 +106,15 @@ def test_cblup_matches_bundled_r_gapit(
 ) -> None:
     """Compare compressed-group selection, BLUE, BLUP, PEV, and prediction."""
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=np.float64), fixed_covariate]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=np.float64),
+        fixed_covariate,
+    ])
     kinship = vanraden_kinship(fixed_genotypes)
-    kinship_with_taxa = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=np.float64), kinship]
-    )
+    kinship_with_taxa = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=np.float64),
+        kinship,
+    ])
     for filename in (
         "GAPIT.emma.R",
         "GAPIT.replaceNaN.R",
@@ -183,12 +186,10 @@ def test_cblup_matches_bundled_r_gapit(
         Y=phenotype_frame,
         GD=genotype_frame,
         GM=marker_frame,
-        CV=pd.DataFrame(
-            {
-                "Taxa": phenotype_frame["Taxa"].astype(str),
-                "Covariate": fixed_covariate,
-            }
-        ),
+        CV=pd.DataFrame({
+            "Taxa": phenotype_frame["Taxa"].astype(str),
+            "Covariate": fixed_covariate,
+        }),
         model="cBLUP",
         PCA_total=0,
         maf_threshold=0.0,
@@ -216,9 +217,10 @@ def test_super_selection_and_sblup_match_bundled_r_gapit(
 ) -> None:
     """Compare corrected SUPER selection and pseudo-QTN prediction with R."""
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=np.float64), fixed_covariate]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=np.float64),
+        fixed_covariate,
+    ])
     chromosomes = np.asarray([1, 1, 1, 2, 2, 2], dtype=np.float64)
     positions = np.asarray([100, 200, 1500, 100, 200, 1500], dtype=np.float64)
     p_values = np.asarray([0.04, 0.001, 0.02, 0.003, 0.05, 0.01])
@@ -321,12 +323,10 @@ def test_super_selection_and_sblup_match_bundled_r_gapit(
         Y=phenotype_frame,
         GD=genotype_frame,
         GM=marker_frame,
-        CV=pd.DataFrame(
-            {
-                "Taxa": phenotype_frame["Taxa"].astype(str),
-                "Covariate": fixed_covariate,
-            }
-        ),
+        CV=pd.DataFrame({
+            "Taxa": phenotype_frame["Taxa"].astype(str),
+            "Covariate": fixed_covariate,
+        }),
         model="sBLUP",
         PCA_total=0,
         maf_threshold=0.0,

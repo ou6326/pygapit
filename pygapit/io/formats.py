@@ -35,9 +35,20 @@ from .._typing import (
 # Based on GAPIT.Numericalization.R lookup table
 
 HETEROZYGOUS_1BIT = frozenset("RYSWKM")
-HETEROZYGOUS_2BIT = frozenset(
-    {"AT", "AG", "AC", "TA", "GA", "CA", "GT", "TG", "GC", "CG", "CT", "TC"}
-)
+HETEROZYGOUS_2BIT = frozenset({
+    "AT",
+    "AG",
+    "AC",
+    "TA",
+    "GA",
+    "CA",
+    "GT",
+    "TG",
+    "GC",
+    "CG",
+    "CT",
+    "TC",
+})
 MISSING_1BIT = frozenset({"N", "X", "-", "+", "/", "NA", "NAN"})
 MISSING_2BIT = frozenset({"NN", "XX", "--", "++", "//", "00", "N", "NA", "NAN"})
 

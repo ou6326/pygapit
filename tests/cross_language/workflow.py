@@ -82,12 +82,10 @@ def make_workflow_inputs(
     canonical_kinship = vanraden_kinship(fixed_genotypes)
     reverse = np.arange(len(taxa) - 1, -1, -1)
 
-    covariate = pd.DataFrame(
-        {
-            "Taxa": taxa[reverse],
-            "Covariate": fixed_covariate[reverse],
-        }
-    )
+    covariate = pd.DataFrame({
+        "Taxa": taxa[reverse],
+        "Covariate": fixed_covariate[reverse],
+    })
     kinship = pd.DataFrame(
         canonical_kinship[np.ix_(reverse, reverse)],
         columns=taxa[reverse],
@@ -127,7 +125,9 @@ def r_design_with_pca(
     if scores_with_taxa.shape[0] != len(inputs.taxa):
         scores_with_taxa = scores_with_taxa.T
     scores = scores_with_taxa[:, 1 : pca_total + 1]
-    design = np.column_stack(
-        [np.ones(len(inputs.taxa)), scores, inputs.covariate_values]
-    )
+    design = np.column_stack([
+        np.ones(len(inputs.taxa)),
+        scores,
+        inputs.covariate_values,
+    ])
     return design, scores

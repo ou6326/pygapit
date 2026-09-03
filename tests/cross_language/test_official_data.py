@@ -120,25 +120,19 @@ def _iterative_workflow_matrices(
     r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
     marker_index = pd.Index(inputs.marker_names, dtype="str")
     filtered_map = inputs.marker_map.set_index("SNP").loc[marker_index]
-    phenotype = np.column_stack(
-        [
-            np.arange(len(inputs.phenotype_values), dtype=np.float64),
-            inputs.phenotype_values,
-        ]
-    )
-    genotype = np.column_stack(
-        [
-            np.arange(len(inputs.phenotype_values), dtype=np.float64),
-            inputs.genotype_values,
-        ]
-    )
-    marker_map = np.column_stack(
-        [
-            np.arange(1, marker_count + 1, dtype=np.float64),
-            filtered_map["Chromosome"].to_numpy(dtype=np.float64),
-            filtered_map["Position"].to_numpy(dtype=np.float64),
-        ]
-    )
+    phenotype = np.column_stack([
+        np.arange(len(inputs.phenotype_values), dtype=np.float64),
+        inputs.phenotype_values,
+    ])
+    genotype = np.column_stack([
+        np.arange(len(inputs.phenotype_values), dtype=np.float64),
+        inputs.genotype_values,
+    ])
+    marker_map = np.column_stack([
+        np.arange(1, marker_count + 1, dtype=np.float64),
+        filtered_map["Chromosome"].to_numpy(dtype=np.float64),
+        filtered_map["Position"].to_numpy(dtype=np.float64),
+    ])
     return r_scores, phenotype, genotype, marker_map
 
 
@@ -262,9 +256,10 @@ def test_official_maize_mlm_workflow_matches_gapit(
     inputs = _load_official_dataset(r_root)
     r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
     design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), r_scores]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        r_scores,
+    ])
     for filename in (
         "GAPIT.emma.R",
         "GAPIT.replaceNaN.R",
@@ -351,9 +346,10 @@ def test_official_maize_gblup_workflow_matches_gapit(
     inputs = _load_official_dataset(r_root)
     r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
     design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), r_scores]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        r_scores,
+    ])
     for filename in (
         "GAPIT.emma.R",
         "GAPIT.replaceNaN.R",
@@ -440,9 +436,10 @@ def test_official_maize_cmlm_workflow_matches_gapit(
     group_count = 40
     r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
     design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), r_scores]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        r_scores,
+    ])
     for filename in (
         "GAPIT.emma.R",
         "GAPIT.replaceNaN.R",
@@ -460,9 +457,10 @@ def test_official_maize_cmlm_workflow_matches_gapit(
         "}",
         returns=RList,
     )
-    kinship_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), r_kinship]
-    )
+    kinship_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        r_kinship,
+    ])
     r_compression = r_compress(
         r_bridge.matrix(kinship_with_taxa),
         groups=group_count,

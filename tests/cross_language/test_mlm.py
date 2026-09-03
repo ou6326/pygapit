@@ -74,9 +74,10 @@ def test_emmax_p3d_scan_matches_bundled_r_gapit(
 ) -> None:
     """Compare SNP-level P3D p-values, effects, errors, and statistics."""
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_covariate]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_covariate,
+    ])
     kinship = vanraden_kinship(fixed_genotypes)
 
     for filename in (

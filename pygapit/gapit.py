@@ -202,9 +202,17 @@ class PreparedTrait:
         return self.genotypes.shape[1]
 
 
-_SUPPORTED_MODELS = frozenset(
-    {"GLM", "MLM", "CMLM", "MLMM", "BLINK", "FARMCPU", "GBLUP", "CBLUP", "SBLUP"}
-)
+_SUPPORTED_MODELS = frozenset({
+    "GLM",
+    "MLM",
+    "CMLM",
+    "MLMM",
+    "BLINK",
+    "FARMCPU",
+    "GBLUP",
+    "CBLUP",
+    "SBLUP",
+})
 
 
 @dataclass(slots=True)
@@ -1108,19 +1116,18 @@ def _build_gwas_table(
 ) -> pd.DataFrame:
     """Build standardized GWAS result DataFrame matching GAPIT's CSV output."""
     return (
-        pd.DataFrame(
-            {
-                "SNP": snp_names,
-                "Chr": chromosomes,
-                "Pos": positions.astype(int),
-                "P.value": p_values,
-                "maf": np.round(maf, 4),
-                "nobs": n_obs,
-                "effect": np.round(effects, 6),
-                "se": np.round(se, 6),
-                "FDR.Adjusted.P.values": np.round(adj_pvalues, 6),
-            }
-        )
+        pd
+        .DataFrame({
+            "SNP": snp_names,
+            "Chr": chromosomes,
+            "Pos": positions.astype(int),
+            "P.value": p_values,
+            "maf": np.round(maf, 4),
+            "nobs": n_obs,
+            "effect": np.round(effects, 6),
+            "se": np.round(se, 6),
+            "FDR.Adjusted.P.values": np.round(adj_pvalues, 6),
+        })
         .sort_values(["Chr", "Pos"])
         .reset_index(drop=True)
     )
@@ -1167,16 +1174,14 @@ def _run_gs_and_build_pred(
         else:
             gs_result = gblup(y, X0, K, taxa=taxa)
 
-        return pd.DataFrame(
-            {
-                "Taxa": taxa,
-                "BLUE": np.round(gs_result.blue, 4),
-                "BLUP": np.round(gs_result.blup, 4),
-                "PEV": np.round(gs_result.pev, 6),
-                "gBreedingValue": np.round(gs_result.gebv, 4),
-                "Prediction": np.round(gs_result.prediction, 4),
-            }
-        )
+        return pd.DataFrame({
+            "Taxa": taxa,
+            "BLUE": np.round(gs_result.blue, 4),
+            "BLUP": np.round(gs_result.blup, 4),
+            "PEV": np.round(gs_result.pev, 6),
+            "gBreedingValue": np.round(gs_result.gebv, 4),
+            "Prediction": np.round(gs_result.prediction, 4),
+        })
     except (ValueError, TypeError, np.linalg.LinAlgError) as e:
         warnings.warn(f"GS prediction failed: {e}")
         return None
@@ -1225,7 +1230,8 @@ def _align_multiple_gwas(
     reference = all_markers.drop_duplicates(keys).copy()
     reference["_chromosome_order"] = reference["Chr"].map(chromosome_order)
     reference = (
-        reference.sort_values(["_chromosome_order", "Pos", "SNP"], kind="stable")
+        reference
+        .sort_values(["_chromosome_order", "Pos", "SNP"], kind="stable")
         .drop(columns="_chromosome_order")
         .reset_index(drop=True)
     )

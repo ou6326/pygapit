@@ -36,9 +36,10 @@ def test_top_level_cmlm_with_fixed_compression_matches_gapit(
         fixed_gapit_inputs,
     )
     design, r_scores = r_design_with_pca(r_bridge, r_root, inputs, pca_total=2)
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), design[:, 1:]]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        design[:, 1:],
+    ])
 
     for filename in (
         "GAPIT.Timmer.R",
@@ -55,9 +56,10 @@ def test_top_level_cmlm_with_fixed_compression_matches_gapit(
         " list(labels=as.numeric(out$GA[,2]), kinship=out$KG)"
         "}"
     )
-    kinship_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), inputs.kinship_values]
-    )
+    kinship_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        inputs.kinship_values,
+    ])
     r_compression = r_compress_fixed(
         r_bridge.matrix(kinship_with_taxa),
         groups=5,
@@ -180,9 +182,10 @@ def test_cmlm_selects_same_compression_as_gapit(
         " best"
         "}"
     )
-    kinship_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), inputs.kinship_values]
-    )
+    kinship_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        inputs.kinship_values,
+    ])
     r_best = r_select(
         r_bridge.matrix(kinship_with_taxa),
         r_bridge.float_vector(inputs.phenotype_values),

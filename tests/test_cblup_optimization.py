@@ -114,9 +114,10 @@ def test_incidence_partial_eigendecomposition_matches_full_reml_space():
     expected_random_basis = expected_random_basis[:, ::-1]
     random_rank = groups - X.shape[1]
     fixed_basis, _ = np.linalg.qr(X, mode="reduced")
-    combined: FloatMatrix = np.column_stack(
-        [expected_random_basis[:, :random_rank], fixed_basis]
-    )
+    combined: FloatMatrix = np.column_stack([
+        expected_random_basis[:, :random_rank],
+        fixed_basis,
+    ])
     expected_complete_basis, _ = np.linalg.qr(combined, mode="complete")
     selected = [*range(random_rank), *range(groups, n)]
     expected_reml_basis = expected_complete_basis[:, selected]

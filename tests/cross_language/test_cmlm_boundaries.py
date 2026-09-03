@@ -98,9 +98,11 @@ def test_near_collinear_fixed_effects_have_stable_native_incidence_fit(
     y, _design, kinship, incidence = _incidence_inputs(fixed_genotypes, fixed_phenotype)
     covariate = np.linspace(-1.0, 1.0, len(y), dtype=np.float64)
     perturbation = np.where(np.arange(len(y)) % 2 == 0, 1.0, -1.0)
-    design = np.column_stack(
-        [np.ones(len(y)), covariate, covariate + 1e-6 * perturbation]
-    )
+    design = np.column_stack([
+        np.ones(len(y)),
+        covariate,
+        covariate + 1e-6 * perturbation,
+    ])
 
     r_ok, r_values = _r_remle(r_bridge, r_root, y, design, kinship, incidence)
     py_values = _result_values(emma_remle(y, design, kinship, Z=incidence))

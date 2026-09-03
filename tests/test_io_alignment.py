@@ -36,14 +36,12 @@ def _inputs() -> tuple[PhenotypeData, GenotypeData]:
 def test_align_inputs_preserves_phenotype_order_and_reorders_all_inputs() -> None:
     phenotype, genotype = _inputs()
     covariates = pd.DataFrame({"Taxa": ["B", "C", "A"], "group": [2.0, 3.0, 1.0]})
-    kinship = pd.DataFrame(
-        {
-            "Taxa": ["B", "A", "C"],
-            "B": [22.0, 12.0, 23.0],
-            "A": [12.0, 11.0, 13.0],
-            "C": [23.0, 13.0, 33.0],
-        }
-    )
+    kinship = pd.DataFrame({
+        "Taxa": ["B", "A", "C"],
+        "B": [22.0, 12.0, 23.0],
+        "A": [12.0, 11.0, 13.0],
+        "C": [23.0, 13.0, 33.0],
+    })
 
     with warnings.catch_warnings():
         warnings.simplefilter("ignore")
@@ -106,9 +104,11 @@ def test_align_inputs_rejects_invalid_genotype_dimensions(
 
 def test_align_inputs_rejects_non_square_kinship_data() -> None:
     phenotype, genotype = _inputs()
-    kinship = pd.DataFrame(
-        {"Taxa": ["A", "B", "C"], "A": [1.0, 0.0, 0.0], "B": [0.0, 1.0, 0.0]}
-    )
+    kinship = pd.DataFrame({
+        "Taxa": ["A", "B", "C"],
+        "A": [1.0, 0.0, 0.0],
+        "B": [0.0, 1.0, 0.0],
+    })
 
     with pytest.raises(ValueError, match="square matrix"):
         align_inputs(phenotype, genotype, ki_df=kinship)

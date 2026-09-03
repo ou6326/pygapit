@@ -139,13 +139,11 @@ def run_baseline(
     phenotype_frame = pd.DataFrame({"Taxa": taxa, "trait": phenotype})
     genotype_frame = pd.DataFrame(genotype, columns=marker_names)
     genotype_frame.insert(0, "Taxa", taxa)
-    marker_map = pd.DataFrame(
-        {
-            "SNP": marker_names,
-            "Chromosome": chromosomes,
-            "Position": positions,
-        }
-    )
+    marker_map = pd.DataFrame({
+        "SNP": marker_names,
+        "Chromosome": chromosomes,
+        "Position": positions,
+    })
     pca = compute_pca(genotype, n_components=3)
     design = build_covariate_matrix(pca, n_pcs=3)
     kinship = vanraden_kinship(genotype)

@@ -24,9 +24,10 @@ def _run_r_p3d(
     snp_impute: str = "Middle",
 ) -> RList:
     design = np.column_stack([np.ones(len(phenotype)), covariate])
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(phenotype), dtype=float), covariate]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(phenotype), dtype=float),
+        covariate,
+    ])
     for filename in (
         "GAPIT.emma.R",
         "GAPIT.replaceNaN.R",
@@ -68,9 +69,10 @@ def test_p3d_monomorphic_marker_matches_bundled_r_gapit(
     fixed_covariate: NDArray[np.float64],
 ) -> None:
     """A monomorphic marker has p=1 and undefined effect statistics."""
-    genotypes = np.column_stack(
-        [fixed_genotypes, np.full(len(fixed_phenotype), 2.0, dtype=float)]
-    )
+    genotypes = np.column_stack([
+        fixed_genotypes,
+        np.full(len(fixed_phenotype), 2.0, dtype=float),
+    ])
     kinship = vanraden_kinship(genotypes)
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
     r_result = _run_r_p3d(

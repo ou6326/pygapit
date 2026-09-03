@@ -45,23 +45,21 @@ def test_corrected_ext_bic_excludes_covariates_from_marker_penalty(
             marker_count,
         )
     )
-    py_scores = np.asarray(
-        [
-            _ext_bic(
-                log_likelihood,
-                n,
-                int(n_fixed),
-                marker_count,
-                int(n_selected),
-            )
-            for log_likelihood, n_fixed, n_selected in zip(
-                log_likelihoods,
-                fixed_effect_counts,
-                selected_marker_counts,
-                strict=True,
-            )
-        ]
-    )
+    py_scores = np.asarray([
+        _ext_bic(
+            log_likelihood,
+            n,
+            int(n_fixed),
+            marker_count,
+            int(n_selected),
+        )
+        for log_likelihood, n_fixed, n_selected in zip(
+            log_likelihoods,
+            fixed_effect_counts,
+            selected_marker_counts,
+            strict=True,
+        )
+    ])
 
     assert int(np.argmin(r_scores)) == 1
     assert int(np.argmin(py_scores)) == 0

@@ -25,9 +25,11 @@ def test_blink_ld_pruning_matches_bundled_r_gapit(
     fixed_genotypes: NDArray[np.float64],
 ) -> None:
     """Compare ordered LD pruning using GAPIT's absolute-correlation cutoff."""
-    duplicated = np.column_stack(
-        [fixed_genotypes, fixed_genotypes[:, 0], 2.0 - fixed_genotypes[:, 1]]
-    )
+    duplicated = np.column_stack([
+        fixed_genotypes,
+        fixed_genotypes[:, 0],
+        2.0 - fixed_genotypes[:, 1],
+    ])
     candidates: NDArray[np.int_] = np.arange(duplicated.shape[1], dtype=np.int_)
     r_ld_remove = r_bridge.source_function(r_root, "GAPIT.Blink.R", "Blink.LDRemove")
     r_indices = (
@@ -56,9 +58,10 @@ def test_blink_bic_selection_matches_bundled_r_gapit(
 ) -> None:
     """Compare prefix selection under BLINK's naive BIC criterion."""
     candidates = np.array([2, 0, 4, 1], dtype=int)
-    phenotype_with_taxa = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
-    )
+    phenotype_with_taxa = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_phenotype,
+    ])
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
     r_bic = r_bridge.source_function(r_root, "GAPIT.Blink.R", "Blink.BICselection")
     r_result = r_bic(
@@ -131,16 +134,15 @@ def test_blink_iterative_workflow_matches_bundled_r_gapit(
 ) -> None:
     """Compare the complete regular-matrix BLINK iteration and final scan."""
     marker_count = fixed_genotypes.shape[1]
-    phenotype = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
-    )
-    marker_map = np.column_stack(
-        [
-            np.arange(1, marker_count + 1, dtype=float),
-            np.array([1, 1, 1, 2, 2, 2], dtype=float),
-            np.array([100, 200, 1500, 100, 200, 1500], dtype=float),
-        ]
-    )
+    phenotype = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_phenotype,
+    ])
+    marker_map = np.column_stack([
+        np.arange(1, marker_count + 1, dtype=float),
+        np.array([1, 1, 1, 2, 2, 2], dtype=float),
+        np.array([100, 200, 1500, 100, 200, 1500], dtype=float),
+    ])
     r_bridge.source(r_root, "GAPIT.Specify.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.Blink.R")
@@ -197,9 +199,10 @@ def test_blink_no_substitute_reward_normalizes_gapit_infinity(
 ) -> None:
     """Normalize GAPIT's infinite no-substitute reward to a valid p-value."""
     genotype = np.column_stack([fixed_genotypes[:, 0], fixed_genotypes[:, 0]])
-    phenotype = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
-    )
+    phenotype = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_phenotype,
+    ])
     marker_map = np.array([[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64)
 
     r_bridge.source(r_root, "GAPIT.Specify.R")
@@ -276,16 +279,15 @@ def test_blink_workflow_without_qtns_matches_bundled_r_gapit(
 ) -> None:
     """Compare the no-candidate path, where SUB is never applied."""
     marker_count = fixed_genotypes.shape[1]
-    phenotype = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
-    )
-    marker_map = np.column_stack(
-        [
-            np.arange(1, marker_count + 1, dtype=float),
-            np.array([1, 1, 1, 2, 2, 2], dtype=float),
-            np.array([100, 200, 1500, 100, 200, 1500], dtype=float),
-        ]
-    )
+    phenotype = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_phenotype,
+    ])
+    marker_map = np.column_stack([
+        np.arange(1, marker_count + 1, dtype=float),
+        np.array([1, 1, 1, 2, 2, 2], dtype=float),
+        np.array([100, 200, 1500, 100, 200, 1500], dtype=float),
+    ])
     r_bridge.source(r_root, "GAPIT.Specify.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.Blink.R")
@@ -340,9 +342,10 @@ def test_blink_single_qtn_with_one_substitute_matches_bundled_r_gapit(
 ) -> None:
     """Compare one selected QTN with exactly one independent substitute marker."""
     genotype = fixed_genotypes[:, :2]
-    phenotype = np.column_stack(
-        [np.arange(len(fixed_phenotype), dtype=float), fixed_phenotype]
-    )
+    phenotype = np.column_stack([
+        np.arange(len(fixed_phenotype), dtype=float),
+        fixed_phenotype,
+    ])
     marker_map = np.array([[1.0, 1.0, 100.0], [2.0, 1.0, 200.0]], dtype=np.float64)
     r_bridge.source(r_root, "GAPIT.Specify.R")
     r_bridge.source_for_regular_matrices(r_root, "GAPIT.FarmCPU.R")

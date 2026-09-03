@@ -23,9 +23,10 @@ def test_compressed_kinship_matches_bundled_r_gapit(
 ) -> None:
     """Compare GAPIT average-linkage memberships and group kinship."""
     kinship = vanraden_kinship(fixed_genotypes)
-    kinship_with_taxa = np.column_stack(
-        [np.arange(kinship.shape[0], dtype=float), kinship]
-    )
+    kinship_with_taxa = np.column_stack([
+        np.arange(kinship.shape[0], dtype=float),
+        kinship,
+    ])
     r_bridge.source(r_root, "GAPIT.Timmer.R")
     r_bridge.source(r_root, "GAPIT.Memory.R")
     r_bridge.source(r_root, "GAPIT.Compress.R")

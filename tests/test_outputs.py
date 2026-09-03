@@ -13,22 +13,18 @@ from pygapit.gapit import GAPIT, GAPITResult, _output_prefix
 def _small_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
     taxa = [f"T{i:02d}" for i in range(12)]
     phenotype = pd.DataFrame({"Taxa": taxa, "height": np.linspace(1.0, 12.0, 12)})
-    genotype = pd.DataFrame(
-        {
-            "Taxa": taxa,
-            "s1": np.tile([0.0, 1.0, 2.0], 4),
-            "s2": np.tile([2.0, 1.0, 0.0], 4),
-            "s3": np.tile([0.0, 2.0], 6),
-            "s4": np.tile([1.0, 2.0, 0.0, 1.0], 3),
-        }
-    )
-    marker_map = pd.DataFrame(
-        {
-            "SNP": ["s1", "s2", "s3", "s4"],
-            "Chromosome": [1, 1, 2, 2],
-            "Position": [10, 20, 10, 20],
-        }
-    )
+    genotype = pd.DataFrame({
+        "Taxa": taxa,
+        "s1": np.tile([0.0, 1.0, 2.0], 4),
+        "s2": np.tile([2.0, 1.0, 0.0], 4),
+        "s3": np.tile([0.0, 2.0], 6),
+        "s4": np.tile([1.0, 2.0, 0.0, 1.0], 3),
+    })
+    marker_map = pd.DataFrame({
+        "SNP": ["s1", "s2", "s3", "s4"],
+        "Chromosome": [1, 1, 2, 2],
+        "Position": [10, 20, 10, 20],
+    })
     return phenotype, genotype, marker_map
 
 

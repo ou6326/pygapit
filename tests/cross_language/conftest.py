@@ -89,11 +89,9 @@ def fixed_gapit_inputs(
     phenotype = pd.DataFrame({"Taxa": taxa, "Trait": fixed_phenotype})
     genotype = pd.DataFrame(fixed_genotypes, columns=marker_names)
     genotype.insert(0, "Taxa", taxa)
-    marker_map = pd.DataFrame(
-        {
-            "SNP": marker_names,
-            "Chromosome": [1, 1, 1, 2, 2, 2],
-            "Position": [100, 200, 1500, 100, 200, 1500],
-        }
-    )
+    marker_map = pd.DataFrame({
+        "SNP": marker_names,
+        "Chromosome": [1, 1, 1, 2, 2, 2],
+        "Position": [100, 200, 1500, 100, 200, 1500],
+    })
     return phenotype, genotype, marker_map

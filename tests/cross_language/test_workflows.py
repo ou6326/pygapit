@@ -100,9 +100,10 @@ def test_top_level_mlm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
         fixed_gapit_inputs,
     )
     design, r_scores = r_design_with_pca(r_bridge, r_root, inputs, pca_total=2)
-    covariates_with_taxa = np.column_stack(
-        [np.arange(len(inputs.taxa), dtype=np.float64), design[:, 1:]]
-    )
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        design[:, 1:],
+    ])
     for filename in (
         "GAPIT.emma.R",
         "GAPIT.replaceNaN.R",
