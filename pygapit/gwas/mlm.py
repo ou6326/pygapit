@@ -20,7 +20,7 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
 from .._typing import FloatMatrix, FloatVector, readonly_copy
-from ..stats.emma import emma_remle, emmax_p3d
+from ..stats.emma import EMMAResult, emma_remle, emmax_p3d
 
 
 @dataclass(frozen=True, slots=True)
@@ -151,8 +151,17 @@ def reml_for_groups(
     Used to select optimal group number in CMLM.
     Translates GAPIT's group optimization by REML.
     """
-    result = emma_remle(y, X0, K_c, Z=Z)
-    return result.reml
+    return _fit_reml_for_groups(y, X0, K_c, Z).reml
+
+
+def _fit_reml_for_groups(
+    y: FloatVector,
+    X0: FloatMatrix,
+    K_c: FloatMatrix,
+    Z: FloatMatrix,
+) -> EMMAResult:
+    """Return the complete REML fit for a candidate compression."""
+    return emma_remle(y, X0, K_c, Z=Z)
 
 
 def cmlm_gwas(

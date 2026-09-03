@@ -37,7 +37,7 @@ from .._typing import (
     require_row_count,
     require_square,
 )
-from ..stats.emma import emma_remle
+from ..stats.emma import EMMAResult, emma_remle
 from ..stats.kinship import vanraden_kinship
 
 
@@ -278,9 +278,9 @@ def cblup(
     Faster than gBLUP for large n. Uses optimal group kinship.
     """
     from ..gwas.mlm import (
+        _fit_reml_for_groups,
         _kinship_cluster_tree,
         compress_kinship,
-        reml_for_groups,
     )
 
     y = as_float_vector(y, name="phenotype")
@@ -305,6 +305,7 @@ def cblup(
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             cluster_tree = None
     best_reml = -np.inf
+    best_candidate_fit: EMMAResult | None = None
     best_K_c = K_full.copy()
     best_Z = np.eye(n)
 
@@ -316,9 +317,10 @@ def cblup(
                 int(g),
                 cluster_tree=cluster_tree,
             )
-            reml = reml_for_groups(y, X0, K_c, Z)
-            if reml > best_reml:
-                best_reml = reml
+            fit = _fit_reml_for_groups(y, X0, K_c, Z)
+            if fit.reml > best_reml:
+                best_reml = fit.reml
+                best_candidate_fit = fit
                 best_K_c = K_c.copy()
                 best_Z = Z.copy()
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
@@ -326,7 +328,13 @@ def cblup(
         if compression_failed:
             continue
 
-    remle = emma_remle(y, X0, best_K_c, ngrids=ngrids, Z=best_Z)
+    # Compression selection uses EMMA's standard 100-point grid.  Reuse that
+    # complete fit for the default final resolution; a custom final grid still
+    # requires the established refit so its numerical behavior is unchanged.
+    if ngrids == 100 and best_candidate_fit is not None:
+        remle = best_candidate_fit
+    else:
+        remle = emma_remle(y, X0, best_K_c, ngrids=ngrids, Z=best_Z)
     beta, group_blup, group_pev = _emma_blup_with_incidence(
         y,
         X0,

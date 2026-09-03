@@ -8,9 +8,10 @@ import numpy as np
 import pytest
 
 from pygapit._typing import FloatMatrix, FloatVector
+from pygapit.gs import blup as blup_module
 from pygapit.gs.blup import _emma_blup_with_incidence, cblup
 from pygapit.gwas import mlm
-from pygapit.stats.emma import _eigen_R_w_Z
+from pygapit.stats.emma import EMMAResult, _eigen_R_w_Z, emma_remle
 
 
 def _reference_incidence_blup(
@@ -96,6 +97,42 @@ def test_cblup_builds_kinship_cluster_tree_once(
     cblup(phenotype, design, genotype, group_to=12, ngrids=10)
 
     assert call_count == 1
+
+
+@pytest.mark.parametrize(("ngrids", "expected_final_refits"), [(100, 0), (10, 1)])
+def test_cblup_reuses_only_matching_candidate_reml_fit(
+    monkeypatch: pytest.MonkeyPatch,
+    ngrids: int,
+    expected_final_refits: int,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n = 24
+    genotype: FloatMatrix = rng.binomial(2, 0.35, size=(n, 40)).astype(np.float64)
+    phenotype: FloatVector = rng.normal(size=n)
+    design: FloatMatrix = np.ones((n, 1), dtype=np.float64)
+    final_refit_count = 0
+
+    def counted_final_refit(
+        y: FloatVector,
+        X: FloatMatrix,
+        K: FloatMatrix,
+        ngrids: int = 100,
+        llim: float = -10.0,
+        ulim: float = 10.0,
+        esp: float = 1e-10,
+        Z: FloatMatrix | None = None,
+    ) -> EMMAResult:
+        nonlocal final_refit_count
+        final_refit_count += 1
+        return emma_remle(y, X, K, ngrids, llim, ulim, esp, Z)
+
+    monkeypatch.setattr(blup_module, "emma_remle", counted_final_refit)
+
+    cblup(phenotype, design, genotype, group_to=12, ngrids=ngrids)
+
+    # The default candidate fit is reusable as-is.  A custom final grid retains
+    # the established refit so callers receive the requested resolution.
+    assert final_refit_count == expected_final_refits
 
 
 def test_incidence_partial_eigendecomposition_matches_full_reml_space():
