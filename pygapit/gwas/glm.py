@@ -27,7 +27,18 @@ from .._typing import (
 )
 
 _REWARD_MARKER_BATCH_SIZE = 4096
+_REWARD_BATCH_TARGET_BYTES = 32 * 1024**2
 _REWARD_MAX_BASE_CONDITION = np.finfo(np.float64).eps ** -0.25
+_FLOAT64_BYTES = 8
+
+
+def _reward_marker_batch_size(n_individuals: int) -> int:
+    """Bound the main reward temporary while retaining large BLAS batches."""
+    memory_limited_size = max(
+        1,
+        _REWARD_BATCH_TARGET_BYTES // (n_individuals * _FLOAT64_BYTES),
+    )
+    return min(_REWARD_MARKER_BATCH_SIZE, memory_limited_size)
 
 
 @dataclass(frozen=True, slots=True)
@@ -235,23 +246,24 @@ def reward_substitute_cofactor_statistics(
         degrees_of_freedom = n - base_design.shape[1] - 1
         cofactor_beta = beta[start : start + cofactor_count]
         cofactor_variance = np.diag(covariance_factor)[start : start + cofactor_count]
-        for batch_start in range(0, GD.shape[1], _REWARD_MARKER_BATCH_SIZE):
-            batch_stop = min(batch_start + _REWARD_MARKER_BATCH_SIZE, GD.shape[1])
+        batch_size = _reward_marker_batch_size(n)
+        base_residual_ss = residual @ residual
+        for batch_start in range(0, GD.shape[1], batch_size):
+            batch_stop = min(batch_start + batch_size, GD.shape[1])
             marker_values = GD[:, batch_start:batch_stop]
             projection_coefficients = base_design_pinv @ marker_values
             residualized = marker_values - base_design @ projection_coefficients
-            residualized_ss = np.sum(residualized**2, axis=0)
+            residualized_ss = np.einsum("ij,ij->j", residualized, residualized)
             valid = residualized_ss >= 1e-8
             if not valid.any():
                 continue
 
-            valid_residualized = residualized[:, valid]
             valid_ss = residualized_ss[valid]
-            marker_effects = (valid_residualized.T @ residual) / valid_ss
-            marker_residuals = residual[:, np.newaxis] - (
-                valid_residualized * marker_effects[np.newaxis, :]
-            )
-            mse = np.sum(marker_residuals**2, axis=0) / degrees_of_freedom
+            residualized_y = residualized.T @ residual
+            valid_residualized_y = residualized_y[valid]
+            marker_effects = valid_residualized_y / valid_ss
+            residual_ss = base_residual_ss - (valid_residualized_y**2 / valid_ss)
+            mse: FloatVector = np.maximum(residual_ss, 0.0) / degrees_of_freedom
 
             cofactor_projection = projection_coefficients[
                 start : start + cofactor_count, valid
@@ -266,7 +278,7 @@ def reward_substitute_cofactor_statistics(
             substitute_se = np.sqrt(
                 np.maximum(substitute_variances * mse[np.newaxis, :], 0.0)
             )
-            substitute_statistics = substitute_effects / substitute_se
+            substitute_statistics: FloatMatrix = substitute_effects / substitute_se
             substitute_p = np.asarray(
                 2.0
                 * t_dist.sf(

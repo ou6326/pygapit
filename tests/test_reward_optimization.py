@@ -128,3 +128,13 @@ def test_reward_full_rank_path_computes_one_pseudoinverse(
     reward_substitute_cofactor_statistics(initial, y, X0, GD, qtns)
 
     assert pinv_calls == 1
+
+
+def test_reward_batch_size_respects_memory_budget(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setattr(glm_module, "_REWARD_BATCH_TARGET_BYTES", 560)
+    monkeypatch.setattr(glm_module, "_REWARD_MARKER_BATCH_SIZE", 4096)
+
+    assert glm_module._reward_marker_batch_size(10) == 7
+    assert glm_module._reward_marker_batch_size(1000) == 1
