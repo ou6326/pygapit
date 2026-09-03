@@ -96,7 +96,7 @@ def test_reward_optimization_matches_original_formulation(
     initial = glm_scan_with_cofactors(y, X0, GD, qtns)
 
     expected = _reference_reward(initial, y, X0, GD, qtns)
-    monkeypatch.setattr(glm_module, "_REWARD_MARKER_BATCH_SIZE", 7)
+    monkeypatch.setattr(glm_module, "_MARKER_BATCH_SIZE", 7)
     actual = reward_substitute_cofactor_statistics(initial, y, X0, GD, qtns)
 
     np.testing.assert_allclose(actual.p_values, expected.p_values, rtol=1e-10)
@@ -133,8 +133,25 @@ def test_reward_full_rank_path_computes_one_pseudoinverse(
 def test_reward_batch_size_respects_memory_budget(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    monkeypatch.setattr(glm_module, "_REWARD_BATCH_TARGET_BYTES", 560)
-    monkeypatch.setattr(glm_module, "_REWARD_MARKER_BATCH_SIZE", 4096)
+    monkeypatch.setattr(glm_module, "_MARKER_BATCH_TARGET_BYTES", 560)
+    monkeypatch.setattr(glm_module, "_MARKER_BATCH_SIZE", 4096)
 
-    assert glm_module._reward_marker_batch_size(10) == 7
-    assert glm_module._reward_marker_batch_size(1000) == 1
+    assert glm_module._marker_batch_size(10) == 7
+    assert glm_module._marker_batch_size(1000) == 1
+
+
+def test_glm_marker_batches_preserve_results(monkeypatch: pytest.MonkeyPatch) -> None:
+    rng = np.random.default_rng(20260904)
+    n, m = 40, 24
+    GD = rng.binomial(2, 0.35, size=(n, m)).astype(np.float64)
+    y = rng.normal(size=n)
+    X0: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+
+    expected = glm_module.glm_gwas(y, X0, GD)
+    monkeypatch.setattr(glm_module, "_MARKER_BATCH_SIZE", 7)
+    actual = glm_module.glm_gwas(y, X0, GD)
+
+    np.testing.assert_allclose(actual.p_values, expected.p_values, rtol=1e-12)
+    np.testing.assert_allclose(actual.effects, expected.effects, rtol=1e-12)
+    np.testing.assert_allclose(actual.se, expected.se, rtol=1e-12)
+    np.testing.assert_allclose(actual.t_stats, expected.t_stats, rtol=1e-12)

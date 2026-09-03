@@ -14,7 +14,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
-from scipy.stats import t as t_dist
+from scipy.special import stdtr
 
 from .._typing import (
     FloatMatrix,
@@ -26,19 +26,19 @@ from .._typing import (
     require_row_count,
 )
 
-_REWARD_MARKER_BATCH_SIZE = 4096
-_REWARD_BATCH_TARGET_BYTES = 32 * 1024**2
+_MARKER_BATCH_SIZE = 4096
+_MARKER_BATCH_TARGET_BYTES = 32 * 1024**2
 _REWARD_MAX_BASE_CONDITION = np.finfo(np.float64).eps ** -0.25
 _FLOAT64_BYTES = 8
 
 
-def _reward_marker_batch_size(n_individuals: int) -> int:
-    """Bound the main reward temporary while retaining large BLAS batches."""
+def _marker_batch_size(n_individuals: int) -> int:
+    """Bound a marker-work matrix while retaining large BLAS batches."""
     memory_limited_size = max(
         1,
-        _REWARD_BATCH_TARGET_BYTES // (n_individuals * _FLOAT64_BYTES),
+        _MARKER_BATCH_TARGET_BYTES // (n_individuals * _FLOAT64_BYTES),
     )
-    return min(_REWARD_MARKER_BATCH_SIZE, memory_limited_size)
+    return min(_MARKER_BATCH_SIZE, memory_limited_size)
 
 
 @dataclass(frozen=True, slots=True)
@@ -77,42 +77,46 @@ def _ols_vectorized(
     except np.linalg.LinAlgError:
         XtX_inv = np.linalg.pinv(X0.T @ X0 + np.eye(q0) * 1e-10)
 
-    H = X0 @ XtX_inv @ X0.T  # hat matrix for X0
-    y_res = y - H @ y  # (n,) residual of y after X0
-    G_res = GD - H @ GD  # (n, m) residual of each SNP after X0
-
-    # ── SNP effect: alpha = (g_res' y_res) / (g_res' g_res) ──────────────
-    g_ss = np.sum(G_res**2, axis=0)  # (m,) sum of squares
-    valid = g_ss > 1e-10  # skip monomorphic
+    null_solver = XtX_inv @ X0.T
+    y_res = y - X0 @ (null_solver @ y)
+    y_res_ss = y_res @ y_res
 
     effects = np.zeros(m)
     se = np.ones(m)
     t_stats = np.zeros(m)
     p_values = np.ones(m)
 
-    if valid.any():
-        g_valid = G_res[:, valid]  # (n, m_valid)
-        g_ss_v = g_ss[valid]  # (m_valid,)
+    batch_size = _marker_batch_size(n)
+    for batch_start in range(0, m, batch_size):
+        batch_stop = min(batch_start + batch_size, m)
+        marker_values = GD[:, batch_start:batch_stop]
+        residualized = marker_values - X0 @ (null_solver @ marker_values)
+        residualized_ss: FloatVector = np.einsum("ij,ij->j", residualized, residualized)
+        valid = residualized_ss > 1e-10
+        if not valid.any():
+            continue
 
-        alpha = (g_valid.T @ y_res) / g_ss_v  # (m_valid,)
-
-        # Residuals of full model
-        y_hat_snp = g_valid * alpha[np.newaxis, :]  # (n, m_valid)
-        e_full = y_res[:, np.newaxis] - y_hat_snp  # (n, m_valid)
-        sse = np.sum(e_full**2, axis=0)  # (m_valid,)
-
-        sigma2 = sse / df
-        se_v = np.sqrt(sigma2 / g_ss_v)  # (m_valid,)
+        residualized_y = residualized.T @ y_res
+        valid_ss = residualized_ss[valid]
+        valid_residualized_y = residualized_y[valid]
+        alpha = valid_residualized_y / valid_ss
+        sse = y_res_ss - valid_residualized_y**2 / valid_ss
+        sigma2 = np.maximum(sse, 0.0) / df
+        se_v = np.sqrt(sigma2 / valid_ss)
         se_v = np.where(se_v < 1e-12, 1e-12, se_v)
 
-        t_v = alpha / se_v  # (m_valid,)
-        p_v = 2.0 * t_dist.sf(np.abs(t_v), df)
-        p_v = np.clip(p_v, 0.0, 1.0)
+        t_v = alpha / se_v
+        p_v: FloatVector = np.asarray(
+            2.0 * stdtr(df, -np.abs(t_v)),
+            dtype=np.float64,
+        )
+        np.clip(p_v, 0.0, 1.0, out=p_v)
 
-        effects[valid] = alpha
-        se[valid] = se_v
-        t_stats[valid] = t_v
-        p_values[valid] = p_v
+        batch_rows = np.flatnonzero(valid) + batch_start
+        effects[batch_rows] = alpha
+        se[batch_rows] = se_v
+        t_stats[batch_rows] = t_v
+        p_values[batch_rows] = p_v
 
     return effects, se, t_stats, p_values
 
@@ -234,7 +238,7 @@ def reward_substitute_cofactor_statistics(
             standard_errors = np.sqrt(np.maximum(np.diag(marker_covariance), 0.0))
             statistics = marker_beta / standard_errors
             p_values = np.asarray(
-                2.0 * t_dist.sf(np.abs(statistics), degrees_of_freedom),
+                2.0 * stdtr(degrees_of_freedom, -np.abs(statistics)),
                 dtype=np.float64,
             )
             cofactor_p[marker] = p_values[start : start + cofactor_count]
@@ -246,14 +250,16 @@ def reward_substitute_cofactor_statistics(
         degrees_of_freedom = n - base_design.shape[1] - 1
         cofactor_beta = beta[start : start + cofactor_count]
         cofactor_variance = np.diag(covariance_factor)[start : start + cofactor_count]
-        batch_size = _reward_marker_batch_size(n)
+        batch_size = _marker_batch_size(n)
         base_residual_ss = residual @ residual
         for batch_start in range(0, GD.shape[1], batch_size):
             batch_stop = min(batch_start + batch_size, GD.shape[1])
             marker_values = GD[:, batch_start:batch_stop]
             projection_coefficients = base_design_pinv @ marker_values
             residualized = marker_values - base_design @ projection_coefficients
-            residualized_ss = np.einsum("ij,ij->j", residualized, residualized)
+            residualized_ss: FloatVector = np.einsum(
+                "ij,ij->j", residualized, residualized
+            )
             valid = residualized_ss >= 1e-8
             if not valid.any():
                 continue
@@ -280,11 +286,7 @@ def reward_substitute_cofactor_statistics(
             )
             substitute_statistics: FloatMatrix = substitute_effects / substitute_se
             substitute_p = np.asarray(
-                2.0
-                * t_dist.sf(
-                    np.abs(substitute_statistics),
-                    degrees_of_freedom,
-                ),
+                2.0 * stdtr(degrees_of_freedom, -np.abs(substitute_statistics)),
                 dtype=np.float64,
             )
             batch_rows = np.flatnonzero(valid) + batch_start
