@@ -77,9 +77,18 @@ def mlm_gwas(
 # ── CMLM: Compressed Mixed Linear Model ──────────────────────────────────
 
 
+def _kinship_cluster_tree(K: FloatMatrix) -> FloatMatrix:
+    """Build the reusable hierarchical clustering tree for a kinship matrix."""
+    condensed = pdist(K, metric="euclidean")
+    tree: FloatMatrix = linkage(condensed, method="average")
+    return tree
+
+
 def compress_kinship(
     K: FloatMatrix,
     n_groups: int,
+    *,
+    cluster_tree: FloatMatrix | None = None,
 ) -> tuple[FloatMatrix, FloatMatrix]:
     """
     Compress n individuals into g groups and compute group kinship.
@@ -105,9 +114,9 @@ def compress_kinship(
     try:
         # GAPIT.Compress calls R's dist(K), i.e. Euclidean distance between
         # complete kinship-profile rows rather than 1 - pairwise kinship.
-        condensed = pdist(K, metric="euclidean")
-        Z_link = linkage(condensed, method="average")
-        labels = fcluster(Z_link, n_groups, criterion="maxclust")
+        if cluster_tree is None:
+            cluster_tree = _kinship_cluster_tree(K)
+        labels = fcluster(cluster_tree, n_groups, criterion="maxclust")
     except (ValueError, np.linalg.LinAlgError, FloatingPointError):
         # Fallback: random grouping
         labels = np.tile(np.arange(n_groups), int(np.ceil(n / n_groups)))[:n] + 1

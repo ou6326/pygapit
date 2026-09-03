@@ -131,14 +131,18 @@ def _emma_blup_with_incidence(
     """Solve GAPIT's native incidence-matrix BLUE, BLUP, and PEV system."""
     genetic_covariance = vg * K
     covariance = Z @ genetic_covariance @ Z.T + ve * np.eye(len(y))
-    precision = np.linalg.inv(covariance)
-    information = X.T @ precision @ X
+    solve_rhs: FloatMatrix = np.column_stack([y, X])
+    solved = np.linalg.solve(covariance, solve_rhs)
+    precision_y = solved[:, 0]
+    precision_x = solved[:, 1:]
+    information = X.T @ precision_x
     try:
         information_inverse = np.linalg.inv(information)
     except np.linalg.LinAlgError:
         information_inverse = np.linalg.pinv(information)
-    beta = information_inverse @ X.T @ precision @ y
-    random_effect = genetic_covariance @ Z.T @ precision @ (y - X @ beta)
+    beta = information_inverse @ X.T @ precision_y
+    covariance_projection = genetic_covariance @ Z.T
+    random_effect = covariance_projection @ (precision_y - precision_x @ beta)
 
     kinship_inverse = np.linalg.pinv(K)
     random_information = Z.T @ Z / ve + kinship_inverse / vg
@@ -146,16 +150,9 @@ def _emma_blup_with_incidence(
         conditional_covariance = np.linalg.inv(random_information)
     except np.linalg.LinAlgError:
         conditional_covariance = np.linalg.pinv(random_information)
+    fixed_effect_basis = covariance_projection @ precision_x
     fixed_effect_correction = (
-        genetic_covariance
-        @ Z.T
-        @ precision
-        @ X
-        @ information_inverse
-        @ X.T
-        @ precision
-        @ Z
-        @ genetic_covariance
+        fixed_effect_basis @ information_inverse @ fixed_effect_basis.T
     )
     pev = np.diag(conditional_covariance + fixed_effect_correction)
     return beta, random_effect, pev
@@ -280,7 +277,11 @@ def cblup(
 
     Faster than gBLUP for large n. Uses optimal group kinship.
     """
-    from ..gwas.mlm import compress_kinship, reml_for_groups
+    from ..gwas.mlm import (
+        _kinship_cluster_tree,
+        compress_kinship,
+        reml_for_groups,
+    )
 
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
@@ -297,6 +298,12 @@ def cblup(
     candidates = np.unique(
         np.round(np.linspace(1, group_to, min(15, group_to))).astype(int)
     )
+    cluster_tree: FloatMatrix | None = None
+    if np.any((candidates > 1) & (candidates < n)):
+        try:
+            cluster_tree = _kinship_cluster_tree(K_full)
+        except (ValueError, np.linalg.LinAlgError, FloatingPointError):
+            cluster_tree = None
     best_reml = -np.inf
     best_K_c = K_full.copy()
     best_Z = np.eye(n)
@@ -304,7 +311,11 @@ def cblup(
     for g in candidates:
         compression_failed = False
         try:
-            K_c, Z = compress_kinship(K_full, int(g))
+            K_c, Z = compress_kinship(
+                K_full,
+                int(g),
+                cluster_tree=cluster_tree,
+            )
             reml = reml_for_groups(y, X0, K_c, Z)
             if reml > best_reml:
                 best_reml = reml
