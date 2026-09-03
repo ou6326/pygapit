@@ -72,12 +72,9 @@ def _ols_vectorized(
     # This is numerically equivalent to regressing out X0 first
     # y_res = y - X0 * (X0'X0)^-1 X0' y
     # g_res = GD - X0 * (X0'X0)^-1 X0' GD
-    try:
-        XtX_inv = np.linalg.pinv(X0.T @ X0)
-    except np.linalg.LinAlgError:
-        XtX_inv = np.linalg.pinv(X0.T @ X0 + np.eye(q0) * 1e-10)
-
-    null_solver = XtX_inv @ X0.T
+    # Work with X directly instead of pinv(X'X), whose condition number is
+    # squared and can turn constant markers into numerical false positives.
+    null_solver = np.linalg.pinv(X0)
     y_res = y - X0 @ (null_solver @ y)
     y_res_ss = y_res @ y_res
 

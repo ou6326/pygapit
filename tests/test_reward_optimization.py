@@ -15,6 +15,54 @@ from pygapit.gwas.glm import (
 )
 
 
+def _reference_ols_vectorized(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    *,
+    stable_projection: bool = False,
+) -> tuple[FloatVector, FloatVector, FloatVector, FloatVector]:
+    """Evaluate the pre-batching explicit-hat-matrix GLM formulation."""
+    n, q0 = X0.shape
+    m = GD.shape[1]
+    degrees_of_freedom = n - q0 - 1
+    if stable_projection:
+        null_solver = np.linalg.pinv(X0)
+    else:
+        null_solver = np.linalg.pinv(X0.T @ X0) @ X0.T
+    hat_matrix = X0 @ null_solver
+    y_residual = y - hat_matrix @ y
+    genotype_residual = GD - hat_matrix @ GD
+    genotype_ss: FloatVector = np.sum(genotype_residual**2, axis=0)
+    valid = genotype_ss > 1e-10
+
+    effects = np.zeros(m)
+    standard_errors = np.ones(m)
+    statistics = np.zeros(m)
+    p_values = np.ones(m)
+    if valid.any():
+        valid_genotype = genotype_residual[:, valid]
+        valid_ss = genotype_ss[valid]
+        valid_effects = (valid_genotype.T @ y_residual) / valid_ss
+        full_residual = y_residual[:, np.newaxis] - (
+            valid_genotype * valid_effects[np.newaxis, :]
+        )
+        residual_ss: FloatVector = np.sum(full_residual**2, axis=0)
+        valid_se = np.sqrt(residual_ss / degrees_of_freedom / valid_ss)
+        valid_se = np.where(valid_se < 1e-12, 1e-12, valid_se)
+        valid_statistics = valid_effects / valid_se
+        valid_p: FloatVector = np.asarray(
+            2.0 * t_dist.sf(np.abs(valid_statistics), degrees_of_freedom),
+            dtype=np.float64,
+        )
+        np.clip(valid_p, 0.0, 1.0, out=valid_p)
+        effects[valid] = valid_effects
+        standard_errors[valid] = valid_se
+        statistics[valid] = valid_statistics
+        p_values[valid] = valid_p
+    return effects, standard_errors, statistics, p_values
+
+
 def _reference_reward(
     result: GLMResult,
     y: FloatVector,
@@ -155,3 +203,41 @@ def test_glm_marker_batches_preserve_results(monkeypatch: pytest.MonkeyPatch) ->
     np.testing.assert_allclose(actual.effects, expected.effects, rtol=1e-12)
     np.testing.assert_allclose(actual.se, expected.se, rtol=1e-12)
     np.testing.assert_allclose(actual.t_stats, expected.t_stats, rtol=1e-12)
+
+
+@pytest.mark.parametrize("near_collinear", [False, True])
+def test_glm_optimization_matches_explicit_hat_matrix(
+    near_collinear: bool,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n, m = 40, 24
+    GD = rng.binomial(2, 0.35, size=(n, m)).astype(np.float64)
+    GD[:, 0] = 1.0
+    y = rng.normal(size=n)
+    trend = np.linspace(-1.0, 1.0, n)
+    X0: FloatMatrix = np.column_stack([np.ones(n), trend])
+    if near_collinear:
+        X0 = np.column_stack([X0, trend + rng.normal(scale=1e-6, size=n)])
+
+    expected = _reference_ols_vectorized(
+        y,
+        X0,
+        GD,
+        stable_projection=near_collinear,
+    )
+    actual_result = glm_module.glm_gwas(y, X0, GD)
+    actual = (
+        actual_result.effects,
+        actual_result.se,
+        actual_result.t_stats,
+        actual_result.p_values,
+    )
+
+    relative_tolerance = 5e-10 if near_collinear else 1e-10
+    for actual_value, expected_value in zip(actual, expected, strict=True):
+        np.testing.assert_allclose(
+            actual_value,
+            expected_value,
+            rtol=relative_tolerance,
+            atol=1e-12,
+        )
