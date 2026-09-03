@@ -55,7 +55,8 @@ def _normalize_kinship(K: FloatMatrix) -> FloatMatrix:
     if not np.allclose(K, K.T, rtol=1e-10, atol=1e-12):
         raise ValueError("MLMM kinship matrix must be symmetric")
     eigenvalues = np.linalg.eigvalsh(K)
-    psd_tolerance = 1e-8 * max(np.max(np.abs(eigenvalues)), 1.0)
+    eigenvalue_scale = np.max([np.max(np.abs(eigenvalues)), 1.0])
+    psd_tolerance = 1e-8 * eigenvalue_scale
     if np.min(eigenvalues) < -psd_tolerance:
         raise ValueError("MLMM kinship matrix must be positive semidefinite")
     n = K.shape[0]

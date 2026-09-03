@@ -55,7 +55,7 @@ def _reference_incidence_blup(
 @pytest.mark.parametrize("singular_kinship", [False, True])
 def test_incidence_blup_solve_matches_explicit_precision(
     singular_kinship: bool,
-) -> None:
+):
     rng = np.random.default_rng(20260903)
     n, groups = 18, 6
     y: FloatVector = rng.normal(size=n)
@@ -76,7 +76,7 @@ def test_incidence_blup_solve_matches_explicit_precision(
 
 def test_cblup_builds_kinship_cluster_tree_once(
     monkeypatch: pytest.MonkeyPatch,
-) -> None:
+):
     rng = np.random.default_rng(20260903)
     n = 24
     genotype: FloatMatrix = rng.binomial(2, 0.35, size=(n, 40)).astype(np.float64)
@@ -96,7 +96,7 @@ def test_cblup_builds_kinship_cluster_tree_once(
     assert call_count == 1
 
 
-def test_incidence_partial_eigendecomposition_matches_full_basis() -> None:
+def test_incidence_partial_eigendecomposition_matches_full_reml_space():
     rng = np.random.default_rng(20260903)
     n, groups = 30, 8
     X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
@@ -117,22 +117,51 @@ def test_incidence_partial_eigendecomposition_matches_full_basis() -> None:
     combined: FloatMatrix = np.column_stack(
         [expected_random_basis[:, :random_rank], fixed_basis]
     )
-    expected_basis, _ = np.linalg.qr(combined, mode="complete")
+    expected_complete_basis, _ = np.linalg.qr(combined, mode="complete")
     selected = [*range(random_rank), *range(groups, n)]
-    expected_basis = expected_basis[:, selected]
+    expected_reml_basis = expected_complete_basis[:, selected]
 
-    actual_values, actual_basis = _eigen_R_w_Z(Z, K, X)
+    actual_values, actual_model_basis = _eigen_R_w_Z(Z, K, X)
 
     np.testing.assert_allclose(actual_values, expected_values[:random_rank])
     for column in range(random_rank):
         assert abs(
-            actual_basis[:, column] @ expected_basis[:, column]
+            actual_model_basis[:, column] @ expected_reml_basis[:, column]
         ) == pytest.approx(1.0)
-    actual_null = actual_basis[:, random_rank:]
-    expected_null = expected_basis[:, random_rank:]
+    expected_model_basis = expected_complete_basis[:, :groups]
     np.testing.assert_allclose(
-        actual_null @ actual_null.T,
-        expected_null @ expected_null.T,
+        actual_model_basis @ actual_model_basis.T,
+        expected_model_basis @ expected_model_basis.T,
         rtol=1e-10,
         atol=1e-11,
     )
+
+    phenotype: FloatVector = rng.normal(size=n)
+    expected_coordinates = expected_reml_basis.T @ phenotype
+    actual_model_coordinates = actual_model_basis.T @ phenotype
+    actual_residual_sum_squares = (
+        phenotype @ phenotype - actual_model_coordinates @ actual_model_coordinates
+    )
+    np.testing.assert_allclose(
+        actual_residual_sum_squares,
+        expected_coordinates[random_rank:] @ expected_coordinates[random_rank:],
+        rtol=1e-10,
+        atol=1e-11,
+    )
+
+
+def test_incidence_group_space_falls_back_for_low_rank_kinship():
+    rng = np.random.default_rng(20260903)
+    n, groups = 30, 8
+    X: FloatMatrix = np.ones((n, 1), dtype=np.float64)
+    Z = np.zeros((n, groups), dtype=np.float64)
+    Z[np.arange(n), np.arange(n) % groups] = 1.0
+    factors = rng.normal(size=(groups, 3))
+    K: FloatMatrix = factors @ factors.T
+
+    values, model_basis = _eigen_R_w_Z(Z, K, X)
+
+    assert values.shape == (groups - X.shape[1],)
+    assert model_basis.shape == (n, groups)
+    assert np.all(np.isfinite(values))
+    assert np.all(np.isfinite(model_basis))

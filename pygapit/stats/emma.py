@@ -127,26 +127,55 @@ def _eigen_R_w_Z(
 
     projection_coefficients, *_ = np.linalg.lstsq(X, Z, rcond=None)
     residualized_Z = Z - X @ projection_coefficients
-    # AB and BA share their nonzero eigenvalues; use the symmetric
-    # observation-space form to avoid platform-dependent complex eigenvectors.
-    residual_covariance = residualized_Z @ K @ residualized_Z.T
-    residual_covariance = (residual_covariance + residual_covariance.T) / 2.0
-    values: FloatVector
-    random_basis: FloatMatrix
-    if random_rank * 2 < n:
-        values, random_basis = scipy_eigh(
-            residual_covariance,
-            subset_by_index=(n - random_rank, n - 1),
-        )
-    else:
-        values, random_basis = np.linalg.eigh(residual_covariance)
-    values = values[::-1]
-    random_basis = random_basis[:, ::-1]
+    values: FloatVector | None = None
+    random_basis: FloatMatrix | None = None
+    # High compression permits an equivalent factorization in group space:
+    # RKR' = (R K^1/2)(R K^1/2)'.  Use it only when the smaller problem is
+    # materially cheaper and has enough well-resolved positive eigenvalues.
+    if t_random * 3 < n:
+        symmetric_kinship = (K + K.T) / 2.0
+        kinship_values, kinship_vectors = np.linalg.eigh(symmetric_kinship)
+        kinship_scale = np.max([np.max(np.abs(kinship_values)), 1.0])
+        kinship_tolerance = np.finfo(np.float64).eps * t_random * kinship_scale
+        positive = kinship_values > kinship_tolerance
+        if np.count_nonzero(positive) >= random_rank:
+            kinship_factor: FloatMatrix = kinship_vectors[:, positive] * np.sqrt(
+                kinship_values[positive]
+            )
+            observation_factor = residualized_Z @ kinship_factor
+            group_covariance = observation_factor.T @ observation_factor
+            group_covariance = (group_covariance + group_covariance.T) / 2.0
+            group_values, group_vectors = np.linalg.eigh(group_covariance)
+            group_values = group_values[::-1][:random_rank]
+            group_scale = np.max([np.max(np.abs(group_values)), 1.0])
+            group_tolerance = np.finfo(np.float64).eps * n * group_scale
+            if np.min(group_values) > group_tolerance:
+                values = group_values
+                group_vectors = group_vectors[:, ::-1][:, :random_rank]
+                random_basis = observation_factor @ group_vectors
+                random_basis /= np.sqrt(values)[np.newaxis, :]
+    if values is None or random_basis is None:
+        # Rank-deficient and weakly compressed cases retain the established
+        # observation-space path.
+        # AB and BA share their nonzero eigenvalues; use the symmetric
+        # observation-space form to avoid platform-dependent complex eigenvectors.
+        residual_covariance = residualized_Z @ K @ residualized_Z.T
+        residual_covariance = (residual_covariance + residual_covariance.T) / 2.0
+        if random_rank * 2 < n:
+            values, random_basis = scipy_eigh(
+                residual_covariance,
+                subset_by_index=(n - random_rank, n - 1),
+            )
+        else:
+            values, random_basis = np.linalg.eigh(residual_covariance)
+        values = values[::-1]
+        random_basis = random_basis[:, ::-1]
+        values = values[:random_rank]
+        random_basis = random_basis[:, :random_rank]
     fixed_basis, _ = np.linalg.qr(X, mode="reduced")
-    combined = np.column_stack([random_basis[:, :random_rank], fixed_basis])
-    basis, _ = np.linalg.qr(combined, mode="complete")
-    selected = [*range(random_rank), *range(t_random, n)]
-    return values[:random_rank], basis[:, selected]
+    combined = np.column_stack([random_basis, fixed_basis])
+    model_basis, _ = np.linalg.qr(combined, mode="reduced")
+    return values, model_basis
 
 
 def _reml_ll(log_delta: float, lambda_R: FloatVector, etas: FloatVector) -> np.float64:
@@ -269,14 +298,26 @@ def emma_remle(
         raise ValueError("design matrix must have linearly independent columns")
 
     # Spectral decomposition
+    etas: FloatVector
     if incidence is None:
         lambda_R, U_R = _eigen_R_wo_Z(K, X)
         residual_rank = 0
+        etas = U_R.T @ y
     else:
-        lambda_R, U_R = _eigen_R_w_Z(incidence, K, X)
+        lambda_R, model_basis = _eigen_R_w_Z(incidence, K, X)
         residual_rank = n - incidence.shape[1]
-    # Rotate phenotype into eigenbasis
-    etas = U_R.T @ y  # (n-q,) rotated residuals
+        model_coordinates = model_basis.T @ y
+        random_coordinates = model_coordinates[: len(lambda_R)]
+        if residual_rank == 0:
+            etas = random_coordinates
+        else:
+            residual_sum_squares = max(
+                y @ y - model_coordinates @ model_coordinates,
+                0.0,
+            )
+            residual_coordinates = np.zeros(residual_rank, dtype=np.float64)
+            residual_coordinates[0] = np.sqrt(residual_sum_squares)
+            etas = np.concatenate([random_coordinates, residual_coordinates])
 
     def ll_at(log_delta: float) -> np.float64:
         if incidence is None:
@@ -413,9 +454,10 @@ def emmax_p3d(
     # Rotation matrix: U * diag(1/sqrt(lambda + delta))
     scale = 1.0 / np.sqrt(lambda_L + delta)
     if incidence is not None:
-        scale = np.concatenate(
-            [scale, np.full(n - incidence.shape[1], 1.0 / np.sqrt(delta))]
-        )
+        scale = np.concatenate([
+            scale,
+            np.full(n - incidence.shape[1], 1.0 / np.sqrt(delta)),
+        ])
     transformed_basis = U_L * scale
     # Apply transformation: yt = scale * U' * y,  Xt0 = scale * U' * X0
     Uty = transformed_basis.T @ y  # (n,)
