@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from typing import Literal
+
 import numpy as np
 import pytest
 
@@ -125,6 +127,12 @@ def test_incidence_partial_eigendecomposition_matches_full_reml_space():
     actual_values, actual_model_basis = _eigen_R_w_Z(Z, K, X)
 
     np.testing.assert_allclose(actual_values, expected_values[:random_rank])
+    np.testing.assert_allclose(
+        actual_model_basis.T @ actual_model_basis,
+        np.eye(groups),
+        rtol=1e-10,
+        atol=1e-11,
+    )
     for column in range(random_rank):
         assert abs(
             actual_model_basis[:, column] @ expected_reml_basis[:, column]
@@ -166,3 +174,36 @@ def test_incidence_group_space_falls_back_for_low_rank_kinship():
     assert model_basis.shape == (n, groups)
     assert np.all(np.isfinite(values))
     assert np.all(np.isfinite(model_basis))
+    np.testing.assert_allclose(
+        model_basis.T @ model_basis,
+        np.eye(groups),
+        rtol=1e-10,
+        atol=1e-11,
+    )
+
+
+def test_incidence_full_rank_spectrum_avoids_combined_qr(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n, groups = 30, 8
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    Z = np.zeros((n, groups), dtype=np.float64)
+    Z[np.arange(n), np.arange(n) % groups] = 1.0
+    factors = rng.normal(size=(groups, groups))
+    K: FloatMatrix = factors @ factors.T + np.eye(groups)
+    original_qr = np.linalg.qr
+    qr_calls = 0
+
+    def counted_qr(
+        matrix: FloatMatrix,
+        mode: Literal["reduced"] = "reduced",
+    ) -> tuple[FloatMatrix, FloatMatrix]:
+        nonlocal qr_calls
+        qr_calls += 1
+        return original_qr(matrix, mode=mode)
+
+    monkeypatch.setattr(np.linalg, "qr", counted_qr)
+    _eigen_R_w_Z(Z, K, X)
+
+    assert qr_calls == 1

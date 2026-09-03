@@ -173,8 +173,17 @@ def _eigen_R_w_Z(
         values = values[:random_rank]
         random_basis = random_basis[:, :random_rank]
     fixed_basis, _ = np.linalg.qr(X, mode="reduced")
-    combined = np.column_stack([random_basis, fixed_basis])
-    model_basis, _ = np.linalg.qr(combined, mode="reduced")
+    # random_basis comes from the eigendecomposition of the covariance after
+    # projecting Z out of X, so it is already orthonormal and orthogonal to
+    # fixed_basis.  Re-factorizing their concatenation repeats an O(n t^2) QR
+    # for every compression candidate.  Numerical zero eigenvalues are the
+    # exception: their arbitrary eigenvectors can leave the residualized range,
+    # so retain the established QR fallback for rank-deficient spectra.
+    model_basis: FloatMatrix = np.column_stack([random_basis, fixed_basis])
+    value_scale = np.max([np.max(np.abs(values)), 1.0])
+    value_tolerance = np.finfo(np.float64).eps * n * value_scale
+    if np.min(np.abs(values)) <= value_tolerance:
+        model_basis, _ = np.linalg.qr(model_basis, mode="reduced")
     return values, model_basis
 
 
