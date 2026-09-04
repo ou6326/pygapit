@@ -68,6 +68,34 @@ def _make_data(
     return genotype, phenotype, chromosomes, positions
 
 
+def _make_pipeline_frames(
+    genotype: FloatMatrix,
+    phenotype: FloatVector,
+    chromosomes: IntVector,
+    positions: FloatVector,
+) -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame, pd.DataFrame]:
+    """Build single- and multi-trait pipeline inputs from one workload."""
+    n_individuals, n_markers = genotype.shape
+    taxa = np.asarray([f"T{i:05d}" for i in range(n_individuals)], dtype=str)
+    marker_names = np.asarray([f"SNP{i:06d}" for i in range(n_markers)], dtype=str)
+    phenotype_frame = pd.DataFrame({"Taxa": taxa, "trait": phenotype})
+    multitrait_frame = pd.DataFrame({
+        "Taxa": taxa,
+        "trait_1": phenotype,
+        "trait_2": 0.75 * phenotype + 0.25 * genotype[:, 0],
+        "trait_3": -0.5 * phenotype + 0.5 * genotype[:, 1],
+        "trait_4": phenotype + 0.1 * genotype[:, 2],
+    })
+    genotype_frame = pd.DataFrame(genotype, columns=marker_names)
+    genotype_frame.insert(0, "Taxa", taxa)
+    marker_map = pd.DataFrame({
+        "SNP": marker_names,
+        "Chromosome": chromosomes,
+        "Position": positions,
+    })
+    return phenotype_frame, multitrait_frame, genotype_frame, marker_map
+
+
 def _measure_time(
     operation: Callable[[], object],
     *,
@@ -136,26 +164,27 @@ def run_baseline(
         n_markers,
         seed,
     )
-    taxa = np.asarray([f"T{i:05d}" for i in range(n_individuals)], dtype=str)
-    marker_names = np.asarray([f"SNP{i:06d}" for i in range(n_markers)], dtype=str)
-    phenotype_frame = pd.DataFrame({"Taxa": taxa, "trait": phenotype})
-    genotype_frame = pd.DataFrame(genotype, columns=marker_names)
-    genotype_frame.insert(0, "Taxa", taxa)
-    marker_map = pd.DataFrame({
-        "SNP": marker_names,
-        "Chromosome": chromosomes,
-        "Position": positions,
-    })
+    phenotype_frame, multitrait_frame, genotype_frame, marker_map = (
+        _make_pipeline_frames(
+            genotype,
+            phenotype,
+            chromosomes,
+            positions,
+        )
+    )
     pca = compute_pca(genotype, n_components=3)
     design = build_covariate_matrix(pca, n_pcs=3)
     kinship = vanraden_kinship(genotype)
     super_p_values = mlm_gwas(phenotype, design, genotype, kinship).p_values
     candidate_threshold = 1.0 / n_markers
 
-    def run_pipeline(model: str) -> object:
+    def run_pipeline(
+        model: str | list[str],
+        traits: pd.DataFrame = phenotype_frame,
+    ) -> object:
         with contextlib.redirect_stdout(io.StringIO()):
             return GAPIT(
-                Y=phenotype_frame,
+                Y=traits,
                 GD=genotype_frame,
                 GM=marker_map,
                 model=model,
@@ -218,6 +247,30 @@ def run_baseline(
             "pipeline_mlm",
             lambda: run_pipeline("MLM"),
         ),
+        (
+            "pipeline_multitrait_glm",
+            lambda: run_pipeline("GLM", multitrait_frame),
+        ),
+        (
+            "pipeline_multitrait_mlm",
+            lambda: run_pipeline("MLM", multitrait_frame),
+        ),
+        (
+            "pipeline_multitrait_gblup",
+            lambda: run_pipeline("GBLUP", multitrait_frame),
+        ),
+        (
+            "pipeline_multitrait_cblup",
+            lambda: run_pipeline("CBLUP", multitrait_frame),
+        ),
+        (
+            "pipeline_multitrait_sblup",
+            lambda: run_pipeline("SBLUP", multitrait_frame),
+        ),
+        (
+            "pipeline_multitrait_mlm_sblup",
+            lambda: run_pipeline(["MLM", "SBLUP"], multitrait_frame),
+        ),
     )
     results = [
         _benchmark(name, operation, warmups=warmups, repeats=repeats)
@@ -249,6 +302,7 @@ def run_baseline(
             "repeats": repeats,
             "pca_components": 3,
             "iterative_max_iterations": 5,
+            "multitrait_count": 4,
         },
         "measurements": [asdict(result) for result in results],
         "memory_note": (

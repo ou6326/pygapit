@@ -3,13 +3,16 @@
 from __future__ import annotations
 
 import argparse
+import contextlib
 import cProfile
+import io
 import pstats
 import sys
 from collections.abc import Callable, Sequence
 from pathlib import Path
 
-from benchmarks.run_baseline import _make_data
+from benchmarks.run_baseline import _make_data, _make_pipeline_frames
+from pygapit.gapit import GAPIT
 from pygapit.gs.blup import cblup, select_super_qtns
 from pygapit.gwas.blink import blink_gwas
 from pygapit.gwas.farmcpu import farmcpu_gwas
@@ -22,7 +25,20 @@ _SCENARIOS = {
     "marker-heavy": (200, 5_000),
     "sample-heavy": (500, 1_000),
 }
-_MODEL_NAMES = ("mlm", "mlmm", "cblup", "super", "farmcpu", "blink")
+_MODEL_NAMES = (
+    "mlm",
+    "mlmm",
+    "cblup",
+    "super",
+    "farmcpu",
+    "blink",
+    "pipeline-multitrait-glm",
+    "pipeline-multitrait-mlm",
+    "pipeline-multitrait-gblup",
+    "pipeline-multitrait-cblup",
+    "pipeline-multitrait-sblup",
+    "pipeline-multitrait-mlm-sblup",
+)
 
 
 def profile_models(
@@ -45,6 +61,12 @@ def profile_models(
     design = build_covariate_matrix(pca, n_pcs=3)
     kinship = vanraden_kinship(genotype)
     threshold = 1.0 / n_markers
+    _, multitrait_frame, genotype_frame, marker_map = _make_pipeline_frames(
+        genotype,
+        phenotype,
+        chromosomes,
+        positions,
+    )
     super_p_values = (
         mlm_gwas(phenotype, design, genotype, kinship).p_values
         if "super" in models
@@ -62,6 +84,16 @@ def profile_models(
             positions,
             super_p_values,
         )
+
+    def run_multitrait_pipeline(model: str | list[str]) -> object:
+        with contextlib.redirect_stdout(io.StringIO()):
+            return GAPIT(
+                Y=multitrait_frame,
+                GD=genotype_frame,
+                GM=marker_map,
+                model=model,
+                file_output=False,
+            )
 
     operations: dict[str, Callable[[], object]] = {
         "mlm": lambda: mlm_gwas(phenotype, design, genotype, kinship),
@@ -90,6 +122,15 @@ def profile_models(
             max_iterations=max_iterations,
             p_threshold=threshold,
         ),
+        "pipeline-multitrait-glm": lambda: run_multitrait_pipeline("GLM"),
+        "pipeline-multitrait-mlm": lambda: run_multitrait_pipeline("MLM"),
+        "pipeline-multitrait-gblup": lambda: run_multitrait_pipeline("GBLUP"),
+        "pipeline-multitrait-cblup": lambda: run_multitrait_pipeline("CBLUP"),
+        "pipeline-multitrait-sblup": lambda: run_multitrait_pipeline("SBLUP"),
+        "pipeline-multitrait-mlm-sblup": lambda: run_multitrait_pipeline([
+            "MLM",
+            "SBLUP",
+        ]),
     }
 
     if output_dir is not None:

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from unittest.mock import patch
 
 import numpy as np
 import pandas as pd
@@ -17,7 +18,9 @@ from pygapit.gapit import (
     _normalize_models,
     _select_traits,
 )
+from pygapit.gs.blup import cblup, gblup, sblup
 from pygapit.gwas.blink import _candidate_mask
+from pygapit.gwas.mlm import mlm_gwas
 from pygapit.stats.emma import EMMASpectrum, prepare_emma_spectrum
 from pygapit.stats.kinship import vanraden_kinship, zhang_kinship
 from pygapit.stats.pca import PCAResult, compute_pca
@@ -135,6 +138,67 @@ def test_multiple_traits_and_models_return_named_results() -> None:
 
     assert isinstance(result, dict)
     assert set(result) == {"height_GLM", "height_MLM", "yield_GLM", "yield_MLM"}
+
+
+@pytest.mark.parametrize(
+    ("model", "target", "implementation"),
+    [
+        ("GBLUP", "pygapit.gapit.gblup", gblup),
+        ("CBLUP", "pygapit.gapit.cblup", cblup),
+        ("SBLUP", "pygapit.gapit.sblup", sblup),
+    ],
+)
+def test_prediction_models_reuse_their_fitted_result(
+    model: str,
+    target: str,
+    implementation: object,
+) -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    with patch(target, wraps=implementation) as prediction_fit:
+        result = GAPIT(
+            Y=phenotype,
+            GD=genotype,
+            GM=marker_map,
+            model=model,
+            PCA_total=1,
+            maf_threshold=0.0,
+            group_to=6,
+            super_qtn_counts=(1, 2),
+            file_output=False,
+        )
+
+    assert isinstance(result, dict)
+    assert prediction_fit.call_count == 2
+    assert all(item.Pred is not None for item in result.values())
+
+
+def test_mlm_and_sblup_share_one_marker_scan_per_trait() -> None:
+    phenotype, genotype, marker_map = _inputs()
+
+    with patch("pygapit.gapit.mlm_gwas", wraps=mlm_gwas) as mlm_scan:
+        result = GAPIT(
+            Y=phenotype,
+            GD=genotype,
+            GM=marker_map,
+            model=["SBLUP", "MLM"],
+            PCA_total=1,
+            maf_threshold=0.0,
+            super_qtn_counts=(1, 2),
+            file_output=False,
+        )
+
+    assert isinstance(result, dict)
+    assert mlm_scan.call_count == 2
+    for trait in ("height", "yield"):
+        sblup_gwas = result[f"{trait}_SBLUP"].GWAS
+        mlm_gwas_result = result[f"{trait}_MLM"].GWAS
+        assert sblup_gwas is not None
+        assert mlm_gwas_result is not None
+        np.testing.assert_allclose(
+            sblup_gwas["P.value"].to_numpy(dtype=np.float64),
+            mlm_gwas_result["P.value"].to_numpy(dtype=np.float64),
+        )
 
 
 @pytest.mark.parametrize(

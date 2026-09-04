@@ -39,7 +39,7 @@ from ._typing import (
     readonly_copy,
     require_square,
 )
-from .gs.blup import cblup, gblup, sblup, select_super_qtns
+from .gs.blup import GBLUPResult, cblup, gblup, sblup, select_super_qtns
 from .gwas.blink import blink_gwas
 from .gwas.farmcpu import farmcpu_gwas
 from .gwas.glm import glm_gwas
@@ -104,6 +104,7 @@ class ModelRunResult:
     vg: float = 0.0
     ve: float = 0.0
     selected_qtns: IntVector | None = None
+    prediction: GBLUPResult | None = None
 
     def __post_init__(self) -> None:
         marker_count = len(self.p_values)
@@ -382,6 +383,7 @@ def GAPIT(
     all_results: dict[str, GAPITResult] = {}
     prepared_cache: dict[tuple[int, ...], PreparedGenotype] = {}
     spectrum_cache: dict[int, EMMASpectrum] = {}
+    reuse_mlm_scan = "MLM" in models and "SBLUP" in models
 
     for trait_name in traits_to_run:
         print(f"\n[pyGAPIT] ---- Trait: {trait_name} ----")
@@ -397,6 +399,7 @@ def GAPIT(
             continue
 
         # ── Run requested models ─────────────────────────────────────────
+        shared_mlm_scan: ModelRunResult | None = None
         for model_name in models:
             print(f"[pyGAPIT] Running {model_name}...")
             t_model = time.time()
@@ -411,6 +414,19 @@ def GAPIT(
                         prepared.design,
                     )
                     spectrum_cache[spectrum_key] = spectrum
+
+            if (
+                reuse_mlm_scan
+                and model_name in {"MLM", "SBLUP"}
+                and shared_mlm_scan is None
+            ):
+                shared_mlm_scan = _run_mlm_scan(
+                    prepared.y,
+                    prepared.design,
+                    prepared.genotypes,
+                    prepared.kinship,
+                    spectrum,
+                )
 
             result = _run_model(
                 model_name=model_name,
@@ -431,6 +447,7 @@ def GAPIT(
                 super_bin_size=super_bin_size,
                 super_qtn_counts=super_qtn_counts,
                 mlm_spectrum=spectrum,
+                mlm_scan=shared_mlm_scan,
             )
 
             elapsed = time.time() - t_model
@@ -958,6 +975,11 @@ def _assemble_result(
             qtn_indices=model_result.selected_qtns,
             prediction_model=prediction_model,
             group_to=group_to,
+            fitted_result=(
+                model_result.prediction
+                if prediction_model is None or prediction_model == model_name
+                else None
+            ),
         )
 
     output_files = None
@@ -1011,6 +1033,7 @@ def _run_model(
     super_bin_size: int,
     super_qtn_counts: Sequence[int] | None,
     mlm_spectrum: EMMASpectrum | None = None,
+    mlm_scan: ModelRunResult | None = None,
 ) -> ModelRunResult:
     """Dispatch to the correct GWAS/GS model."""
     m = GD.shape[1]
@@ -1021,8 +1044,7 @@ def _run_model(
         return ModelRunResult(r.p_values, r.effects, r.se)
 
     elif model_name == "MLM":
-        r = mlm_gwas(y, X0, GD, K, spectrum=mlm_spectrum)
-        return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
+        return mlm_scan or _run_mlm_scan(y, X0, GD, K, mlm_spectrum)
 
     elif model_name == "CMLM":
         n = len(y)
@@ -1070,18 +1092,30 @@ def _run_model(
         r = gblup(y, X0, K)
         p_vals = np.ones(GD.shape[1])
         return ModelRunResult(
-            p_vals, np.zeros(GD.shape[1]), np.ones(GD.shape[1]), r.h2, r.vg, r.ve
+            p_vals,
+            np.zeros(GD.shape[1]),
+            np.ones(GD.shape[1]),
+            r.h2,
+            r.vg,
+            r.ve,
+            prediction=r,
         )
 
     elif model_name == "CBLUP":
-        r = cblup(y, X0, GD)
+        r = cblup(y, X0, GD, group_to=group_to)
         p_vals = np.ones(GD.shape[1])
         return ModelRunResult(
-            p_vals, np.zeros(GD.shape[1]), np.ones(GD.shape[1]), r.h2, r.vg, r.ve
+            p_vals,
+            np.zeros(GD.shape[1]),
+            np.ones(GD.shape[1]),
+            r.h2,
+            r.vg,
+            r.ve,
+            prediction=r,
         )
 
     elif model_name == "SBLUP":
-        scan = mlm_gwas(y, X0, GD, K, spectrum=mlm_spectrum)
+        scan = mlm_scan or _run_mlm_scan(y, X0, GD, K, mlm_spectrum)
         selection = select_super_qtns(
             y,
             X0,
@@ -1101,6 +1135,7 @@ def _run_model(
             r.vg,
             r.ve,
             selection.qtn_indices,
+            prediction=r,
         )
 
     else:
@@ -1109,6 +1144,25 @@ def _run_model(
             "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, "
             "gBLUP, cBLUP, sBLUP."
         )
+
+
+def _run_mlm_scan(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    K: FloatMatrix,
+    spectrum: EMMASpectrum | None,
+) -> ModelRunResult:
+    """Run and normalize the MLM scan shared by MLM and sBLUP."""
+    result = mlm_gwas(y, X0, GD, K, spectrum=spectrum)
+    return ModelRunResult(
+        result.p_values,
+        result.effects,
+        result.se,
+        result.h2,
+        result.vg,
+        result.ve,
+    )
 
 
 def _compute_maf(GD: FloatMatrix) -> FloatVector:
@@ -1158,6 +1212,7 @@ def _run_gs_and_build_pred(
     qtn_indices: IntVector | None = None,
     prediction_model: str | None = None,
     group_to: int | None = None,
+    fitted_result: GBLUPResult | None = None,
 ) -> pd.DataFrame | None:
     """Run genomic prediction and build prediction DataFrame."""
     selected_model = prediction_model
@@ -1176,7 +1231,9 @@ def _run_gs_and_build_pred(
         )
 
     try:
-        if selected_model == "SBLUP" and qtn_indices is not None:
+        if fitted_result is not None:
+            gs_result = fitted_result
+        elif selected_model == "SBLUP" and qtn_indices is not None:
             gs_result = sblup(y, X0, GD, qtn_indices=qtn_indices, taxa=taxa)
         elif selected_model == "CBLUP":
             gs_result = cblup(
