@@ -9,11 +9,32 @@ VanRaden (2009) method:
 
 from __future__ import annotations
 
+import typing as t
 import warnings
 
 import numpy as np
 
 from .._typing import FloatMatrix, as_float_matrix, require_square
+
+
+def vanraden_factor(GD: FloatMatrix) -> FloatMatrix:
+    """Return a factor whose cross-product is the VanRaden kinship matrix."""
+    GD = as_float_matrix(GD, name="genotype matrix")
+    n = GD.shape[0]
+    allele_frequencies = GD.sum(axis=0) / (2.0 * n)
+    valid = (allele_frequencies > 0.0) & (allele_frequencies < 1.0)
+    if not valid.any():
+        warnings.warn("All SNPs are monomorphic; returning identity factor.")
+        return np.eye(n)
+
+    selected = GD[:, valid]
+    frequencies = allele_frequencies[valid]
+    centered = selected - 2.0 * frequencies
+    adjustment = 2.0 * np.sum(frequencies * (1.0 - frequencies))
+    if adjustment < 1e-12:
+        warnings.warn("Adjustment factor near zero; check allele frequencies.")
+        adjustment = 1.0
+    return centered / t.cast(np.float64, np.sqrt(adjustment))
 
 
 def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:

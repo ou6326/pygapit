@@ -22,6 +22,7 @@ import scipy
 
 from pygapit._typing import FloatMatrix, FloatVector, IntVector
 from pygapit.gapit import GAPIT
+from pygapit.gs.blup import select_super_qtns
 from pygapit.gwas.blink import blink_gwas
 from pygapit.gwas.farmcpu import farmcpu_gwas
 from pygapit.gwas.glm import glm_gwas
@@ -148,6 +149,7 @@ def run_baseline(
     pca = compute_pca(genotype, n_components=3)
     design = build_covariate_matrix(pca, n_pcs=3)
     kinship = vanraden_kinship(genotype)
+    super_p_values = mlm_gwas(phenotype, design, genotype, kinship).p_values
     candidate_threshold = 1.0 / n_markers
 
     def run_pipeline(model: str) -> object:
@@ -173,6 +175,17 @@ def run_baseline(
                 genotype,
                 kinship,
                 max_steps=5,
+            ),
+        ),
+        (
+            "super_selection",
+            lambda: select_super_qtns(
+                phenotype,
+                design,
+                genotype,
+                chromosomes,
+                positions,
+                super_p_values,
             ),
         ),
         (

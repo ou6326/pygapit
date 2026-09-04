@@ -10,7 +10,7 @@ from collections.abc import Callable, Sequence
 from pathlib import Path
 
 from benchmarks.run_baseline import _make_data
-from pygapit.gs.blup import cblup
+from pygapit.gs.blup import cblup, select_super_qtns
 from pygapit.gwas.blink import blink_gwas
 from pygapit.gwas.farmcpu import farmcpu_gwas
 from pygapit.gwas.mlm import mlm_gwas
@@ -22,7 +22,7 @@ _SCENARIOS = {
     "marker-heavy": (200, 5_000),
     "sample-heavy": (500, 1_000),
 }
-_MODEL_NAMES = ("mlm", "mlmm", "cblup", "farmcpu", "blink")
+_MODEL_NAMES = ("mlm", "mlmm", "cblup", "super", "farmcpu", "blink")
 
 
 def profile_models(
@@ -45,6 +45,24 @@ def profile_models(
     design = build_covariate_matrix(pca, n_pcs=3)
     kinship = vanraden_kinship(genotype)
     threshold = 1.0 / n_markers
+    super_p_values = (
+        mlm_gwas(phenotype, design, genotype, kinship).p_values
+        if "super" in models
+        else None
+    )
+
+    def run_super_selection() -> object:
+        if super_p_values is None:
+            raise RuntimeError("SUPER p-values were not prepared")
+        return select_super_qtns(
+            phenotype,
+            design,
+            genotype,
+            chromosomes,
+            positions,
+            super_p_values,
+        )
+
     operations: dict[str, Callable[[], object]] = {
         "mlm": lambda: mlm_gwas(phenotype, design, genotype, kinship),
         "mlmm": lambda: mlmm_gwas(
@@ -55,6 +73,7 @@ def profile_models(
             max_steps=max_iterations,
         ),
         "cblup": lambda: cblup(phenotype, design, genotype),
+        "super": run_super_selection,
         "farmcpu": lambda: farmcpu_gwas(
             phenotype,
             design,

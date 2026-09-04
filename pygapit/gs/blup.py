@@ -38,8 +38,13 @@ from .._typing import (
     require_row_count,
     require_square,
 )
-from ..stats.emma import EMMAResult, emma_remle, prepare_emma_fixed_basis
-from ..stats.kinship import vanraden_kinship
+from ..stats.emma import (
+    EMMAResult,
+    emma_remle,
+    prepare_emma_factor_spectrum,
+    prepare_emma_fixed_basis,
+)
+from ..stats.kinship import vanraden_factor, vanraden_kinship
 
 
 @dataclass(frozen=True, slots=True)
@@ -468,6 +473,7 @@ def select_super_qtns(
     fitted_counts: list[int] = []
     fitted_reml: list[float] = []
     fitted_qtns: list[IntVector] = []
+    fixed_basis = prepare_emma_fixed_basis(X0)
     for count in counts:
         qtns = ranked[:count]
         varying = np.var(GD[:, qtns], axis=0) > 0.0
@@ -475,8 +481,20 @@ def select_super_qtns(
         if len(qtns) == 0:
             continue
         try:
-            pseudo_kinship = vanraden_kinship(GD[:, qtns])
-            fit = emma_remle(y, X0, pseudo_kinship, ngrids=ngrids)
+            kinship_factor = vanraden_factor(GD[:, qtns])
+            pseudo_kinship = kinship_factor @ kinship_factor.T
+            spectrum = prepare_emma_factor_spectrum(
+                kinship_factor,
+                X0,
+                fixed_basis=fixed_basis,
+            )
+            fit = emma_remle(
+                y,
+                X0,
+                pseudo_kinship,
+                ngrids=ngrids,
+                spectrum=spectrum,
+            )
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             continue
         fitted_counts.append(int(count))

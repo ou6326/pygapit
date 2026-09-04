@@ -2,8 +2,8 @@
 
 `run_baseline.py` records a reproducible baseline for the main numerical
 workflows without making performance claims or enforcing timing thresholds in
-CI. It covers PCA, VanRaden kinship, GLM, MLM, FarmCPU, and BLINK on one
-deterministic synthetic dataset.
+CI. It covers PCA, VanRaden kinship, GLM, MLM, MLMM, SUPER selection, FarmCPU,
+and BLINK on one deterministic synthetic dataset.
 
 Run the standard workload in the full pixi environment:
 
@@ -32,7 +32,7 @@ marker-heavy iterative work from sample-heavy mixed-model work:
 
 ```powershell
 pixi run -e full python benchmarks/profile_hotspots.py --scenario marker-heavy --models farmcpu blink
-pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm mlmm cblup
+pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm mlmm cblup super
 ```
 
 Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`

@@ -93,6 +93,28 @@ class EMMASpectrum:
 
 
 @dataclass(frozen=True, slots=True)
+class EMMACompactSpectrum:
+    """Low-rank residual spectrum with an implicit zero-eigenvalue complement."""
+
+    values: FloatVector
+    random_basis: FloatMatrix
+    fixed_basis: FloatMatrix
+    residual_rank: int
+
+    def __post_init__(self) -> None:
+        if self.random_basis.shape[1] != len(self.values):
+            raise ValueError(
+                "EMMA compact spectrum values and basis must have equal rank"
+            )
+        if self.random_basis.shape[0] != self.fixed_basis.shape[0]:
+            raise ValueError("EMMA compact spectrum bases must have equal row counts")
+        if self.residual_rank < 0:
+            raise ValueError("EMMA compact spectrum residual rank must be non-negative")
+        for field in ("values", "random_basis", "fixed_basis"):
+            object.__setattr__(self, field, readonly_copy(getattr(self, field)))
+
+
+@dataclass(frozen=True, slots=True)
 class EMMAFixedBasis:
     """Validated orthonormal basis for repeated fits with one fixed design."""
 
@@ -145,6 +167,51 @@ def prepare_emma_spectrum(K: FloatMatrix, X: FloatMatrix) -> EMMASpectrum:
         raise ValueError("design matrix must have linearly independent columns")
     values, basis = _eigen_R_wo_Z(K, X)
     return EMMASpectrum(values=values, basis=basis)
+
+
+def prepare_emma_factor_spectrum(
+    factor: FloatMatrix,
+    X: FloatMatrix,
+    fixed_basis: EMMAFixedBasis | None = None,
+) -> EMMASpectrum | EMMACompactSpectrum:
+    """Prepare an EMMA spectrum from a low-rank factor ``K = factor @ factor.T``."""
+    factor = as_float_matrix(factor, name="kinship factor")
+    X = as_float_matrix(X, name="design matrix")
+    n, q = X.shape
+    require_row_count(factor, n, name="kinship factor")
+    if q == 0 or n <= q:
+        raise ValueError("EMMA spectrum requires more observations than fixed effects")
+    if fixed_basis is None:
+        fixed_basis = prepare_emma_fixed_basis(X)
+    elif fixed_basis.basis.shape != (n, q):
+        raise ValueError("EMMA fixed basis shape does not match X")
+    if factor.shape[1] >= n - q:
+        return prepare_emma_spectrum(factor @ factor.T, X)
+
+    fixed_vectors = fixed_basis.basis
+    residualized = factor - fixed_vectors @ (fixed_vectors.T @ factor)
+    factor_covariance = residualized.T @ residualized
+    factor_covariance = (factor_covariance + factor_covariance.T) / 2.0
+    factor_values, factor_vectors = np.linalg.eigh(factor_covariance)
+    value_scale = (
+        np.max([np.max(np.abs(factor_values)), 1.0])
+        if len(factor_values) > 0
+        else np.float64(1.0)
+    )
+    tolerance = np.finfo(np.float64).eps * max(factor.shape) * value_scale
+    positive = factor_values > tolerance
+    values = factor_values[positive][::-1]
+    vectors = factor_vectors[:, positive][:, ::-1]
+    random_basis: FloatMatrix = residualized @ vectors
+    random_basis /= np.sqrt(values)[np.newaxis, :]
+
+    zero_rank = n - q - len(values)
+    return EMMACompactSpectrum(
+        values=values,
+        random_basis=random_basis,
+        fixed_basis=fixed_vectors,
+        residual_rank=zero_rank,
+    )
 
 
 def _eigen_L_wo_Z(K: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
@@ -372,7 +439,7 @@ def emma_remle(
     ulim: float = 10.0,
     esp: float = 1e-10,
     Z: FloatMatrix | None = None,
-    spectrum: EMMASpectrum | None = None,
+    spectrum: EMMASpectrum | EMMACompactSpectrum | None = None,
     fixed_basis: EMMAFixedBasis | None = None,
 ) -> EMMAResult:
     """
@@ -389,7 +456,8 @@ def emma_remle(
     esp : convergence tolerance
     Z : optional (n, t) incidence matrix for random effects
     spectrum : optional phenotype-independent decomposition from
-        :func:`prepare_emma_spectrum`; valid only without ``Z``
+        :func:`prepare_emma_spectrum` or :func:`prepare_emma_factor_spectrum`;
+        valid only without ``Z``
     fixed_basis : optional validated fixed-effect basis from
         :func:`prepare_emma_fixed_basis`; valid only with ``Z``
 
@@ -431,15 +499,43 @@ def emma_remle(
 
     # Spectral decomposition
     etas: FloatVector
+    compact_spectrum = isinstance(spectrum, EMMACompactSpectrum)
     if incidence is None:
         if spectrum is None:
             lambda_R, U_R = _eigen_R_wo_Z(K, X)
-        else:
+            residual_rank = 0
+            etas = U_R.T @ y
+        elif isinstance(spectrum, EMMASpectrum):
             lambda_R, U_R = spectrum.values, spectrum.basis
             if lambda_R.shape != (n - q,) or U_R.shape != (n, n - q):
                 raise ValueError("EMMA spectrum shape does not match K and X")
-        residual_rank = 0
-        etas = U_R.T @ y
+            residual_rank = 0
+            etas = U_R.T @ y
+        else:
+            lambda_R = spectrum.values
+            if spectrum.fixed_basis.shape != (n, q):
+                raise ValueError("EMMA compact fixed basis shape does not match X")
+            if spectrum.random_basis.shape != (n, len(lambda_R)):
+                raise ValueError(
+                    "EMMA compact random basis shape does not match values"
+                )
+            if len(lambda_R) + spectrum.residual_rank != n - q:
+                raise ValueError("EMMA compact spectrum rank does not match K and X")
+            fixed_coordinates = spectrum.fixed_basis.T @ y
+            random_coordinates = spectrum.random_basis.T @ y
+            residual_sum_squares = np.maximum(
+                y @ y
+                - fixed_coordinates @ fixed_coordinates
+                - random_coordinates @ random_coordinates,
+                0.0,
+            )
+            residual_rank = spectrum.residual_rank
+            if residual_rank == 0:
+                etas = random_coordinates
+            else:
+                residual_coordinates = np.zeros(residual_rank, dtype=np.float64)
+                residual_coordinates[0] = np.sqrt(residual_sum_squares)
+                etas = np.concatenate([random_coordinates, residual_coordinates])
     else:
         reusable_basis = None if fixed_basis is None else fixed_basis.basis
         lambda_R, model_basis = _eigen_R_w_Z(
@@ -463,12 +559,12 @@ def emma_remle(
             etas = np.concatenate([random_coordinates, residual_coordinates])
 
     def ll_at(log_delta: float) -> np.float64:
-        if incidence is None:
+        if incidence is None and not compact_spectrum:
             return _reml_ll(log_delta, lambda_R, etas)
         return _reml_ll_w_Z(log_delta, lambda_R, etas, residual_rank)
 
     def dll_at(log_delta: float) -> np.float64:
-        if incidence is None:
+        if incidence is None and not compact_spectrum:
             return _reml_dll(log_delta, lambda_R, etas)
         return _reml_dll_w_Z(log_delta, lambda_R, etas, residual_rank)
 
@@ -516,7 +612,7 @@ def emma_remle(
     # Recover variance components
     nq = n - q
     denom = lambda_R + best_delta
-    if incidence is None:
+    if incidence is None and not compact_spectrum:
         sse = np.sum(etas**2 / denom)
     else:
         etas1 = etas[: len(lambda_R)]
