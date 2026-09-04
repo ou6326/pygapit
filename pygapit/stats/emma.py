@@ -92,6 +92,28 @@ class EMMASpectrum:
         object.__setattr__(self, "basis", readonly_copy(self.basis))
 
 
+@dataclass(frozen=True, slots=True)
+class EMMAFixedBasis:
+    """Validated orthonormal basis for repeated fits with one fixed design."""
+
+    basis: FloatMatrix
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "basis", readonly_copy(self.basis))
+
+
+def prepare_emma_fixed_basis(X: FloatMatrix) -> EMMAFixedBasis:
+    """Validate a fixed-effect design once and prepare its reusable basis."""
+    X = as_float_matrix(X, name="design matrix")
+    n, q = X.shape
+    if q == 0 or n <= q:
+        raise ValueError("EMMA requires more observations than fixed effects")
+    if np.linalg.matrix_rank(X) < q:
+        raise ValueError("design matrix must have linearly independent columns")
+    basis, _ = np.linalg.qr(X, mode="reduced")
+    return EMMAFixedBasis(basis=basis)
+
+
 def _eigen_R_wo_Z(K: FloatMatrix, X: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
     """
     Spectral decomposition of the residual projection matrix (no Z).
@@ -158,9 +180,18 @@ def _eigen_L_w_Z(Z: FloatMatrix, K: FloatMatrix) -> tuple[FloatVector, FloatMatr
 
 
 def _eigen_R_w_Z(
-    Z: FloatMatrix, K: FloatMatrix, X: FloatMatrix
+    Z: FloatMatrix,
+    K: FloatMatrix,
+    X: FloatMatrix,
+    fixed_basis: FloatMatrix | None = None,
 ) -> tuple[FloatVector, FloatMatrix]:
-    """Translate GAPIT's ``emma.eigen.R.w.Z`` decomposition."""
+    """Translate GAPIT's ``emma.eigen.R.w.Z`` decomposition.
+
+    The centered-kinship contrast path requires the compression contract
+    ``K @ (Z.T @ 1) == 0``.  It is used only after verifying that relationship,
+    so general, fractional, or weighted incidence matrices retain the spectral
+    fallback when they do not satisfy the contract.
+    """
     n, t_random = Z.shape
     q_fixed = X.shape[1]
     random_rank = t_random - q_fixed
@@ -169,8 +200,9 @@ def _eigen_R_w_Z(
             "incidence matrix must have more columns than the fixed-effect design"
         )
 
-    projection_coefficients, *_ = np.linalg.lstsq(X, Z, rcond=None)
-    residualized_Z = Z - X @ projection_coefficients
+    if fixed_basis is None:
+        fixed_basis, _ = np.linalg.qr(X, mode="reduced")
+    residualized_Z = Z - fixed_basis @ (fixed_basis.T @ Z)
     values: FloatVector | None = None
     random_basis: FloatMatrix | None = None
     # High compression permits an equivalent factorization in group space:
@@ -252,7 +284,6 @@ def _eigen_R_w_Z(
         random_basis = random_basis[:, ::-1]
         values = values[:random_rank]
         random_basis = random_basis[:, :random_rank]
-    fixed_basis, _ = np.linalg.qr(X, mode="reduced")
     # random_basis comes from the eigendecomposition of the covariance after
     # projecting Z out of X, so it is already orthonormal and orthogonal to
     # fixed_basis.  Re-factorizing their concatenation repeats an O(n t^2) QR
@@ -342,6 +373,7 @@ def emma_remle(
     esp: float = 1e-10,
     Z: FloatMatrix | None = None,
     spectrum: EMMASpectrum | None = None,
+    fixed_basis: EMMAFixedBasis | None = None,
 ) -> EMMAResult:
     """
     REML variance component estimation via EMMA algorithm.
@@ -358,6 +390,8 @@ def emma_remle(
     Z : optional (n, t) incidence matrix for random effects
     spectrum : optional phenotype-independent decomposition from
         :func:`prepare_emma_spectrum`; valid only without ``Z``
+    fixed_basis : optional validated fixed-effect basis from
+        :func:`prepare_emma_fixed_basis`; valid only with ``Z``
 
     Returns
     -------
@@ -387,8 +421,12 @@ def emma_remle(
             )
     if incidence is not None and spectrum is not None:
         raise ValueError("a reusable EMMA spectrum is valid only without incidence")
+    if incidence is None and fixed_basis is not None:
+        raise ValueError("a reusable fixed basis is valid only with incidence")
+    if fixed_basis is not None and fixed_basis.basis.shape != (n, q):
+        raise ValueError("EMMA fixed basis shape does not match X")
 
-    if np.linalg.matrix_rank(X) < q:
+    if fixed_basis is None and np.linalg.matrix_rank(X) < q:
         raise ValueError("design matrix must have linearly independent columns")
 
     # Spectral decomposition
@@ -403,7 +441,13 @@ def emma_remle(
         residual_rank = 0
         etas = U_R.T @ y
     else:
-        lambda_R, model_basis = _eigen_R_w_Z(incidence, K, X)
+        reusable_basis = None if fixed_basis is None else fixed_basis.basis
+        lambda_R, model_basis = _eigen_R_w_Z(
+            incidence,
+            K,
+            X,
+            fixed_basis=reusable_basis,
+        )
         residual_rank = n - incidence.shape[1]
         model_coordinates = model_basis.T @ y
         random_coordinates = model_coordinates[: len(lambda_R)]

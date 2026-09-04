@@ -12,7 +12,13 @@ from pygapit.gs import blup as blup_module
 from pygapit.gs.blup import _emma_blup_with_incidence, cblup
 from pygapit.gwas import mlm
 from pygapit.stats import emma as emma_module
-from pygapit.stats.emma import EMMAResult, _eigen_R_w_Z, emma_remle
+from pygapit.stats.emma import (
+    EMMAFixedBasis,
+    EMMAResult,
+    _eigen_R_w_Z,
+    emma_remle,
+    prepare_emma_fixed_basis,
+)
 
 
 def _reference_incidence_blup(
@@ -144,10 +150,21 @@ def test_cblup_reuses_only_matching_candidate_reml_fit(
         ulim: float = 10.0,
         esp: float = 1e-10,
         Z: FloatMatrix | None = None,
+        fixed_basis: EMMAFixedBasis | None = None,
     ) -> EMMAResult:
         nonlocal final_refit_count
         final_refit_count += 1
-        return emma_remle(y, X, K, ngrids, llim, ulim, esp, Z)
+        return emma_remle(
+            y,
+            X,
+            K,
+            ngrids,
+            llim,
+            ulim,
+            esp,
+            Z,
+            fixed_basis=fixed_basis,
+        )
 
     monkeypatch.setattr(blup_module, "emma_remle", counted_final_refit)
 
@@ -156,6 +173,32 @@ def test_cblup_reuses_only_matching_candidate_reml_fit(
     # The default candidate fit is reusable as-is.  A custom final grid retains
     # the established refit so callers receive the requested resolution.
     assert final_refit_count == expected_final_refits
+
+
+def test_incidence_reuses_validated_fixed_basis(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n = 18
+    y: FloatVector = rng.normal(size=n)
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    factors = rng.normal(size=(n, n))
+    K: FloatMatrix = factors @ factors.T + np.eye(n)
+    Z: FloatMatrix = np.eye(n)
+    expected = emma_remle(y, X, K, Z=Z)
+    fixed_basis = prepare_emma_fixed_basis(X)
+
+    def unexpected_rank(*args: object, **kwargs: object) -> None:
+        pytest.fail("a validated fixed basis should skip repeated rank checks")
+
+    def unexpected_qr(*args: object, **kwargs: object) -> None:
+        pytest.fail("a validated fixed basis should skip repeated fixed-design QR")
+
+    monkeypatch.setattr(np.linalg, "matrix_rank", unexpected_rank)
+    monkeypatch.setattr(np.linalg, "qr", unexpected_qr)
+    actual = emma_remle(y, X, K, Z=Z, fixed_basis=fixed_basis)
+
+    assert actual == pytest.approx(expected, rel=1e-11, abs=1e-12)
 
 
 def test_incidence_partial_eigendecomposition_matches_full_reml_space():

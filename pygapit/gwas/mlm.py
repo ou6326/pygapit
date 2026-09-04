@@ -20,7 +20,14 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
 from .._typing import FloatMatrix, FloatVector, readonly_copy
-from ..stats.emma import EMMAResult, EMMASpectrum, emma_remle, emmax_p3d
+from ..stats.emma import (
+    EMMAFixedBasis,
+    EMMAResult,
+    EMMASpectrum,
+    emma_remle,
+    emmax_p3d,
+    prepare_emma_fixed_basis,
+)
 
 
 @dataclass(frozen=True, slots=True)
@@ -160,9 +167,10 @@ def _fit_reml_for_groups(
     X0: FloatMatrix,
     K_c: FloatMatrix,
     Z: FloatMatrix,
+    fixed_basis: EMMAFixedBasis | None = None,
 ) -> EMMAResult:
     """Return the complete REML fit for a candidate compression."""
-    return emma_remle(y, X0, K_c, Z=Z)
+    return emma_remle(y, X0, K_c, Z=Z, fixed_basis=fixed_basis)
 
 
 def cmlm_gwas(
@@ -219,12 +227,13 @@ def cmlm_gwas(
     best_Z = np.eye(n)
     best_n_groups = n
     fitted_candidate = False
+    fixed_basis = prepare_emma_fixed_basis(X0)
 
     for g in candidates:
         compression_failed = False
         try:
             K_c, Z = compress_kinship(K, int(g))
-            reml = reml_for_groups(y, X0, K_c, Z)
+            reml = _fit_reml_for_groups(y, X0, K_c, Z, fixed_basis).reml
             if reml > best_reml:
                 fitted_candidate = True
                 best_reml = reml

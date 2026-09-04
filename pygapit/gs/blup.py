@@ -38,7 +38,7 @@ from .._typing import (
     require_row_count,
     require_square,
 )
-from ..stats.emma import EMMAResult, emma_remle
+from ..stats.emma import EMMAResult, emma_remle, prepare_emma_fixed_basis
 from ..stats.kinship import vanraden_kinship
 
 
@@ -317,6 +317,7 @@ def cblup(
     best_candidate_fit: EMMAResult | None = None
     best_K_c = K_full.copy()
     best_Z = np.eye(n)
+    fixed_basis = prepare_emma_fixed_basis(X0)
 
     for g in candidates:
         compression_failed = False
@@ -326,7 +327,7 @@ def cblup(
                 int(g),
                 cluster_tree=cluster_tree,
             )
-            fit = _fit_reml_for_groups(y, X0, K_c, Z)
+            fit = _fit_reml_for_groups(y, X0, K_c, Z, fixed_basis)
             if fit.reml > best_reml:
                 best_reml = fit.reml
                 best_candidate_fit = fit
@@ -343,7 +344,14 @@ def cblup(
     if ngrids == 100 and best_candidate_fit is not None:
         remle = best_candidate_fit
     else:
-        remle = emma_remle(y, X0, best_K_c, ngrids=ngrids, Z=best_Z)
+        remle = emma_remle(
+            y,
+            X0,
+            best_K_c,
+            ngrids=ngrids,
+            Z=best_Z,
+            fixed_basis=fixed_basis,
+        )
     beta, group_blup, group_pev = _emma_blup_with_incidence(
         y,
         X0,
