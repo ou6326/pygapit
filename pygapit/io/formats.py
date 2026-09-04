@@ -268,14 +268,11 @@ def _numeric_from_frames(
             "Numeric genotype SNP columns must match marker-map rows in order"
         )
     try:
-        values = gd_df.iloc[:, 1:].to_numpy(dtype=np.float64)
+        values = gd_df.iloc[:, 1:].to_numpy(dtype=np.float64, copy=True)
     except (TypeError, ValueError) as exc:
         raise ValueError(f"{source} SNP values must be numeric") from exc
     if np.isinf(values).any():
         raise ValueError(f"{source} SNP values must not contain infinity")
-    if not values.flags.writeable:
-        values = values.copy()
-
     return GenotypeData(
         GD=_impute_missing_inplace(values, method=impute_method),
         GM=marker_map,
@@ -404,10 +401,20 @@ def read_hapmap(
     """
     if isinstance(filepath, pd.DataFrame):
         raw = filepath
+        raw_taxa: StrVector = np.asarray(raw.columns[11:], dtype=str)
     else:
         fp = Path(filepath)
         if not fp.exists():
             raise FileNotFoundError(f"HapMap file not found: {fp}")
+        header = pd.read_csv(
+            fp,
+            sep="\t",
+            header=None,
+            nrows=1,
+            dtype=str,
+            keep_default_na=False,
+        )
+        raw_taxa = np.asarray(header.iloc[0, 11:], dtype=str)
         raw = pd.read_csv(fp, sep="\t", low_memory=False)
     n_meta = 11  # first 11 columns are SNP metadata
     if raw.shape[1] <= n_meta:
@@ -416,7 +423,7 @@ def read_hapmap(
         raise ValueError("HapMap data must contain at least one marker row")
 
     # Extract taxa names from the header, skipping the metadata columns.
-    taxa = _taxa_array(np.asarray(raw.columns[n_meta:], dtype=str), "HapMap")
+    taxa = _taxa_array(raw_taxa, "HapMap")
     # Extract SNP info: rs (col 0), chrom (col 2), pos (col 3)
     snp_info = _marker_map_from_frame(raw.iloc[:, [0, 2, 3]], "HapMap marker data")
 

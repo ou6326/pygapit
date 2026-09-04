@@ -9,7 +9,12 @@ import pandas as pd
 import pytest
 
 from pygapit.gapit import _load_data
-from pygapit.io.formats import read_hapmap, read_numeric, read_phenotype
+from pygapit.io.formats import (
+    GenotypeData,
+    read_hapmap,
+    read_numeric,
+    read_phenotype,
+)
 
 
 def _phenotype() -> pd.DataFrame:
@@ -107,6 +112,32 @@ def test_numeric_reader_rejects_non_numeric_values(tmp_path: Path) -> None:
         read_numeric(genotype_path, _marker_map("s1"))
 
 
+@pytest.mark.parametrize(
+    "taxa",
+    [
+        pd.Series(["A", "B"], dtype=str),
+        pd.Series([1, 2], dtype=np.int64),
+        pd.Series([1.0, 2.0], dtype=np.float64),
+    ],
+)
+def test_numeric_frame_imputation_does_not_modify_input(taxa: pd.Series) -> None:
+    genotype = pd.DataFrame({
+        "Taxa": taxa,
+        "s1": np.array([0.0, np.nan]),
+        "s2": np.array([2.0, 1.0]),
+    })
+    original = genotype.copy(deep=True)
+
+    result = GenotypeData.from_numeric_frame(
+        genotype,
+        _marker_map("s1", "s2"),
+        impute_method="middle",
+    )
+
+    pd.testing.assert_frame_equal(genotype, original)
+    assert not np.isnan(result.GD).any()
+
+
 def test_hapmap_reader_rejects_invalid_position() -> None:
     with pytest.raises(ValueError, match="positions must be numeric"):
         read_hapmap(_hapmap(position="unknown"))
@@ -117,6 +148,16 @@ def test_hapmap_reader_rejects_missing_taxa_columns() -> None:
 
     with pytest.raises(ValueError, match="11 metadata columns and taxa"):
         read_hapmap(hapmap)
+
+
+def test_hapmap_file_rejects_duplicate_taxa(tmp_path: Path) -> None:
+    path = tmp_path / "duplicate_taxa.hmp.txt"
+    hapmap = _hapmap()
+    hapmap.columns = [*hapmap.columns[:11], "A", "A"]
+    hapmap.to_csv(path, sep="\t", index=False)
+
+    with pytest.raises(ValueError, match="Duplicate taxa in HapMap: A"):
+        read_hapmap(path)
 
 
 def test_ndarray_genotype_uses_phenotype_taxa_order() -> None:
