@@ -6,6 +6,32 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [1.2.2] - 2026-09-05
+
+### Added
+
+- Deterministic profiling and benchmark workloads for GWAS pipelines, cBLUP
+  eigensolver selection, multi-trait execution, and genotype preprocessing.
+
+### Changed
+
+- Reduce repeated matrix decompositions, inversions, projections, and marker
+  work across GLM, MLM, cBLUP, MLMM, FarmCPU, BLINK, SUPER, and genomic
+  prediction paths.
+- Reuse compatible fits and genotype-derived preparation across traits while
+  preserving trait-specific missing-data masks and prediction settings.
+- Accelerate numeric and HapMap input conversion, missing-value imputation,
+  PCA, and VanRaden kinship construction with lower peak allocations.
+- Use an explicit NumPy generator in BayesB so sampling no longer depends on
+  process-global random state.
+
+### Fixed
+
+- Stabilize covariate projection and define degenerate marker statistics in
+  vectorized EMMAX scans.
+- Preserve caller-owned numeric genotype frames during imputation and reject
+  duplicate HapMap taxa before Pandas can normalize their column names.
+
 ## [1.2.1] - 2026-09-02
 
 ### Changed
@@ -39,6 +65,7 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.1...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.2...main
+[1.2.2]: https://github.com/ou6326/pygapit/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/ou6326/pygapit/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ou6326/pygapit/releases/tag/v1.2.0

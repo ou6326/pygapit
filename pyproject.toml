@@ -1,10 +1,10 @@
 [build-system]
-requires      = ["hatchling>=1.26,<2"]
+requires      = ["hatchling>=1.26,<1.30"]
 build-backend = "hatchling.build"
 
 [project]
 name        = "pygapit-ng"
-version     = "1.2.1"
+version     = "1.2.2"
 description = "Python implementation of GAPIT: Genome Association and Prediction Integrated Tool (GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP, cBLUP, sBLUP)"
 readme      = "README.md"
 license     = "GPL-3.0-or-later"
@@ -61,7 +61,7 @@ dev = [
     "pytest-cov>=7.1.0,<8",
     "rpy2>=3.6.7,<4",
     "black>=26.5.1,<27",
-    "ruff>=0.16.5,<0.17",
+    "ruff>=0.16.6,<0.17",
     "pandas-stubs>=2.3.3.260113,<4",
     "scipy-stubs>=1.15.3.0,<2",
     "pyrefly>=1.2.0,<2",
