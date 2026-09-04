@@ -38,3 +38,30 @@ pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy -
 Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`
 files for `python -m pstats` or another compatible viewer. Compare profiles
 only on the same machine and thread configuration used for the baseline.
+
+## cBLUP eigensolver crossover
+
+`benchmark_cblup_eigensolvers.py` compares the group-space and
+observation-space incidence decompositions across sample counts, compression
+ratios from 0.2 through the uncompressed case, and kinship ranks. Every
+full-rank timing is preceded by an eigenvalue and eigenspace-equivalence check.
+Rank-deficient cases record when group space is mathematically unavailable and
+the observation-space fallback is required.
+
+Run the default multi-scale workload and retain its JSON report:
+
+```powershell
+pixi run -e full python benchmarks/benchmark_cblup_eigensolvers.py --output benchmarks/results/cblup-eigensolver-crossover.json
+```
+
+For a quick validation run:
+
+```powershell
+pixi run -e full python benchmarks/benchmark_cblup_eigensolvers.py --individuals 120 --group-ratios 0.25 0.5 --kinship-rank-fractions 1.0 0.5 --warmups 0 --repeats 1
+```
+
+An `observation_over_group` value above one favors group space. Use results
+only to revise the production crossover heuristic when the trend is stable
+across relevant sample sizes and the same BLAS/thread configuration.
+The checked-in heuristic uses group space through `groups / individuals = 0.5`,
+the largest consistently faster ratio in the default benchmark matrix.

@@ -323,6 +323,28 @@ class TestEMMA:
         assert np.all(valid_p >= 0), "P-values must be ≥ 0"
         assert np.all(valid_p <= 1), "P-values must be ≤ 1"
 
+    def test_p3d_unimputed_marker_uses_observed_samples(
+        self,
+        small_dataset: SmallDataset,
+    ) -> None:
+        from pygapit.stats.emma import emmax_p3d
+        from pygapit.stats.kinship import vanraden_kinship
+        from pygapit.stats.pca import build_covariate_matrix, compute_pca
+
+        complete_GD = small_dataset["GD"]
+        GD = complete_GD.copy()
+        GD[0, 0] = np.nan
+        y = small_dataset["y"]
+        K = vanraden_kinship(complete_GD)
+        X0 = build_covariate_matrix(compute_pca(complete_GD, 3), 3)
+
+        result = emmax_p3d(y, X0, GD, K, snp_impute="none")
+
+        assert np.isfinite(result.effects[0])
+        assert np.isfinite(result.se[0])
+        assert np.isfinite(result.stats[0])
+        assert 0.0 <= result.p_values[0] <= 1.0
+
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Tests: Multiple Testing

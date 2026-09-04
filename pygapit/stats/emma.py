@@ -132,7 +132,10 @@ def _eigen_R_w_Z(
     # High compression permits an equivalent factorization in group space:
     # RKR' = (R K^1/2)(R K^1/2)'.  Use it only when the smaller problem is
     # materially cheaper and has enough well-resolved positive eigenvalues.
-    if t_random * 3 < n:
+    # Multi-scale crossover benchmarks show a stable group-space advantage
+    # through half-size incidence problems.  Beyond that point the faster path
+    # depends on sample size and the active BLAS implementation.
+    if t_random * 2 <= n:
         symmetric_kinship = (K + K.T) / 2.0
         kinship_values, kinship_vectors = np.linalg.eigh(symmetric_kinship)
         kinship_scale = np.max([np.max(np.abs(kinship_values)), 1.0])
@@ -481,6 +484,8 @@ def emmax_p3d(
     stats_arr = np.full(m, np.nan)
     df = n - q1
 
+    se: np.float64
+    t_stat: np.float64
     for i in range(m):
         raw_snp = GD[:, i]
         observed = np.isfinite(raw_snp)
@@ -489,17 +494,23 @@ def emmax_p3d(
             continue
         if not np.all(observed):
             observed_count = int(np.count_nonzero(observed))
+            random_covariance: FloatMatrix
             if incidence is None:
                 random_covariance = K[np.ix_(observed, observed)]
             else:
-                observed_incidence = incidence[observed]
+                observed_incidence: FloatMatrix = incidence[observed]
                 random_covariance = observed_incidence @ K @ observed_incidence.T
-            covariance = random_covariance + delta * np.eye(observed_count)
-            precision = np.linalg.pinv(covariance)
-            marker_design = np.column_stack([X0[observed], raw_snp[observed]])
-            information = marker_design.T @ precision @ marker_design
-            information_inverse = np.linalg.pinv(information)
-            beta = information_inverse @ marker_design.T @ precision @ y[observed]
+            covariance: FloatMatrix = random_covariance + delta * np.eye(observed_count)
+            precision: FloatMatrix = np.linalg.pinv(covariance)
+            marker_design: FloatMatrix = np.column_stack([
+                X0[observed],
+                raw_snp[observed],
+            ])
+            information: FloatMatrix = marker_design.T @ precision @ marker_design
+            information_inverse: FloatMatrix = np.linalg.pinv(information)
+            beta: FloatVector = (
+                information_inverse @ marker_design.T @ precision @ y[observed]
+            )
             se = np.sqrt(information_inverse[q0, q0] * vg)
             if se < 1e-12:
                 p_values[i] = 1.0
@@ -513,11 +524,11 @@ def emmax_p3d(
         snp = UtGD[:, i]
 
         # Build design matrix with SNP
-        Xt = np.column_stack([UtX0, snp])  # (n, q1)
+        Xt: FloatMatrix = np.column_stack([UtX0, snp])  # (n, q1)
         # OLS in transformed space: beta = (Xt'Xt)^-1 Xt'yt
         try:
-            XtX = Xt.T @ Xt
-            Xty = Xt.T @ Uty
+            XtX: FloatMatrix = Xt.T @ Xt
+            Xty: FloatVector = Xt.T @ Uty
             beta, *_ = np.linalg.lstsq(XtX, Xty, rcond=None)
         except np.linalg.LinAlgError:
             p_values[i] = 1.0
@@ -525,7 +536,7 @@ def emmax_p3d(
 
         # Standard error and t-statistic for the SNP coefficient (last element)
         try:
-            iXX = np.linalg.inv(XtX)
+            iXX: FloatMatrix = np.linalg.inv(XtX)
         except np.linalg.LinAlgError:
             p_values[i] = 1.0
             continue

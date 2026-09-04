@@ -11,6 +11,7 @@ from pygapit._typing import FloatMatrix, FloatVector
 from pygapit.gs import blup as blup_module
 from pygapit.gs.blup import _emma_blup_with_incidence, cblup
 from pygapit.gwas import mlm
+from pygapit.stats import emma as emma_module
 from pygapit.stats.emma import EMMAResult, _eigen_R_w_Z, emma_remle
 
 
@@ -217,6 +218,34 @@ def test_incidence_group_space_falls_back_for_low_rank_kinship():
         rtol=1e-10,
         atol=1e-11,
     )
+
+
+def test_incidence_half_size_uses_group_space(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n, groups = 30, 15
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    Z = np.zeros((n, groups), dtype=np.float64)
+    Z[np.arange(n), np.arange(n) % groups] = 1.0
+    factors = rng.normal(size=(groups, groups))
+    K: FloatMatrix = factors @ factors.T + np.eye(groups)
+
+    def unexpected_observation_eigh(
+        matrix: FloatMatrix,
+        *,
+        subset_by_index: tuple[int, int],
+    ) -> None:
+        pytest.fail(
+            "half-size full-rank incidence should not use observation-space eigh"
+        )
+
+    monkeypatch.setattr(emma_module, "scipy_eigh", unexpected_observation_eigh)
+
+    values, model_basis = _eigen_R_w_Z(Z, K, X)
+
+    assert values.shape == (groups - X.shape[1],)
+    assert model_basis.shape == (n, groups)
 
 
 def test_incidence_full_rank_spectrum_avoids_combined_qr(
