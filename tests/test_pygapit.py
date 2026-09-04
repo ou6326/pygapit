@@ -191,8 +191,9 @@ class TestKinship:
         """Monomorphic SNPs should not crash the computation."""
         from pygapit.stats.kinship import vanraden_kinship
 
+        rng = np.random.default_rng(20260904)
         GD = np.ones((10, 20)) * 2  # all monomorphic
-        GD[:, :10] = np.random.choice([0, 1, 2], size=(10, 10))  # add some variation
+        GD[:, :10] = rng.choice([0, 1, 2], size=(10, 10))  # add some variation
         K = vanraden_kinship(GD)
         assert K.shape == (10, 10)
         assert np.all(np.isfinite(K))
@@ -719,7 +720,8 @@ class TestFarmCPU:
 
         GM = small_dataset["GM"]
         n = small_dataset["n"]
-        p = np.random.uniform(0, 0.001, small_dataset["m"])
+        rng = np.random.default_rng(20260904)
+        p = rng.uniform(0, 0.001, small_dataset["m"])
         max_qtns = int(np.sqrt(n) / np.sqrt(max(1, np.log10(n))))
         positions = as_float_vector(GM["Position"].to_numpy())
         qtns = _bin_select_qtns(
@@ -1034,7 +1036,8 @@ class TestIO:
             Y=Y, taxa=np.array(["A", "B", "C", "D", "E"]), trait_names=["trait"]
         )
         # Genotype: 4 individuals (missing D, extra F)
-        GD = np.random.rand(4, 10)
+        rng = np.random.default_rng(20260904)
+        GD = rng.random((4, 10))
         GM = pd.DataFrame({
             "SNP": [f"s{i}" for i in range(10)],
             "Chromosome": [1] * 10,

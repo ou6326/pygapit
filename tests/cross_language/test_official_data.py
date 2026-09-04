@@ -605,7 +605,7 @@ def test_official_maize_mlmm_workflow_matches_gapit(
     )
     missing_markers = iter(name for name in marker_names if name not in r_markers)
     r_markers = np.asarray(
-        [name if name else next(missing_markers) for name in r_markers],
+        [name or next(missing_markers) for name in r_markers],
         dtype=np.str_,
     )
     canonical_order = np.asarray(
