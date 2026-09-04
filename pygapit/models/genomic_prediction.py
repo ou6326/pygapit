@@ -236,6 +236,7 @@ def BayesB(
     n_iter: int = 5000,
     burn_in: int = 1000,
     pi: float = 0.95,
+    rng: np.random.Generator | None = None,
 ) -> tuple[FloatVector, FloatVector]:
     """
     Simplified BayesB via Gibbs sampling.
@@ -248,6 +249,7 @@ def BayesB(
     n_iter    : int -- total Gibbs iterations
     burn_in   : int -- burn-in iterations (discarded)
     pi        : float -- sparsity prior
+    rng       : np.random.Generator, optional -- random number generator
 
     Returns
     -------
@@ -255,7 +257,8 @@ def BayesB(
     gebv      : np.ndarray (n,) -- genomic estimated breeding values
     """
     print(f"[PyGAPIT] Running BayesB ({n_iter} iterations, burn-in={burn_in}) ...")
-    y = as_float_vector(phenotype, name="phenotype")
+    rng = np.random.default_rng() if rng is None else rng
+    y = as_float_vector(phenotype, name="phenotype").copy()
     Z = np.nan_to_num(as_float_matrix(genotype, name="genotype matrix"))
     n, m = Z.shape
     require_row_count(Z, len(y), name="genotype matrix")
@@ -272,7 +275,7 @@ def BayesB(
     for it in range(n_iter):
         residual = y - Z @ beta
 
-        for j in np.random.permutation(m):
+        for j in rng.permutation(m):
             zj = Z[:, j]
             zz = np.dot(zj, zj)
             residual += zj * beta[j]  # un-residualise this SNP
@@ -288,19 +291,20 @@ def BayesB(
             )
             p_incl = 1.0 / (1.0 + np.exp(-np.clip(log_p1, -30, 30)))
 
-            if np.random.rand() < p_incl:
+            if rng.random() < p_incl:
                 delta[j] = True
-                beta[j] = np.random.normal(mean_j, np.sqrt(max(var_j, 0)))
+                beta[j] = rng.normal(mean_j, np.sqrt(max(var_j, 0)))
             else:
                 delta[j] = False
                 beta[j] = 0.0
 
             residual -= zj * beta[j]
 
-        Ve = _sample_var(residual, n, a=4, b=np.var(y) * 0.5)
+        Ve = _sample_var(residual, n, rng, a=4, b=np.var(y) * 0.5)
         Vb = _sample_var(
             beta[delta],
             max(int(delta.sum()), 1),
+            rng,
             a=4,
             b=np.var(y) * 0.5 / max(m * (1 - pi), 1e-8),
         )
@@ -322,14 +326,20 @@ def BayesB(
 # ─────────────────────────────────────────────────────────────────────────────
 
 
-def _sample_var(residuals: FloatVector, n: int, a: float = 4, b: float = 1) -> float:
+def _sample_var(
+    residuals: FloatVector,
+    n: int,
+    rng: np.random.Generator,
+    a: float = 4,
+    b: float = 1,
+) -> float:
     """Sample from Scaled-Inverse-Chi-Squared distribution."""
     if n < 2:
         return b / a
     shape = (a + n) / 2
     sum_squares = np.sum(residuals**2).item()
     scale = (a * b + sum_squares) / 2
-    return scale / np.random.gamma(shape)
+    return scale / rng.gamma(shape)
 
 
 def _cross_validate_rrblup(
