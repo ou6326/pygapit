@@ -144,7 +144,7 @@ def _emma_blup_with_incidence(
     covariance_projection = genetic_covariance @ Z.T
     random_effect = covariance_projection @ (precision_y - precision_x @ beta)
 
-    kinship_inverse = np.linalg.pinv(K)
+    kinship_inverse = np.linalg.pinv(K, hermitian=True)
     random_information = Z.T @ Z / ve + kinship_inverse / vg
     try:
         conditional_covariance = np.linalg.inv(random_information)

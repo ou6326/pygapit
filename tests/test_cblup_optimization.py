@@ -220,6 +220,41 @@ def test_incidence_group_space_falls_back_for_low_rank_kinship():
     )
 
 
+def test_incidence_centered_kinship_uses_one_eigendecomposition(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n, groups = 30, 8
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    Z = np.zeros((n, groups), dtype=np.float64)
+    Z[np.arange(n), np.arange(n) % groups] = 1.0
+    group_sizes = Z.sum(axis=0)
+    factors = rng.normal(size=(groups, groups - 1))
+    factors -= np.outer(group_sizes, group_sizes @ factors) / (
+        group_sizes @ group_sizes
+    )
+    K: FloatMatrix = factors @ factors.T
+    original_eigh = np.linalg.eigh
+    eigh_calls = 0
+
+    def counted_eigh(matrix: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
+        nonlocal eigh_calls
+        eigh_calls += 1
+        return original_eigh(matrix)
+
+    monkeypatch.setattr(np.linalg, "eigh", counted_eigh)
+    values, model_basis = _eigen_R_w_Z(Z, K, X)
+
+    assert eigh_calls == 1
+    assert values.shape == (groups - X.shape[1],)
+    np.testing.assert_allclose(
+        model_basis.T @ model_basis,
+        np.eye(groups),
+        rtol=1e-10,
+        atol=1e-11,
+    )
+
+
 def test_incidence_half_size_uses_group_space(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:

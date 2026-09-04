@@ -181,14 +181,46 @@ def _eigen_R_w_Z(
     # depends on sample size and the active BLAS implementation.
     if t_random * 2 <= n:
         symmetric_kinship = (K + K.T) / 2.0
-        kinship_values, kinship_vectors = np.linalg.eigh(symmetric_kinship)
-        kinship_scale = np.max([np.max(np.abs(kinship_values)), 1.0])
-        kinship_tolerance = np.finfo(np.float64).eps * t_random * kinship_scale
-        positive = kinship_values > kinship_tolerance
-        if np.count_nonzero(positive) >= random_rank:
-            kinship_factor: FloatMatrix = kinship_vectors[:, positive] * np.sqrt(
-                kinship_values[positive]
+        kinship_factor: FloatMatrix | None = None
+        try:
+            kinship_factor = np.linalg.cholesky(symmetric_kinship)
+        except np.linalg.LinAlgError:
+            # VanRaden kinships have a known null direction because every
+            # centered marker sums to zero.  Compression maps that direction
+            # to the group-size vector.  Removing it leaves a positive-definite
+            # contrast block that can use Cholesky instead of a full eigh.
+            group_sizes = Z.sum(axis=0)
+            null_residual = symmetric_kinship @ group_sizes
+            null_residual_norm: np.float64 = np.linalg.norm(null_residual)
+            null_scale: np.float64 = np.linalg.norm(symmetric_kinship) * np.linalg.norm(
+                group_sizes
             )
+            null_tolerance = (
+                np.finfo(np.float64).eps * t_random * np.max([null_scale, 1.0])
+            )
+            if null_residual_norm <= null_tolerance:
+                group_basis, _ = np.linalg.qr(
+                    group_sizes[:, np.newaxis], mode="complete"
+                )
+                contrast_basis = group_basis[:, 1:]
+                reduced_kinship = contrast_basis.T @ symmetric_kinship @ contrast_basis
+                reduced_kinship = (reduced_kinship + reduced_kinship.T) / 2.0
+                try:
+                    kinship_factor = contrast_basis @ np.linalg.cholesky(
+                        reduced_kinship
+                    )
+                except np.linalg.LinAlgError:
+                    pass
+        if kinship_factor is None:
+            kinship_values, kinship_vectors = np.linalg.eigh(symmetric_kinship)
+            kinship_scale = np.max([np.max(np.abs(kinship_values)), 1.0])
+            kinship_tolerance = np.finfo(np.float64).eps * t_random * kinship_scale
+            positive = kinship_values > kinship_tolerance
+            if np.count_nonzero(positive) >= random_rank:
+                kinship_factor = kinship_vectors[:, positive] * np.sqrt(
+                    kinship_values[positive]
+                )
+        if kinship_factor is not None:
             observation_factor = residualized_Z @ kinship_factor
             group_covariance = observation_factor.T @ observation_factor
             group_covariance = (group_covariance + group_covariance.T) / 2.0
