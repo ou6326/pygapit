@@ -20,7 +20,7 @@ from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
 from .._typing import FloatMatrix, FloatVector, readonly_copy
-from ..stats.emma import EMMAResult, emma_remle, emmax_p3d
+from ..stats.emma import EMMAResult, EMMASpectrum, emma_remle, emmax_p3d
 
 
 @dataclass(frozen=True, slots=True)
@@ -45,6 +45,7 @@ def mlm_gwas(
     GD: FloatMatrix,
     K: FloatMatrix,
     ngrids: int = 100,
+    spectrum: EMMASpectrum | None = None,
 ) -> MLMResult:
     """
     MLM genome-wide association using EMMA + P3D.
@@ -61,7 +62,7 @@ def mlm_gwas(
     -------
     MLMResult with p_values, effects, vg, ve, h2
     """
-    result = emmax_p3d(y, X0, GD, K, ngrids=ngrids)
+    result = emmax_p3d(y, X0, GD, K, ngrids=ngrids, spectrum=spectrum)
     return MLMResult(
         p_values=result.p_values,
         effects=result.effects,

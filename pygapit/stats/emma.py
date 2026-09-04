@@ -78,6 +78,20 @@ class GWASResult:
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
+@dataclass(frozen=True, slots=True)
+class EMMASpectrum:
+    """Phenotype-independent residual spectrum for an ordinary EMMA model."""
+
+    values: FloatVector
+    basis: FloatMatrix
+
+    def __post_init__(self) -> None:
+        if self.basis.shape[1] != len(self.values):
+            raise ValueError("EMMA spectrum values and basis must have equal rank")
+        object.__setattr__(self, "values", readonly_copy(self.values))
+        object.__setattr__(self, "basis", readonly_copy(self.basis))
+
+
 def _eigen_R_wo_Z(K: FloatMatrix, X: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
     """
     Spectral decomposition of the residual projection matrix (no Z).
@@ -95,6 +109,20 @@ def _eigen_R_wo_Z(K: FloatMatrix, X: FloatMatrix) -> tuple[FloatVector, FloatMat
     eigvals = eigvals[q:][::-1]
     eigvecs = eigvecs[:, q:][:, ::-1]
     return eigvals - 1.0, eigvecs  # subtract 1 added by I
+
+
+def prepare_emma_spectrum(K: FloatMatrix, X: FloatMatrix) -> EMMASpectrum:
+    """Prepare the reusable residual spectrum determined only by ``K`` and ``X``."""
+    K = as_float_matrix(K, name="kinship matrix")
+    X = as_float_matrix(X, name="design matrix")
+    n, q = X.shape
+    require_square(K, name="kinship matrix", size=n)
+    if q == 0 or n <= q:
+        raise ValueError("EMMA spectrum requires more observations than fixed effects")
+    if np.linalg.matrix_rank(X) < q:
+        raise ValueError("design matrix must have linearly independent columns")
+    values, basis = _eigen_R_wo_Z(K, X)
+    return EMMASpectrum(values=values, basis=basis)
 
 
 def _eigen_L_wo_Z(K: FloatMatrix) -> tuple[FloatVector, FloatMatrix]:
@@ -280,6 +308,7 @@ def emma_remle(
     ulim: float = 10.0,
     esp: float = 1e-10,
     Z: FloatMatrix | None = None,
+    spectrum: EMMASpectrum | None = None,
 ) -> EMMAResult:
     """
     REML variance component estimation via EMMA algorithm.
@@ -294,6 +323,8 @@ def emma_remle(
     llim, ulim : log-delta search bounds
     esp : convergence tolerance
     Z : optional (n, t) incidence matrix for random effects
+    spectrum : optional phenotype-independent decomposition from
+        :func:`prepare_emma_spectrum`; valid only without ``Z``
 
     Returns
     -------
@@ -321,6 +352,8 @@ def emma_remle(
             raise ValueError(
                 "incidence matrix must have more columns than the fixed-effect design"
             )
+    if incidence is not None and spectrum is not None:
+        raise ValueError("a reusable EMMA spectrum is valid only without incidence")
 
     if np.linalg.matrix_rank(X) < q:
         raise ValueError("design matrix must have linearly independent columns")
@@ -328,7 +361,12 @@ def emma_remle(
     # Spectral decomposition
     etas: FloatVector
     if incidence is None:
-        lambda_R, U_R = _eigen_R_wo_Z(K, X)
+        if spectrum is None:
+            lambda_R, U_R = _eigen_R_wo_Z(K, X)
+        else:
+            lambda_R, U_R = spectrum.values, spectrum.basis
+            if lambda_R.shape != (n - q,) or U_R.shape != (n, n - q):
+                raise ValueError("EMMA spectrum shape does not match K and X")
         residual_rank = 0
         etas = U_R.T @ y
     else:
@@ -424,6 +462,7 @@ def emmax_p3d(
     ulim: float = 10.0,
     snp_impute: str = "middle",
     Z: FloatMatrix | None = None,
+    spectrum: EMMASpectrum | None = None,
 ) -> GWASResult:
     """
     EMMAxP3D: genome-wide association using EMMA with P3D approximation.
@@ -441,6 +480,7 @@ def emmax_p3d(
     K  : kinship matrix; (n, n) without Z or (t, t) with Z
     snp_impute : missing-genotype policy; GAPIT defaults to ``"middle"``
     Z  : optional (n, t) incidence matrix for random effects
+    spectrum : optional phenotype-independent residual spectrum to reuse
 
     Returns
     -------
@@ -465,7 +505,16 @@ def emmax_p3d(
     q0 = X0.shape[1]
 
     # ── Step 1: Estimate delta from null model (P3D) ──────────────────────
-    remle = emma_remle(y, X0, K, ngrids=ngrids, llim=llim, ulim=ulim, Z=incidence)
+    remle = emma_remle(
+        y,
+        X0,
+        K,
+        ngrids=ngrids,
+        llim=llim,
+        ulim=ulim,
+        Z=incidence,
+        spectrum=spectrum,
+    )
     delta = remle.delta
     vg = remle.vg
     ve = remle.ve

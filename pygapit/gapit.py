@@ -55,6 +55,7 @@ from .io.formats import (
     read_numeric,
     read_phenotype,
 )
+from .stats.emma import EMMASpectrum, prepare_emma_spectrum
 from .stats.kinship import vanraden_kinship, zhang_kinship
 from .stats.pca import PCAResult, build_covariate_matrix, compute_pca
 from .stats.testing import (
@@ -380,6 +381,7 @@ def GAPIT(
 
     all_results: dict[str, GAPITResult] = {}
     prepared_cache: dict[tuple[int, ...], PreparedGenotype] = {}
+    spectrum_cache: dict[int, EMMASpectrum] = {}
 
     for trait_name in traits_to_run:
         print(f"\n[pyGAPIT] ---- Trait: {trait_name} ----")
@@ -399,6 +401,17 @@ def GAPIT(
             print(f"[pyGAPIT] Running {model_name}...")
             t_model = time.time()
 
+            spectrum: EMMASpectrum | None = None
+            if model_name in {"MLM", "SBLUP"}:
+                spectrum_key = id(prepared.shared)
+                spectrum = spectrum_cache.get(spectrum_key)
+                if spectrum is None:
+                    spectrum = prepare_emma_spectrum(
+                        prepared.kinship,
+                        prepared.design,
+                    )
+                    spectrum_cache[spectrum_key] = spectrum
+
             result = _run_model(
                 model_name=model_name,
                 y=prepared.y,
@@ -417,6 +430,7 @@ def GAPIT(
                 fdr_alpha=cutOff or 0.05,
                 super_bin_size=super_bin_size,
                 super_qtn_counts=super_qtn_counts,
+                mlm_spectrum=spectrum,
             )
 
             elapsed = time.time() - t_model
@@ -996,6 +1010,7 @@ def _run_model(
     fdr_alpha: float,
     super_bin_size: int,
     super_qtn_counts: Sequence[int] | None,
+    mlm_spectrum: EMMASpectrum | None = None,
 ) -> ModelRunResult:
     """Dispatch to the correct GWAS/GS model."""
     m = GD.shape[1]
@@ -1006,7 +1021,7 @@ def _run_model(
         return ModelRunResult(r.p_values, r.effects, r.se)
 
     elif model_name == "MLM":
-        r = mlm_gwas(y, X0, GD, K)
+        r = mlm_gwas(y, X0, GD, K, spectrum=mlm_spectrum)
         return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
 
     elif model_name == "CMLM":
@@ -1066,7 +1081,7 @@ def _run_model(
         )
 
     elif model_name == "SBLUP":
-        scan = mlm_gwas(y, X0, GD, K)
+        scan = mlm_gwas(y, X0, GD, K, spectrum=mlm_spectrum)
         selection = select_super_qtns(
             y,
             X0,

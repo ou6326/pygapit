@@ -18,6 +18,7 @@ from pygapit.gapit import (
     _select_traits,
 )
 from pygapit.gwas.blink import _candidate_mask
+from pygapit.stats.emma import EMMASpectrum, prepare_emma_spectrum
 from pygapit.stats.kinship import vanraden_kinship, zhang_kinship
 from pygapit.stats.pca import PCAResult, compute_pca
 
@@ -187,14 +188,53 @@ def test_trait_preparation_cache_respects_observed_taxa(
     assert kinship_calls == expected_calls
 
 
-def test_cached_trait_results_match_independent_runs() -> None:
+@pytest.mark.parametrize(
+    ("missing_cells", "expected_calls"),
+    [
+        ((), 1),
+        (((0, "height"), (1, "yield")), 2),
+    ],
+)
+def test_mlm_spectrum_cache_respects_observed_taxa(
+    monkeypatch: pytest.MonkeyPatch,
+    missing_cells: tuple[tuple[int, str], ...],
+    expected_calls: int,
+) -> None:
+    phenotype, genotype, marker_map = _inputs()
+    for row, column in missing_cells:
+        phenotype.loc[row, column] = np.nan
+
+    spectrum_calls = 0
+
+    def counting_spectrum(K: FloatMatrix, X: FloatMatrix) -> EMMASpectrum:
+        nonlocal spectrum_calls
+        spectrum_calls += 1
+        return prepare_emma_spectrum(K, X)
+
+    monkeypatch.setattr("pygapit.gapit.prepare_emma_spectrum", counting_spectrum)
+    result = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="MLM",
+        PCA_total=1,
+        maf_threshold=0.0,
+        file_output=False,
+    )
+
+    assert isinstance(result, dict)
+    assert spectrum_calls == expected_calls
+
+
+@pytest.mark.parametrize("model", ["GLM", "MLM"])
+def test_cached_trait_results_match_independent_runs(model: str) -> None:
     phenotype, genotype, marker_map = _inputs()
 
     combined = GAPIT(
         Y=phenotype,
         GD=genotype,
         GM=marker_map,
-        model="GLM",
+        model=model,
         PCA_total=1,
         file_output=False,
     )
@@ -202,7 +242,7 @@ def test_cached_trait_results_match_independent_runs() -> None:
         Y=phenotype,
         GD=genotype,
         GM=marker_map,
-        model="GLM",
+        model=model,
         trait="height",
         PCA_total=1,
         file_output=False,
@@ -211,7 +251,7 @@ def test_cached_trait_results_match_independent_runs() -> None:
         Y=phenotype,
         GD=genotype,
         GM=marker_map,
-        model="GLM",
+        model=model,
         trait="yield",
         PCA_total=1,
         file_output=False,
@@ -220,8 +260,8 @@ def test_cached_trait_results_match_independent_runs() -> None:
     assert isinstance(combined, dict)
     assert isinstance(height, GAPITResult)
     assert isinstance(yield_result, GAPITResult)
-    combined_height = combined["height_GLM"]
-    combined_yield = combined["yield_GLM"]
+    combined_height = combined[f"height_{model}"]
+    combined_yield = combined[f"yield_{model}"]
     assert combined_height.GWAS is not None
     assert combined_yield.GWAS is not None
     assert height.GWAS is not None
