@@ -20,9 +20,11 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.linalg import eigh as scipy_eigh
 from scipy.optimize import brentq
+from scipy.special import stdtr
 from scipy.stats import t as t_dist
 
 from .._typing import (
+    BoolVector,
     FloatMatrix,
     FloatVector,
     as_float_matrix,
@@ -32,6 +34,19 @@ from .._typing import (
     require_square,
 )
 from ..io.formats import impute_missing
+
+_EMMAX_MARKER_BATCH_SIZE = 4096
+_EMMAX_MARKER_BATCH_TARGET_BYTES = 32 * 1024**2
+_FLOAT64_BYTES = 8
+
+
+def _emmax_marker_batch_size(n_individuals: int) -> int:
+    """Bound transformed marker work arrays to roughly 32 MiB."""
+    memory_limited_size = max(
+        1,
+        _EMMAX_MARKER_BATCH_TARGET_BYTES // (n_individuals * _FLOAT64_BYTES),
+    )
+    return min(_EMMAX_MARKER_BATCH_SIZE, memory_limited_size)
 
 
 @dataclass(frozen=True, slots=True)
@@ -484,72 +499,85 @@ def emmax_p3d(
     stats_arr = np.full(m, np.nan)
     df = n - q1
 
+    # Complete markers share the transformed null design, so apply the
+    # Frisch-Waugh-Lovell reduction in bounded batches instead of solving and
+    # inverting one augmented normal-equation system per marker.
+    complete: BoolVector = np.all(np.isfinite(GD), axis=0)
+    variable: BoolVector = np.std(GD, axis=0) >= 1e-8
+    complete_marker_indices = np.flatnonzero(complete & variable)
+    if len(complete_marker_indices) > 0:
+        null_solver: FloatMatrix = np.linalg.pinv(UtX0)
+        transformed_y_residual: FloatVector = Uty - UtX0 @ (null_solver @ Uty)
+        batch_size = _emmax_marker_batch_size(n)
+        for batch_start in range(0, len(complete_marker_indices), batch_size):
+            marker_indices = complete_marker_indices[
+                batch_start : batch_start + batch_size
+            ]
+            transformed_markers = UtGD[:, marker_indices]
+            residualized = transformed_markers - UtX0 @ (
+                null_solver @ transformed_markers
+            )
+            residualized_ss: FloatVector = np.einsum(
+                "ij,ij->j", residualized, residualized
+            )
+            stable = residualized_ss > 1e-12
+            if not stable.any():
+                continue
+
+            residualized_y: FloatVector = residualized.T @ transformed_y_residual
+            stable_ss = residualized_ss[stable]
+            marker_effects = residualized_y[stable] / stable_ss
+            marker_se = np.sqrt(vg / stable_ss)
+            stable_se = marker_se >= 1e-12
+            if not stable_se.any():
+                continue
+
+            marker_rows = marker_indices[stable][stable_se]
+            marker_effects = marker_effects[stable_se]
+            marker_se = marker_se[stable_se]
+            marker_stats = marker_effects / marker_se
+            marker_p_values: FloatVector = np.asarray(
+                2.0 * stdtr(df, -np.abs(marker_stats)),
+                dtype=np.float64,
+            )
+            np.clip(marker_p_values, 0.0, 1.0, out=marker_p_values)
+            p_values[marker_rows] = marker_p_values
+            effects[marker_rows] = marker_effects
+            se_arr[marker_rows] = marker_se
+            stats_arr[marker_rows] = marker_stats
+
     se: np.float64
     t_stat: np.float64
-    for i in range(m):
+    for i in np.flatnonzero(~complete):
         raw_snp = GD[:, i]
         observed = np.isfinite(raw_snp)
         if np.count_nonzero(observed) <= q1 or np.nanstd(raw_snp) < 1e-8:
             p_values[i] = 1.0
             continue
-        if not np.all(observed):
-            observed_count = int(np.count_nonzero(observed))
-            random_covariance: FloatMatrix
-            if incidence is None:
-                random_covariance = K[np.ix_(observed, observed)]
-            else:
-                observed_incidence: FloatMatrix = incidence[observed]
-                random_covariance = observed_incidence @ K @ observed_incidence.T
-            covariance: FloatMatrix = random_covariance + delta * np.eye(observed_count)
-            precision: FloatMatrix = np.linalg.pinv(covariance)
-            marker_design: FloatMatrix = np.column_stack([
-                X0[observed],
-                raw_snp[observed],
-            ])
-            information: FloatMatrix = marker_design.T @ precision @ marker_design
-            information_inverse: FloatMatrix = np.linalg.pinv(information)
-            beta: FloatVector = (
-                information_inverse @ marker_design.T @ precision @ y[observed]
-            )
-            se = np.sqrt(information_inverse[q0, q0] * vg)
-            if se < 1e-12:
-                p_values[i] = 1.0
-                continue
-            t_stat = beta[q0] / se
-            p_values[i] = 2.0 * t_dist.sf(abs(t_stat), observed_count - q1)
-            effects[i] = beta[q0]
-            se_arr[i] = se
-            stats_arr[i] = t_stat
-            continue
-        snp = UtGD[:, i]
-
-        # Build design matrix with SNP
-        Xt: FloatMatrix = np.column_stack([UtX0, snp])  # (n, q1)
-        # OLS in transformed space: beta = (Xt'Xt)^-1 Xt'yt
-        try:
-            XtX: FloatMatrix = Xt.T @ Xt
-            Xty: FloatVector = Xt.T @ Uty
-            beta, *_ = np.linalg.lstsq(XtX, Xty, rcond=None)
-        except np.linalg.LinAlgError:
-            p_values[i] = 1.0
-            continue
-
-        # Standard error and t-statistic for the SNP coefficient (last element)
-        try:
-            iXX: FloatMatrix = np.linalg.inv(XtX)
-        except np.linalg.LinAlgError:
-            p_values[i] = 1.0
-            continue
-
-        se = np.sqrt(iXX[q0, q0] * vg)
+        observed_count = int(np.count_nonzero(observed))
+        random_covariance: FloatMatrix
+        if incidence is None:
+            random_covariance = K[np.ix_(observed, observed)]
+        else:
+            observed_incidence: FloatMatrix = incidence[observed]
+            random_covariance = observed_incidence @ K @ observed_incidence.T
+        covariance: FloatMatrix = random_covariance + delta * np.eye(observed_count)
+        precision: FloatMatrix = np.linalg.pinv(covariance)
+        marker_design: FloatMatrix = np.column_stack([
+            X0[observed],
+            raw_snp[observed],
+        ])
+        information: FloatMatrix = marker_design.T @ precision @ marker_design
+        information_inverse: FloatMatrix = np.linalg.pinv(information)
+        beta: FloatVector = (
+            information_inverse @ marker_design.T @ precision @ y[observed]
+        )
+        se = np.sqrt(information_inverse[q0, q0] * vg)
         if se < 1e-12:
             p_values[i] = 1.0
             continue
-
         t_stat = beta[q0] / se
-        p_val = 2.0 * t_dist.sf(abs(t_stat), df)
-
-        p_values[i] = min(max(p_val, 0.0), 1.0)
+        p_values[i] = 2.0 * t_dist.sf(abs(t_stat), observed_count - q1)
         effects[i] = beta[q0]
         se_arr[i] = se
         stats_arr[i] = t_stat
