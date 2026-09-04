@@ -78,6 +78,28 @@ def test_incidence_blup_solve_matches_explicit_precision(
         np.testing.assert_allclose(actual_value, expected_value, rtol=1e-11, atol=1e-12)
 
 
+def test_incidence_blup_uses_cholesky_for_observation_covariance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n, groups = 18, 6
+    y: FloatVector = rng.normal(size=n)
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    Z = np.zeros((n, groups), dtype=np.float64)
+    Z[np.arange(n), np.arange(n) % groups] = 1.0
+    factors = rng.normal(size=(groups, groups))
+    K: FloatMatrix = factors @ factors.T
+
+    def unexpected_general_solve(
+        matrix: FloatMatrix,
+        right_hand_side: FloatMatrix,
+    ) -> None:
+        pytest.fail("positive-definite observation covariance should use Cholesky")
+
+    monkeypatch.setattr(np.linalg, "solve", unexpected_general_solve)
+    _emma_blup_with_incidence(y, X, K, Z, vg=1.3, ve=0.7)
+
+
 def test_cblup_builds_kinship_cluster_tree_once(
     monkeypatch: pytest.MonkeyPatch,
 ):

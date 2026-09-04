@@ -22,6 +22,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass, replace
 
 import numpy as np
+from scipy.linalg import cho_factor, cho_solve
 
 from .._typing import (
     FloatMatrix,
@@ -132,7 +133,15 @@ def _emma_blup_with_incidence(
     genetic_covariance = vg * K
     covariance = Z @ genetic_covariance @ Z.T + ve * np.eye(len(y))
     solve_rhs: FloatMatrix = np.column_stack([y, X])
-    solved = np.linalg.solve(covariance, solve_rhs)
+    try:
+        covariance_factor = cho_factor(covariance, lower=True, check_finite=False)
+        solved: FloatMatrix = cho_solve(
+            covariance_factor,
+            solve_rhs,
+            check_finite=False,
+        )
+    except np.linalg.LinAlgError:
+        solved = np.linalg.solve(covariance, solve_rhs)
     precision_y = solved[:, 0]
     precision_x = solved[:, 1:]
     information = X.T @ precision_x
