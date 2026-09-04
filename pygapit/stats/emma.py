@@ -19,6 +19,7 @@ from dataclasses import dataclass
 
 import numpy as np
 from scipy.linalg import eigh as scipy_eigh
+from scipy.linalg import solve_triangular
 from scipy.optimize import brentq
 from scipy.special import stdtr
 from scipy.stats import t as t_dist
@@ -471,25 +472,53 @@ def emmax_p3d(
     h2 = remle.h2
 
     # ── Step 2: Build transformed system ─────────────────────────────────
-    # Eigendecompose kinship: K = U * diag(lambda) * U'
+    # Any whitening T with T V T' = I gives the same GLS marker statistics.
+    # For the ordinary MLM path, a Cholesky solve avoids a second full
+    # eigendecomposition after REML.  Retain the spectral construction as a
+    # fallback for covariance matrices that are not numerically positive definite.
     if incidence is None:
-        lambda_L, U_L = _eigen_L_wo_Z(K)
+        null_covariance: FloatMatrix = (K + K.T) / 2.0
+        null_covariance = null_covariance.copy()
+        null_covariance.flat[:: n + 1] += delta
+        try:
+            covariance_factor: FloatMatrix = np.linalg.cholesky(null_covariance)
+        except np.linalg.LinAlgError:
+            lambda_L, U_L = _eigen_L_wo_Z(K)
+            lambda_L = np.maximum(lambda_L, 0)
+            transformed_basis = U_L * (1.0 / np.sqrt(lambda_L + delta))
+            Uty: FloatVector = transformed_basis.T @ y
+            UtX0: FloatMatrix = transformed_basis.T @ X0
+            UtGD: FloatMatrix = transformed_basis.T @ GD
+        else:
+            Uty = solve_triangular(
+                covariance_factor,
+                y,
+                lower=True,
+                check_finite=False,
+            )
+            UtX0 = solve_triangular(
+                covariance_factor,
+                X0,
+                lower=True,
+                check_finite=False,
+            )
+            UtGD = solve_triangular(
+                covariance_factor,
+                GD,
+                lower=True,
+                check_finite=False,
+            )
     else:
         lambda_L, U_L = _eigen_L_w_Z(incidence, K)
-    lambda_L = np.maximum(lambda_L, 0)  # numerical stability
-
-    # Rotation matrix: U * diag(1/sqrt(lambda + delta))
-    scale = 1.0 / np.sqrt(lambda_L + delta)
-    if incidence is not None:
+        lambda_L = np.maximum(lambda_L, 0)  # numerical stability
         scale = np.concatenate([
-            scale,
+            1.0 / np.sqrt(lambda_L + delta),
             np.full(n - incidence.shape[1], 1.0 / np.sqrt(delta)),
         ])
-    transformed_basis = U_L * scale
-    # Apply transformation: yt = scale * U' * y,  Xt0 = scale * U' * X0
-    Uty = transformed_basis.T @ y  # (n,)
-    UtX0 = transformed_basis.T @ X0  # (n, q0)
-    UtGD = transformed_basis.T @ GD  # (n, m)
+        transformed_basis = U_L * scale
+        Uty = transformed_basis.T @ y
+        UtX0 = transformed_basis.T @ X0
+        UtGD = transformed_basis.T @ GD
 
     # ── Step 3: Test each SNP ─────────────────────────────────────────────
     q1 = q0 + 1
