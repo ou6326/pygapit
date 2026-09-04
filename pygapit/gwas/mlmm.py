@@ -23,6 +23,7 @@ import typing as t
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.linalg import solve_triangular
 from scipy.optimize import minimize_scalar
 from scipy.special import gammaln
 from scipy.stats import f as f_dist
@@ -30,6 +31,7 @@ from scipy.stats import t as t_dist
 
 from .._typing import FloatMatrix, FloatVector, IntVector, readonly_copy
 from ..stats.emma import GWASResult, emma_remle
+from .glm import _marker_batch_size
 
 
 @dataclass(frozen=True, slots=True)
@@ -145,18 +147,25 @@ def _restore_cofactor_statistics(
     cofactors: list[int],
     result: GWASResult,
     ngrids: int,
+    variance_fit: GWASResult | None = None,
 ) -> GWASResult:
     """Replace collinear scan placeholders with joint GLS cofactor statistics."""
     if not cofactors:
         return result
     design: FloatMatrix = np.column_stack([X0] + [GD[:, index] for index in cofactors])
-    remle = emma_remle(y, design, K, ngrids=ngrids)
-    covariance = K + remle.delta * np.eye(len(y))
+    if variance_fit is None:
+        remle = emma_remle(y, design, K, ngrids=ngrids)
+        delta = remle.delta
+        vg = remle.vg
+    else:
+        delta = variance_fit.ve / variance_fit.vg
+        vg = variance_fit.vg
+    covariance = K + delta * np.eye(len(y))
     precision = np.linalg.pinv(covariance)
     information_inverse = np.linalg.pinv(design.T @ precision @ design)
     beta = information_inverse @ design.T @ precision @ y
     standard_errors: FloatVector = np.sqrt(
-        np.maximum(np.diag(information_inverse) * remle.vg, 0.0)
+        np.maximum(np.diag(information_inverse) * vg, 0.0)
     )
     statistics = beta / standard_errors
     degrees_of_freedom = len(y) - design.shape[1]
@@ -193,16 +202,23 @@ def _least_significant_cofactor(
     K: FloatMatrix,
     cofactors: list[int],
     ngrids: int,
+    variance_fit: GWASResult | None = None,
 ) -> int:
     """Return the marker with GAPIT's smallest absolute joint GLS t statistic."""
     design: FloatMatrix = np.column_stack([X0] + [GD[:, index] for index in cofactors])
-    remle = emma_remle(y, design, K, ngrids=ngrids)
-    covariance = K + remle.delta * np.eye(len(y))
+    if variance_fit is None:
+        remle = emma_remle(y, design, K, ngrids=ngrids)
+        delta = remle.delta
+        vg = remle.vg
+    else:
+        delta = variance_fit.ve / variance_fit.vg
+        vg = variance_fit.vg
+    covariance = K + delta * np.eye(len(y))
     precision = np.linalg.pinv(covariance)
     information_inverse = np.linalg.pinv(design.T @ precision @ design)
     beta = information_inverse @ design.T @ precision @ y
     standard_errors: FloatVector = np.sqrt(
-        np.maximum(np.diag(information_inverse) * remle.vg, 0.0)
+        np.maximum(np.diag(information_inverse) * vg, 0.0)
     )
     marker_statistics = np.abs(beta[X0.shape[1] :] / standard_errors[X0.shape[1] :])
     return cofactors[int(np.nanargmin(marker_statistics))]
@@ -225,14 +241,21 @@ def _conditioned_marker_scan(
     remle = emma_remle(y, design, K, ngrids=ngrids)
     covariance = remle.vg * K + remle.ve * np.eye(len(y))
     cholesky = np.linalg.cholesky(covariance)
-    transformed_y = np.linalg.solve(cholesky, y)
-    transformed_design = np.linalg.solve(cholesky, design)
+    transformed_y = solve_triangular(
+        cholesky,
+        y,
+        lower=True,
+        check_finite=False,
+    )
+    transformed_design = solve_triangular(
+        cholesky,
+        design,
+        lower=True,
+        check_finite=False,
+    )
     design_beta, *_ = np.linalg.lstsq(transformed_design, transformed_y, rcond=None)
     residual = transformed_y - transformed_design @ design_beta
-    projection = np.eye(len(y)) - transformed_design @ np.linalg.pinv(
-        transformed_design
-    )
-    transformed_genotypes = projection @ np.linalg.solve(cholesky, GD)
+    design_solver: FloatMatrix = np.linalg.pinv(transformed_design)
     null_rss = np.sum(residual**2)
     degrees_of_freedom = len(y) - design.shape[1] - 1
 
@@ -240,28 +263,56 @@ def _conditioned_marker_scan(
     effects = np.full(GD.shape[1], np.nan)
     standard_errors = np.full(GD.shape[1], np.nan)
     statistics = np.full(GD.shape[1], np.nan)
-    for marker in range(GD.shape[1]):
-        if marker in cofactors:
-            continue
-        genotype = transformed_genotypes[:, marker]
-        genotype_sum_squares = np.sum(genotype**2)
-        if genotype_sum_squares < 1e-12:
-            continue
-        effect = np.sum(genotype * residual) / genotype_sum_squares
-        marker_rss = np.sum((residual - genotype * effect) ** 2)
-        f_statistic = t.cast(
-            np.float64,
-            np.maximum(
-                (null_rss / marker_rss - 1.0) * degrees_of_freedom,
-                0.0,
-            ),
+    cofactor_mask = np.zeros(GD.shape[1], dtype=bool)
+    cofactor_mask[cofactors] = True
+    batch_size = _marker_batch_size(len(y))
+    for batch_start in range(0, GD.shape[1], batch_size):
+        batch_stop = min(batch_start + batch_size, GD.shape[1])
+        transformed_genotypes = solve_triangular(
+            cholesky,
+            GD[:, batch_start:batch_stop],
+            lower=True,
+            check_finite=False,
         )
-        statistic = np.sign(effect) * np.sqrt(f_statistic)
-        p_values[marker] = f_dist.sf(f_statistic, 1, degrees_of_freedom)
-        effects[marker] = effect
-        statistics[marker] = statistic
-        if f_statistic > 0.0:
-            standard_errors[marker] = abs(effect) / np.sqrt(f_statistic)
+        residualized = transformed_genotypes - transformed_design @ (
+            design_solver @ transformed_genotypes
+        )
+        genotype_sum_squares: FloatVector = np.einsum(
+            "ij,ij->j", residualized, residualized
+        )
+        valid = genotype_sum_squares >= 1e-12
+        valid &= ~cofactor_mask[batch_start:batch_stop]
+        if not valid.any():
+            continue
+
+        residualized_y: FloatVector = np.asarray(
+            residualized.T @ residual,
+            dtype=np.float64,
+        )
+        valid_ss = genotype_sum_squares[valid]
+        valid_y = residualized_y[valid]
+        marker_effects = valid_y / valid_ss
+        marker_rss = np.maximum(null_rss - valid_y**2 / valid_ss, 0.0)
+        f_statistics = np.maximum(
+            (null_rss / marker_rss - 1.0) * degrees_of_freedom,
+            0.0,
+        )
+        marker_statistics = np.sign(marker_effects) * np.sqrt(f_statistics)
+        marker_p_values: FloatVector = np.asarray(
+            f_dist.sf(f_statistics, 1, degrees_of_freedom),
+            dtype=np.float64,
+        )
+        marker_standard_errors = np.full(len(valid_ss), np.nan)
+        positive = f_statistics > 0.0
+        marker_standard_errors[positive] = np.abs(marker_effects[positive]) / np.sqrt(
+            f_statistics[positive]
+        )
+
+        marker_indices = np.flatnonzero(valid) + batch_start
+        p_values[marker_indices] = marker_p_values
+        effects[marker_indices] = marker_effects
+        statistics[marker_indices] = marker_statistics
+        standard_errors[marker_indices] = marker_standard_errors
 
     return GWASResult(
         p_values=p_values,
@@ -348,10 +399,20 @@ def mlmm_gwas(
     # ── Backward elimination ─────────────────────────────────────────────
     # GAPIT builds a complete backward path from the final forward model.
     backward_cofactors = cofactors.copy()
+    backward_variance_fit: GWASResult | None = result
     while len(backward_cofactors) > 1:
-        dropped = _least_significant_cofactor(y, X0, GD, K, backward_cofactors, ngrids)
+        dropped = _least_significant_cofactor(
+            y,
+            X0,
+            GD,
+            K,
+            backward_cofactors,
+            ngrids,
+            variance_fit=backward_variance_fit,
+        )
         backward_cofactors.remove(dropped)
         record_model(backward_cofactors)
+        backward_variance_fit = None
 
     def criterion(candidate: tuple[np.float64, list[int]]) -> np.float64:
         return candidate[0]
@@ -361,7 +422,14 @@ def mlmm_gwas(
     # ── Final scan with best cofactor set ────────────────────────────────
     final_result = _conditioned_marker_scan(y, X0, GD, K, best_cofactors, ngrids)
     final_result = _restore_cofactor_statistics(
-        y, X0, GD, K, best_cofactors, final_result, ngrids
+        y,
+        X0,
+        GD,
+        K,
+        best_cofactors,
+        final_result,
+        ngrids,
+        variance_fit=final_result,
     )
 
     return MLMMResult(

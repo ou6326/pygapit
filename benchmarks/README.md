@@ -32,7 +32,7 @@ marker-heavy iterative work from sample-heavy mixed-model work:
 
 ```powershell
 pixi run -e full python benchmarks/profile_hotspots.py --scenario marker-heavy --models farmcpu blink
-pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm cblup
+pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm mlmm cblup
 ```
 
 Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`

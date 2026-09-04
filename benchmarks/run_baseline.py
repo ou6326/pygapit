@@ -26,6 +26,7 @@ from pygapit.gwas.blink import blink_gwas
 from pygapit.gwas.farmcpu import farmcpu_gwas
 from pygapit.gwas.glm import glm_gwas
 from pygapit.gwas.mlm import mlm_gwas
+from pygapit.gwas.mlmm import mlmm_gwas
 from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import build_covariate_matrix, compute_pca
 
@@ -164,6 +165,16 @@ def run_baseline(
         ("vanraden_kinship", lambda: vanraden_kinship(genotype)),
         ("glm", lambda: glm_gwas(phenotype, design, genotype)),
         ("mlm", lambda: mlm_gwas(phenotype, design, genotype, kinship)),
+        (
+            "mlmm",
+            lambda: mlmm_gwas(
+                phenotype,
+                design,
+                genotype,
+                kinship,
+                max_steps=5,
+            ),
+        ),
         (
             "farmcpu",
             lambda: farmcpu_gwas(

@@ -14,6 +14,7 @@ from pygapit.gs.blup import cblup
 from pygapit.gwas.blink import blink_gwas
 from pygapit.gwas.farmcpu import farmcpu_gwas
 from pygapit.gwas.mlm import mlm_gwas
+from pygapit.gwas.mlmm import mlmm_gwas
 from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import build_covariate_matrix, compute_pca
 
@@ -21,7 +22,7 @@ _SCENARIOS = {
     "marker-heavy": (200, 5_000),
     "sample-heavy": (500, 1_000),
 }
-_MODEL_NAMES = ("mlm", "cblup", "farmcpu", "blink")
+_MODEL_NAMES = ("mlm", "mlmm", "cblup", "farmcpu", "blink")
 
 
 def profile_models(
@@ -46,6 +47,13 @@ def profile_models(
     threshold = 1.0 / n_markers
     operations: dict[str, Callable[[], object]] = {
         "mlm": lambda: mlm_gwas(phenotype, design, genotype, kinship),
+        "mlmm": lambda: mlmm_gwas(
+            phenotype,
+            design,
+            genotype,
+            kinship,
+            max_steps=max_iterations,
+        ),
         "cblup": lambda: cblup(phenotype, design, genotype),
         "farmcpu": lambda: farmcpu_gwas(
             phenotype,
