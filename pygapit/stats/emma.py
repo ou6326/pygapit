@@ -504,6 +504,7 @@ def emmax_p3d(
     # inverting one augmented normal-equation system per marker.
     complete: BoolVector = np.all(np.isfinite(GD), axis=0)
     variable: BoolVector = np.std(GD, axis=0) >= 1e-8
+    p_values[complete & ~variable] = 1.0
     complete_marker_indices = np.flatnonzero(complete & variable)
     if len(complete_marker_indices) > 0:
         null_solver: FloatMatrix = np.linalg.pinv(UtX0)
@@ -521,6 +522,7 @@ def emmax_p3d(
                 "ij,ij->j", residualized, residualized
             )
             stable = residualized_ss > 1e-12
+            p_values[marker_indices[~stable]] = 1.0
             if not stable.any():
                 continue
 
@@ -529,6 +531,7 @@ def emmax_p3d(
             marker_effects = residualized_y[stable] / stable_ss
             marker_se = np.sqrt(vg / stable_ss)
             stable_se = marker_se >= 1e-12
+            p_values[marker_indices[stable][~stable_se]] = 1.0
             if not stable_se.any():
                 continue
 
