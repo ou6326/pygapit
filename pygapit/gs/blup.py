@@ -153,17 +153,35 @@ def _emma_blup_with_incidence(
     covariance_projection = genetic_covariance @ Z.T
     random_effect = covariance_projection @ (precision_y - precision_x @ beta)
 
-    kinship_inverse = np.linalg.pinv(K, hermitian=True)
-    random_information = Z.T @ Z / ve + kinship_inverse / vg
-    try:
-        conditional_covariance = np.linalg.inv(random_information)
-    except np.linalg.LinAlgError:
-        conditional_covariance = np.linalg.pinv(random_information)
+    identity_incidence = (
+        Z.shape == (len(y), len(y))
+        and np.count_nonzero(Z) == len(y)
+        and np.array_equal(np.diag(Z), np.ones(len(y)))
+    )
+    if identity_incidence:
+        kinship_values, kinship_vectors = np.linalg.eigh((K + K.T) / 2.0)
+        value_scale: np.float64 = np.max(np.abs(kinship_values))
+        # Match the cutoff used by NumPy's default Moore-Penrose inverse so
+        # this path retains the established singular-kinship semantics.
+        significant = np.abs(kinship_values) > 1e-15 * value_scale
+        random_precision: FloatVector = np.full_like(kinship_values, 1.0 / ve)
+        random_precision[significant] += 1.0 / (vg * kinship_values[significant])
+        conditional_variance: FloatVector = np.square(kinship_vectors) @ (
+            1.0 / random_precision
+        )
+    else:
+        kinship_inverse = np.linalg.pinv(K, hermitian=True)
+        random_information = Z.T @ Z / ve + kinship_inverse / vg
+        try:
+            conditional_covariance = np.linalg.inv(random_information)
+        except np.linalg.LinAlgError:
+            conditional_covariance = np.linalg.pinv(random_information)
+        conditional_variance = np.diag(conditional_covariance)
     fixed_effect_basis = covariance_projection @ precision_x
     fixed_effect_correction = (
         fixed_effect_basis @ information_inverse @ fixed_effect_basis.T
     )
-    pev = np.diag(conditional_covariance + fixed_effect_correction)
+    pev = conditional_variance + np.diag(fixed_effect_correction)
     return beta, random_effect, pev
 
 

@@ -106,6 +106,32 @@ def test_incidence_blup_uses_cholesky_for_observation_covariance(
     _emma_blup_with_incidence(y, X, K, Z, vg=1.3, ve=0.7)
 
 
+@pytest.mark.parametrize("singular_kinship", [False, True])
+def test_identity_incidence_uses_direct_conditional_spectrum(
+    monkeypatch: pytest.MonkeyPatch,
+    singular_kinship: bool,
+) -> None:
+    rng = np.random.default_rng(20260904)
+    n = 12
+    y: FloatVector = rng.normal(size=n)
+    X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    Z: FloatMatrix = np.eye(n)
+    factors = rng.normal(size=(n, n - singular_kinship))
+    K: FloatMatrix = factors @ factors.T
+    if not singular_kinship:
+        K += np.eye(n)
+    expected = _reference_incidence_blup(y, X, K, Z, vg=1.3, ve=0.7)
+
+    def unexpected_pinv(*args: object, **kwargs: object) -> None:
+        pytest.fail("identity incidence should use the direct conditional spectrum")
+
+    monkeypatch.setattr(np.linalg, "pinv", unexpected_pinv)
+    actual = _emma_blup_with_incidence(y, X, K, Z, vg=1.3, ve=0.7)
+
+    for actual_value, expected_value in zip(actual, expected, strict=True):
+        np.testing.assert_allclose(actual_value, expected_value, rtol=1e-10, atol=1e-11)
+
+
 def test_cblup_builds_kinship_cluster_tree_once(
     monkeypatch: pytest.MonkeyPatch,
 ):
