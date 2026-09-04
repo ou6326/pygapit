@@ -63,5 +63,7 @@ pixi run -e full python benchmarks/benchmark_cblup_eigensolvers.py --individuals
 An `observation_over_group` value above one favors group space. Use results
 only to revise the production crossover heuristic when the trend is stable
 across relevant sample sizes and the same BLAS/thread configuration.
-The checked-in heuristic uses group space through `groups / individuals = 0.5`,
-the largest consistently faster ratio in the default benchmark matrix.
+The checked-in heuristic uses group space through `groups / individuals = 0.8`.
+With the centered-kinship contrast factorization this remains consistently
+faster across the default sample sizes; 0.9 is deliberately excluded because
+the two paths are effectively tied there.

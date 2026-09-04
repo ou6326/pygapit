@@ -176,10 +176,11 @@ def _eigen_R_w_Z(
     # High compression permits an equivalent factorization in group space:
     # RKR' = (R K^1/2)(R K^1/2)'.  Use it only when the smaller problem is
     # materially cheaper and has enough well-resolved positive eigenvalues.
-    # Multi-scale crossover benchmarks show a stable group-space advantage
-    # through half-size incidence problems.  Beyond that point the faster path
-    # depends on sample size and the active BLAS implementation.
-    if t_random * 2 <= n:
+    # With the centered-kinship contrast factorization, multi-scale crossover
+    # benchmarks show a stable group-space advantage through four-fifths-size
+    # incidence problems.  At nine-tenths the paths are effectively tied, so
+    # retain observation space beyond the conservative 0.8 boundary.
+    if t_random * 5 <= n * 4:
         symmetric_kinship = (K + K.T) / 2.0
         kinship_factor: FloatMatrix | None = None
         try:

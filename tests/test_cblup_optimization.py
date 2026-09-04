@@ -255,11 +255,13 @@ def test_incidence_centered_kinship_uses_one_eigendecomposition(
     )
 
 
-def test_incidence_half_size_uses_group_space(
+@pytest.mark.parametrize("groups", [15, 24])
+def test_incidence_benchmark_supported_ratios_use_group_space(
     monkeypatch: pytest.MonkeyPatch,
+    groups: int,
 ) -> None:
     rng = np.random.default_rng(20260904)
-    n, groups = 30, 15
+    n = 30
     X: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
     Z = np.zeros((n, groups), dtype=np.float64)
     Z[np.arange(n), np.arange(n) % groups] = 1.0
@@ -272,7 +274,7 @@ def test_incidence_half_size_uses_group_space(
         subset_by_index: tuple[int, int],
     ) -> None:
         pytest.fail(
-            "half-size full-rank incidence should not use observation-space eigh"
+            "benchmark-supported incidence ratios should not use observation-space eigh"
         )
 
     monkeypatch.setattr(emma_module, "scipy_eigh", unexpected_observation_eigh)

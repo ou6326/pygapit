@@ -101,14 +101,37 @@ def _group_space_decomposition(
     random_rank = n_groups - fixed_design.shape[1]
     residualized = _residualize_incidence(incidence, fixed_design)
 
-    kinship_values, kinship_vectors = np.linalg.eigh(kinship)
-    kinship_scale = np.max([np.max(np.abs(kinship_values)), 1.0])
-    tolerance = np.finfo(np.float64).eps * n_groups * kinship_scale
-    positive = kinship_values > tolerance
-    if np.count_nonzero(positive) < random_rank:
-        return None
-
-    kinship_factor = kinship_vectors[:, positive] * np.sqrt(kinship_values[positive])
+    symmetric_kinship = (kinship + kinship.T) / 2.0
+    kinship_factor: FloatMatrix | None = None
+    try:
+        kinship_factor = np.linalg.cholesky(symmetric_kinship)
+    except np.linalg.LinAlgError:
+        group_sizes = incidence.sum(axis=0)
+        null_residual = symmetric_kinship @ group_sizes
+        null_residual_norm: np.float64 = np.linalg.norm(null_residual)
+        null_scale: np.float64 = np.linalg.norm(symmetric_kinship) * np.linalg.norm(
+            group_sizes
+        )
+        null_tolerance = np.finfo(np.float64).eps * n_groups * np.max([null_scale, 1.0])
+        if null_residual_norm <= null_tolerance:
+            group_basis, _ = np.linalg.qr(group_sizes[:, np.newaxis], mode="complete")
+            contrast_basis = group_basis[:, 1:]
+            reduced_kinship = contrast_basis.T @ symmetric_kinship @ contrast_basis
+            reduced_kinship = (reduced_kinship + reduced_kinship.T) / 2.0
+            try:
+                kinship_factor = contrast_basis @ np.linalg.cholesky(reduced_kinship)
+            except np.linalg.LinAlgError:
+                pass
+    if kinship_factor is None:
+        kinship_values, kinship_vectors = np.linalg.eigh(symmetric_kinship)
+        kinship_scale = np.max([np.max(np.abs(kinship_values)), 1.0])
+        tolerance = np.finfo(np.float64).eps * n_groups * kinship_scale
+        positive = kinship_values > tolerance
+        if np.count_nonzero(positive) < random_rank:
+            return None
+        kinship_factor = kinship_vectors[:, positive] * np.sqrt(
+            kinship_values[positive]
+        )
     observation_factor = residualized @ kinship_factor
     group_covariance = observation_factor.T @ observation_factor
     group_covariance = (group_covariance + group_covariance.T) / 2.0
