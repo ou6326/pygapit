@@ -27,9 +27,9 @@ def vanraden_factor(GD: FloatMatrix) -> FloatMatrix:
         warnings.warn("All SNPs are monomorphic; returning identity factor.")
         return np.eye(n)
 
-    selected = GD[:, valid]
     frequencies = allele_frequencies[valid]
-    centered = selected - 2.0 * frequencies
+    centered = GD[:, valid]
+    centered -= 2.0 * frequencies
     adjustment = 2.0 * np.sum(frequencies * (1.0 - frequencies))
     if adjustment < 1e-12:
         warnings.warn("Adjustment factor near zero; check allele frequencies.")
@@ -53,36 +53,26 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
         K[i,j] > 0 = more related than average
     """
     GD = as_float_matrix(GD, name="genotype matrix")
-    n, _m = GD.shape
+    n = GD.shape[0]
 
     # ── Remove monomorphic SNPs ────────────────────────────────────────────
-    fa = GD.sum(axis=0) / (2 * n)  # allele frequency
-    valid = (fa > 0) & (fa < 1)
-    if valid.sum() == 0:
+    frequencies = GD.sum(axis=0) / (2.0 * n)
+    valid = (frequencies > 0.0) & (frequencies < 1.0)
+    if not valid.any():
         warnings.warn("All SNPs are monomorphic; returning identity matrix.")
         return np.eye(n)
 
-    GD = GD[:, valid]
-    fa = fa[valid]
-    GD.shape[1]
-
-    # ── Center genotypes ──────────────────────────────────────────────────
-    # p = allele frequency of alternate allele
-    p = GD.sum(axis=0) / (2 * n)
-    # P = deviation vector: 2*(p - 0.5)
-    P = 2.0 * (p - 0.5)
-    # Shift coding: 0/1/2 -> -1/0/1
-    Z = GD - 1.0
-    # Z_centered = Z - P  (column-wise subtraction)
-    Z_c = Z - P[np.newaxis, :]  # (n, m)
+    frequencies = frequencies[valid]
+    centered = GD[:, valid]
+    centered -= 2.0 * frequencies
 
     # ── Compute K = Z_c' Z_c / adj ───────────────────────────────────────
     # Note: R uses crossprod(Z, Z) where Z is TRANSPOSED first
-    # In Python: Z_c is (n, m), so K = Z_c @ Z_c.T
-    K = Z_c @ Z_c.T  # (n, n)
+    # In Python: centered is (n, m), so K = centered @ centered.T
+    K = centered @ centered.T
 
     # Adjustment factor: 2 * sum(p_j * (1 - p_j))
-    adj = 2.0 * np.sum(p * (1.0 - p))
+    adj = 2.0 * np.sum(frequencies * (1.0 - frequencies))
     if adj < 1e-12:
         warnings.warn("Adjustment factor near zero; check allele frequencies.")
         adj = 1.0

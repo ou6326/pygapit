@@ -273,9 +273,11 @@ def _numeric_from_frames(
         raise ValueError(f"{source} SNP values must be numeric") from exc
     if np.isinf(values).any():
         raise ValueError(f"{source} SNP values must not contain infinity")
+    if not values.flags.writeable:
+        values = values.copy()
 
     return GenotypeData(
-        GD=impute_missing(values, method=impute_method),
+        GD=_impute_missing_inplace(values, method=impute_method),
         GM=marker_map,
         taxa=taxa,
     )
@@ -284,6 +286,8 @@ def _numeric_from_frames(
 def _numericalize_snp(
     alleles: Vector,
     major_allele_zero: bool = False,
+    *,
+    already_uppercase: bool = False,
 ) -> FloatVector:
     """
     Convert a SNP's character allele calls to 0/1/2.
@@ -296,10 +300,13 @@ def _numericalize_snp(
 
     Returns 0/1/2 coded array with NaN for missing.
     """
-    values = np.char.upper(np.asarray(alleles, dtype=str))
+    values = np.asarray(alleles, dtype=str)
+    if not already_uppercase:
+        values = np.char.upper(values)
+    unique_values = np.unique(values)
     nonmissing_lengths = [
         len(value)
-        for value in values
+        for value in unique_values
         if value not in MISSING_1BIT and value not in MISSING_2BIT
     ]
     bit = max(nonmissing_lengths, default=2)
@@ -309,14 +316,16 @@ def _numericalize_snp(
     if bit == 1:
         # GAPIT replaces K by Z so the heterozygote sorts after homozygotes.
         normalized[normalized == "K"] = "Z"
-    normalized[np.isin(normalized, tuple(missing_codes))] = "N"
+    for value in unique_values:
+        if value in missing_codes:
+            normalized[normalized == value] = "N"
 
-    levels = sorted(set(normalized) - {"N"})
+    levels = np.unique(normalized[normalized != "N"]).tolist()
     if bit == 2:
         heterozygotes = [level for level in levels if level in HETEROZYGOUS_2BIT]
         if len(heterozygotes) > 1:
             normalized[normalized == heterozygotes[1]] = heterozygotes[0]
-            levels = sorted(set(normalized) - {"N"})
+            levels = np.unique(normalized[normalized != "N"]).tolist()
 
     if len(levels) <= 1 or len(levels) > 3:
         return np.zeros(len(normalized), dtype=float)
@@ -394,34 +403,38 @@ def read_hapmap(
     GenotypeData with GD (n×m), GM (m×3), taxa (n,)
     """
     if isinstance(filepath, pd.DataFrame):
-        header = pd.DataFrame([filepath.columns], columns=filepath.columns)
-        raw = pd.concat([header, filepath], ignore_index=True)
+        raw = filepath
     else:
         fp = Path(filepath)
         if not fp.exists():
             raise FileNotFoundError(f"HapMap file not found: {fp}")
-        # Read with no header (row 0 is header)
-        raw = pd.read_csv(fp, sep="\t", header=None, low_memory=False)
+        raw = pd.read_csv(fp, sep="\t", low_memory=False)
     n_meta = 11  # first 11 columns are SNP metadata
     if raw.shape[1] <= n_meta:
         raise ValueError("HapMap data must contain 11 metadata columns and taxa")
-    if len(raw) < 2:
+    if raw.empty:
         raise ValueError("HapMap data must contain at least one marker row")
 
-    # Extract taxa names from first row, skip first 11 columns
-    taxa = _taxa_array(raw.iloc[0, n_meta:], "HapMap")
+    # Extract taxa names from the header, skipping the metadata columns.
+    taxa = _taxa_array(np.asarray(raw.columns[n_meta:], dtype=str), "HapMap")
     # Extract SNP info: rs (col 0), chrom (col 2), pos (col 3)
-    snp_info = _marker_map_from_frame(raw.iloc[1:, [0, 2, 3]], "HapMap marker data")
+    snp_info = _marker_map_from_frame(raw.iloc[:, [0, 2, 3]], "HapMap marker data")
 
     # Genotype block: rows = SNPs, cols = individuals
-    geno_block = raw.iloc[1:, n_meta:].values  # (n_snps, n_individuals)
+    geno_block = np.char.upper(
+        np.asarray(raw.iloc[:, n_meta:].values, dtype=str)
+    )  # (n_snps, n_individuals)
 
     n_snps, n_indiv = geno_block.shape
 
     # Convert each SNP row to numeric
     GD_T = np.full((n_snps, n_indiv), np.nan, dtype=np.float64)
     for i in range(n_snps):
-        GD_T[i, :] = _numericalize_snp(geno_block[i, :], major_allele_zero)
+        GD_T[i, :] = _numericalize_snp(
+            geno_block[i, :],
+            major_allele_zero,
+            already_uppercase=True,
+        )
 
     # Transpose: GD should be (n_individuals, n_snps)
     GD = GD_T.T
@@ -486,7 +499,17 @@ def impute_missing(GD: FloatMatrix, method: str = "middle") -> FloatMatrix:
       'mean'   : impute with column mean (population allele frequency)
       'none'   : leave as NaN
     """
-    GD = as_float_matrix(GD, name="genotype matrix").copy()
+    values = as_float_matrix(GD, name="genotype matrix").copy()
+    return _impute_missing_inplace(values, method)
+
+
+def _impute_missing_inplace(GD: FloatMatrix, method: str) -> FloatMatrix:
+    """Impute a validated, exclusively owned floating-point matrix in place."""
+    if method == "none":
+        return GD
+    if method not in {"middle", "major", "minor", "mean"}:
+        raise ValueError(f"Unknown impute method: {method}")
+
     missing = np.isnan(GD)
 
     if method == "middle":
@@ -496,15 +519,15 @@ def impute_missing(GD: FloatMatrix, method: str = "middle") -> FloatMatrix:
     elif method == "minor":
         GD[missing] = 0.0
     elif method == "mean":
-        col_means = np.nanmean(GD, axis=0)
-        for j in range(GD.shape[1]):
-            mask = np.isnan(GD[:, j])
-            if mask.any():
-                GD[mask, j] = col_means[j] if not np.isnan(col_means[j]) else 1.0
-    elif method == "none":
-        pass
-    else:
-        raise ValueError(f"Unknown impute method: {method}")
+        observed_count = np.sum(~missing, axis=0)
+        col_means: FloatVector = np.ones(GD.shape[1], dtype=np.float64)
+        np.divide(
+            np.nansum(GD, axis=0),
+            observed_count,
+            out=col_means,
+            where=observed_count > 0,
+        )
+        np.copyto(GD, col_means[np.newaxis, :], where=missing)
 
     return GD
 

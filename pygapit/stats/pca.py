@@ -12,6 +12,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.linalg import eigh as scipy_eigh
 
 from .._typing import (
     FloatMatrix,
@@ -67,27 +68,49 @@ def compute_pca(
     if valid_snps.sum() < n_components:
         valid_snps = maf > 0  # relax if too few pass filter
 
-    GD_filtered = GD[:, valid_snps]
+    GD_centered = GD[:, valid_snps]
 
     # ── Center each SNP as in R's prcomp(scale. = FALSE) ────────────────
-    col_means = GD_filtered.mean(axis=0)
-    GD_centered = GD_filtered - col_means
+    col_means = GD_centered.mean(axis=0)
+    GD_centered -= col_means
 
-    # ── SVD (efficient for tall matrices) ────────────────────────────────
+    # ── Leading singular triplets through the smaller Gram matrix ───────
     k = min(n_components, min(GD_centered.shape))
-    # Use truncated SVD via numpy
-    # G = U * S * V^T, scores = U * S
-    U, singular_values, Vt = np.linalg.svd(GD_centered, full_matrices=False)
-    singular_values_array: FloatVector = singular_values
-    eigenvalues_all: FloatVector = singular_values_array**2 / (n - 1)
-    U = U[:, :k]
-    S = singular_values_array[:k]
-    Vt = Vt[:k, :]
+    marker_count = GD_centered.shape[1]
+    total_var: np.float64 = np.einsum("ij,ij->", GD_centered, GD_centered) / (n - 1)
+    if k == 0:
+        scores = np.empty((n, 0), dtype=np.float64)
+        loadings = np.empty((marker_count, 0), dtype=np.float64)
+        eigenvalues = np.empty(0, dtype=np.float64)
+    elif n <= marker_count:
+        gram: FloatMatrix = GD_centered @ GD_centered.T
+        gram_values, left_vectors = scipy_eigh(
+            gram,
+            subset_by_index=(n - k, n - 1),
+            check_finite=False,
+        )
+        gram_values = np.maximum(gram_values[::-1], 0.0)
+        left_vectors = left_vectors[:, ::-1]
+        singular_values: FloatVector = np.sqrt(gram_values)
+        scores = left_vectors * singular_values
+        loadings = np.zeros((marker_count, k), dtype=np.float64)
+        nonzero = singular_values > np.finfo(np.float64).eps * singular_values[0]
+        loadings[:, nonzero] = (
+            GD_centered.T @ left_vectors[:, nonzero]
+        ) / singular_values[nonzero]
+        eigenvalues = gram_values / (n - 1)
+    else:
+        gram = GD_centered.T @ GD_centered
+        gram_values, loadings = scipy_eigh(
+            gram,
+            subset_by_index=(marker_count - k, marker_count - 1),
+            check_finite=False,
+        )
+        gram_values = np.maximum(gram_values[::-1], 0.0)
+        loadings = loadings[:, ::-1]
+        scores = GD_centered @ loadings
+        eigenvalues = gram_values / (n - 1)
 
-    scores = U * S  # (n, k) — PC scores (same as R's prcomp$x)
-    loadings = Vt.T  # (m, k)
-    eigenvalues = S**2 / (n - 1)
-    total_var = np.sum(eigenvalues_all)
     var_explained: FloatVector = (
         eigenvalues / total_var if total_var > 0 else eigenvalues / eigenvalues.sum()
     )
