@@ -81,6 +81,27 @@ def test_mean_imputation_matches_column_means_and_all_missing_fallback() -> None
     assert np.isnan(genotype).any()
 
 
+def test_mean_imputation_matches_nan_sum_reference() -> None:
+    rng = np.random.default_rng(20260906)
+    genotype = rng.binomial(2, 0.35, size=(40, 73)).astype(np.float64)
+    genotype[rng.random(genotype.shape) < 0.2] = np.nan
+    genotype[:, 0] = np.nan
+    observed = np.sum(~np.isnan(genotype), axis=0)
+    expected_means = np.ones(genotype.shape[1], dtype=np.float64)
+    np.divide(
+        np.nansum(genotype, axis=0),
+        observed,
+        out=expected_means,
+        where=observed > 0,
+    )
+    expected = np.where(np.isnan(genotype), expected_means, genotype)
+
+    actual = impute_missing(genotype, method="mean")
+
+    np.testing.assert_array_equal(actual, expected)
+    assert np.isnan(genotype).any()
+
+
 def test_batched_vanraden_matches_full_centered_crossproduct() -> None:
     rng = np.random.default_rng(20260905)
     genotype = rng.binomial(2, 0.35, size=(40, 257)).astype(np.float64)

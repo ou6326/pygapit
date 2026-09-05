@@ -526,10 +526,14 @@ def _impute_missing_inplace(GD: FloatMatrix, method: str) -> FloatMatrix:
     elif method == "minor":
         GD[missing] = 0.0
     elif method == "mean":
-        observed_count = np.sum(~missing, axis=0)
+        observed_count = GD.shape[0] - np.sum(missing, axis=0)
+        # This matrix is an exclusively owned copy. Replacing NaNs with zero
+        # avoids the additional full-size temporary created by np.nansum.
+        GD[missing] = 0.0
+        col_sums: FloatVector = np.sum(GD, axis=0)
         col_means: FloatVector = np.ones(GD.shape[1], dtype=np.float64)
         np.divide(
-            np.nansum(GD, axis=0),
+            col_sums,
             observed_count,
             out=col_means,
             where=observed_count > 0,

@@ -33,6 +33,10 @@ before batching measured 0.198 s / 197.36 MiB traced peak. The equivalent
 0.304 s / 6.39 MiB. These workload-specific values document the memory/runtime
 trade-off and are not CI thresholds.
 
+On the same machine, mean imputation of a 500 by 20,000 matrix with 5% missing
+values improved from 0.0755 s / 172.12 MiB to 0.0405 s / 86.37 MiB by reusing
+the owned output buffer instead of creating `np.nansum`'s full-size temporary.
+
 ## Hotspot profiles
 
 After recording a baseline, use deterministic profiler scenarios to separate
