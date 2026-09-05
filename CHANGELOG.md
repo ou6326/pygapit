@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [1.2.3] - 2026-09-06
+
 ### Added
 
 - A canonical `rrblup()` full-data fit and immutable `RRBLUPResult` containing
@@ -115,7 +117,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.2...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.3...main
+[1.2.3]: https://github.com/ou6326/pygapit/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/ou6326/pygapit/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/ou6326/pygapit/compare/v1.2.0...v1.2.1
 [1.2.0]: https://github.com/ou6326/pygapit/releases/tag/v1.2.0

@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name        = "pygapit-ng"
-version     = "1.2.2"
+version     = "1.2.3"
 description = "Python implementation of GAPIT: Genome Association and Prediction Integrated Tool (GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP, cBLUP, sBLUP)"
 readme      = "README.md"
 license     = "GPL-3.0-or-later"
