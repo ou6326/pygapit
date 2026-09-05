@@ -19,6 +19,11 @@ from .gs.blup import (
     sblup,
     select_super_qtns,
 )
+from .gs.validation import (
+    PredictionCVResult,
+    cross_validate_gblup,
+    cross_validate_rrblup,
+)
 from .gwas.blink import BLINKResult, blink_gwas
 from .gwas.farmcpu import FarmCPUResult, farmcpu_gwas
 from .gwas.glm import GLMResult, glm_gwas
@@ -69,6 +74,7 @@ __all__ = [
     "MLMResult",
     "ModelRunResult",
     "PhenotypeData",
+    "PredictionCVResult",
     "SUPERSelectionResult",
     "align_inputs",
     "align_taxa",
@@ -79,6 +85,8 @@ __all__ = [
     "cblup",
     "cmlm_gwas",
     "compute_pca",
+    "cross_validate_gblup",
+    "cross_validate_rrblup",
     "emma_remle",
     "emmax_p3d",
     "farmcpu_gwas",

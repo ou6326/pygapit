@@ -6,6 +6,30 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+### Added
+
+- Fold-local RR-BLUP and gBLUP cross-validation APIs with seeded or grouped
+  splits, explicit fold assignments, immutable out-of-fold predictions,
+  per-fold regularization, Pearson correlation, and RMSE.
+- An equivalent-solve RR-BLUP benchmark comparing marker-space reference
+  equations against dimension-adaptive solving.
+
+### Fixed
+
+- Standalone RR-BLUP and GBLUP validation now predicts every sample, including
+  remainder samples when the sample count is not divisible by the fold count.
+- Standalone RR-BLUP estimates imputation means and REML penalties separately
+  within each training fold, fits an unpenalized intercept, and uses a kernel
+  scale consistent with its marker penalty. Its returned GEBV excludes the
+  intercept; old uncentered predictions and CV scores intentionally change.
+- Standalone GBLUP reuses canonical gBLUP for its full fit and estimates a GLS
+  intercept within each validation fold, without a full-data fallback.
+
+### Changed
+
+- Standalone RR-BLUP solves in sample space when markers outnumber training
+  samples, avoiding the marker-by-marker dense system.
+
 ## [1.2.2] - 2026-09-05
 
 ### Added

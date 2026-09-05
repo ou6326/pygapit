@@ -301,6 +301,60 @@ print(result.Pred)
 
 ---
 
+## Prediction cross-validation (1.3 development)
+
+Evaluate prediction on held-out samples independently of the full-data
+`GAPIT(...).Pred` fit:
+
+```python
+from pygapit import cross_validate_rrblup, cross_validate_gblup
+
+# y: finite phenotype vector; GD_array: numeric sample-by-marker array.
+# All arrays must already share the same sample order.
+cv = cross_validate_rrblup(y, GD_array, n_folds=5, seed=42)
+print(cv.pearson_r, cv.rmse)
+print(cv.predictions, cv.fold_ids)  # one held-out prediction per input sample
+print(cv.fold_pearson_r, cv.fold_rmse, cv.regularization)
+
+# Keep each family entirely within one fold.
+grouped = cross_validate_rrblup(y, GD_array, n_folds=5, groups=family_ids, seed=42)
+
+# Reuse the same split with a phenotype-independent, precomputed kinship.
+comparison = cross_validate_gblup(y, K, fold_ids=cv.fold_ids)
+```
+
+These initial CV APIs fit an intercept only. Remove missing phenotypes and
+align all arrays before calling. RR-BLUP learns marker imputation means,
+centering, and REML regularization separately in every training fold; markers
+entirely missing in training contribute zero. A supplied `lambda_` must be
+positive and is treated as externally fixed, so tuning it from these same
+held-out phenotypes would invalidate the assessment. gBLUP estimates a GLS
+intercept and variance components in each fold, treating the supplied kinship
+as fixed. Do not supply a kinship constructed using held-out phenotype-based
+marker selection. This API does not evaluate cBLUP/sBLUP selection pipelines.
+
+With `seed=None`, ungrouped folds follow input order. An integer seed shuffles
+samples; grouped splits balance group sizes without splitting groups. Explicit
+integer `fold_ids` override `n_folds` and cannot be combined with `groups` or
+`seed`. Every sample receives one prediction; every training fold needs at
+least two samples. Constant vectors and singleton test folds have undefined
+Pearson correlation (`NaN`), while RMSE remains available. Results own read-only
+copies of their arrays; save the fold IDs to reproduce an exact split.
+
+The older `pygapit.models.genomic_prediction.RR_BLUP` and `GBLUP` functions
+retain their `(training_gebv, cv_correlation)` return shape and now use this
+validation machinery. RR-BLUP fits an unpenalized intercept and returns GEBV
+without it, correcting its previous uncentered behavior. The canonical
+`pygapit.gblup` result and top-level GAPIT prediction contract are unchanged.
+
+RR-BLUP uses `K = Z_centered @ Z_centered.T / m` and `lambda = m * delta`,
+consistent with its marker-effect parameterization; see
+[Endelman (2011)](https://doi.org/10.3835/plantgenome2011.08.0024).
+When markers outnumber training samples, the ridge solve uses sample space.
+Inputs and the REML kernel still reside in memory; this is not streaming CV.
+
+---
+
 ## Output files
 
 When `file_output=True` (default), pyGAPIT writes to `output_dir`:

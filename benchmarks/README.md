@@ -67,3 +67,22 @@ The checked-in heuristic uses group space through `groups / individuals = 0.8`.
 With the centered-kinship contrast factorization this remains consistently
 faster across the default sample sizes; 0.9 is deliberately excluded because
 the two paths are effectively tied there.
+
+## RR-BLUP dimension-adaptive solve
+
+```powershell
+pixi run -e full python -m benchmarks.benchmark_rrblup --output benchmarks/results/rrblup.json
+```
+
+The benchmark checks numerical equivalence before comparing a centered,
+fixed-penalty marker-space reference with the adaptive production solve.
+It includes centering and effects, but excludes REML and cross-validation;
+the reference corrects the legacy intercept semantics to isolate solver cost.
+Memory is measured separately with tracemalloc, not whole-process RSS.
+
+On the development Windows machine (Python 3.12.14, NumPy 2.5.2; 200 samples,
+2,000 markers; one warm-up, three repetitions), the 2026-09-05 run measured
+median 0.869 s / 94.61 MiB traced peak for the reference and 0.145 s / 9.25 MiB
+for the adaptive path. These are workload-specific observations, not an
+end-to-end speed claim or a CI threshold. The generated report records
+environment thread overrides; no project BLAS setting is changed.
