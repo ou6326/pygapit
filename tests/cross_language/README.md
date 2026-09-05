@@ -73,7 +73,9 @@ pixi run -e dev pytest tests/cross_language -q
 The tests use fixed genotypes, phenotypes, covariates, and p-values from shared
 fixtures. They do not modify the R checkout or write output files. Missing
 numeric genotypes are checked under GAPIT's `Middle`, `Major`, and `Minor`
-imputation policies.
+imputation policies. VanRaden fixtures additionally cover extreme allele
+frequencies, rank-deficient markers, middle imputation, and the intentional
+all-monomorphic safety divergence from GAPIT 3.5's zero-over-zero result.
 
 Intentional divergences are kept explicit and tested. In particular, GAPIT
 accepts PCA covariates in `Blink()` but omits `CV1` when it calls
