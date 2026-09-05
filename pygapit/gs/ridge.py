@@ -5,7 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 
 from .._typing import FloatVector, Matrix, Vector, readonly_copy
-from .validation import _genotypes, _phenotype, _ridge_components
+from ._ridge import _finite_phenotype, _genotypes, _ridge_components
 
 
 @dataclass(frozen=True, slots=True)
@@ -38,7 +38,7 @@ def rrblup(
     unpenalized intercept. When ``lambda_`` is omitted, EMMA REML estimates
     delta from ``K = Z Z' / m`` and the marker penalty is ``m * delta``.
     """
-    y = _phenotype(phenotype)
+    y = _finite_phenotype(phenotype, minimum_samples=2)
     markers = _genotypes(genotype, len(y))
     gebv, prediction, intercept, effects, means, regularization = _ridge_components(
         y, markers, markers, lambda_

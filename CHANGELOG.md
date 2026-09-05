@@ -23,6 +23,9 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Fixed
 
+- Full-data RR-BLUP accepts two finite samples independently of the stricter
+  three-sample cross-validation contract; shared ridge fitting internals no
+  longer depend on the validation module.
 - Validate marker workspace budgets at every direct GLM/MLM public boundary,
   even when the genotype contains no variable markers to scan.
 - gBLUP CV now enforces the documented PSD kinship requirement with a

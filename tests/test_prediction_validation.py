@@ -8,6 +8,7 @@ from scipy.linalg import cho_factor as scipy_cho_factor
 import pygapit
 from pygapit import gs
 from pygapit._typing import FloatMatrix
+from pygapit.gs import _ridge as ridge_core
 from pygapit.gs import validation
 from pygapit.gs.validation import cross_validate_gblup, cross_validate_rrblup
 from pygapit.models.genomic_prediction import GBLUP, RR_BLUP
@@ -58,7 +59,7 @@ def test_canonical_rrblup_reports_full_fit_components(markers: int) -> None:
     expected_gebv = centered @ expected_effects
 
     assert fitted.intercept == pytest.approx(float(phenotype.mean()))
-    assert fitted.regularization == 2.5
+    assert fitted.regularization == pytest.approx(2.5)
     np.testing.assert_allclose(fitted.marker_means, genotype.mean(axis=0))
     np.testing.assert_allclose(fitted.effects, expected_effects, rtol=1e-11, atol=1e-11)
     np.testing.assert_allclose(fitted.gebv, expected_gebv, rtol=1e-11, atol=1e-11)
@@ -70,6 +71,28 @@ def test_canonical_rrblup_reports_full_fit_components(markers: int) -> None:
         fitted.prediction,
     ):
         assert not values.flags.writeable
+
+
+@pytest.mark.parametrize("lambda_", [2.5, None])
+def test_canonical_rrblup_accepts_two_samples(lambda_: float | None) -> None:
+    phenotype = np.array([1.0, 3.0])
+    genotype = np.array([[0.0, 2.0, 1.0], [2.0, 0.0, 1.0]])
+
+    fitted = pygapit.rrblup(phenotype, genotype, lambda_=lambda_)
+
+    assert np.all(np.isfinite(fitted.prediction))
+    assert np.all(np.isfinite(fitted.effects))
+    assert fitted.regularization > 0
+
+
+def test_rrblup_cv_still_requires_three_samples() -> None:
+    with pytest.raises(ValueError, match="at least three"):
+        cross_validate_rrblup(
+            np.array([1.0, 3.0]),
+            np.array([[0.0, 2.0], [2.0, 0.0]]),
+            n_folds=2,
+            lambda_=2.5,
+        )
 
 
 def test_rrblup_uses_cholesky_for_penalized_gram(
@@ -92,7 +115,7 @@ def test_rrblup_uses_cholesky_for_penalized_gram(
             check_finite=check_finite,
         )
 
-    monkeypatch.setattr(validation, "cho_factor", counting_factor)
+    monkeypatch.setattr(ridge_core, "cho_factor", counting_factor)
     rng = np.random.default_rng(73)
     result = cross_validate_rrblup(
         rng.normal(size=20),
