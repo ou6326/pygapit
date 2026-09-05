@@ -9,6 +9,7 @@ from .blup import (
     sblup,
     select_super_qtns,
 )
+from .ridge import RRBLUPResult, rrblup
 from .validation import (
     PredictionCVResult,
     cross_validate_gblup,
@@ -18,12 +19,14 @@ from .validation import (
 __all__ = [
     "GBLUPResult",
     "PredictionCVResult",
+    "RRBLUPResult",
     "SUPERSelectionResult",
     "cblup",
     "cross_validate_gblup",
     "cross_validate_rrblup",
     "gblup",
     "predict_new",
+    "rrblup",
     "sblup",
     "select_super_qtns",
 ]

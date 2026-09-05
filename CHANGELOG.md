@@ -8,6 +8,9 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Added
 
+- A canonical `rrblup()` full-data fit and immutable `RRBLUPResult` containing
+  marker means, effects, intercept, regularization, GEBV, and phenotype
+  prediction.
 - A validated `marker_workspace_mib` option for direct and top-level GLM/MLM
   scans, also available from the command line.
 - Fold-local RR-BLUP and gBLUP cross-validation APIs with seeded or grouped

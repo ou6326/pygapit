@@ -31,18 +31,17 @@ def RR_BLUP(
     EMMA REML with K = centered_Z @ centered_Z.T / m.
     Use cross_validate_rrblup for explicit folds, groups, seeds and OOF output.
     """
-    from ..gs.validation import (
-        _genotypes,
-        _phenotype,
-        _ridge_fit,
-        cross_validate_rrblup,
-    )
+    from ..gs.ridge import rrblup
+    from ..gs.validation import cross_validate_rrblup
 
-    y = _phenotype(phenotype)
-    z = _genotypes(genotype, len(y))
-    cv = cross_validate_rrblup(y, z, lambda_=lambda_, n_folds=n_folds)
-    gebv, _, _ = _ridge_fit(y, z, z, lambda_)
-    return gebv, cv.pearson_r
+    fitted = rrblup(phenotype, genotype, lambda_=lambda_)
+    cv = cross_validate_rrblup(
+        phenotype,
+        genotype,
+        lambda_=lambda_,
+        n_folds=n_folds,
+    )
+    return fitted.gebv, cv.pearson_r
 
 
 def GBLUP(

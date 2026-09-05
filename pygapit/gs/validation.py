@@ -200,13 +200,13 @@ def _solve_penalized_gram(
     return solution
 
 
-def _ridge_fit(
+def _ridge_components(
     y: FloatVector,
     train: FloatMatrix,
     test: FloatMatrix,
     lambda_: float | None,
-) -> tuple[FloatVector, FloatVector, float]:
-    """Return training GEBV, test phenotype prediction, and marker penalty."""
+) -> tuple[FloatVector, FloatVector, float, FloatVector, FloatVector, float]:
+    """Fit RR-BLUP and return predictions, coefficients, means, and penalty."""
     if lambda_ is not None and (not np.isfinite(lambda_) or lambda_ <= 0):
         raise ValueError("lambda_ must be finite and positive")
     counts = np.sum(~np.isnan(train), axis=0)
@@ -234,7 +234,30 @@ def _ridge_fit(
             sample_gram = z @ z.T
         dual = _solve_penalized_gram(sample_gram, centered_y, penalty)
         effects = z.T @ dual
-    return z @ effects, z_test @ effects + intercept, penalty
+    return (
+        z @ effects,
+        z_test @ effects + intercept,
+        intercept,
+        effects,
+        means,
+        penalty,
+    )
+
+
+def _ridge_fit(
+    y: FloatVector,
+    train: FloatMatrix,
+    test: FloatMatrix,
+    lambda_: float | None,
+) -> tuple[FloatVector, FloatVector, float]:
+    """Return training GEBV, test phenotype prediction, and marker penalty."""
+    gebv, prediction, _intercept, _effects, _means, penalty = _ridge_components(
+        y,
+        train,
+        test,
+        lambda_,
+    )
+    return gebv, prediction, penalty
 
 
 def cross_validate_rrblup(

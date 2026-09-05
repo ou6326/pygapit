@@ -39,6 +39,37 @@ def test_prediction_validation_is_exposed_by_public_namespaces() -> None:
     assert gs.cblup is pygapit.cblup
     assert gs.sblup is pygapit.sblup
     assert gs.select_super_qtns is pygapit.select_super_qtns
+    assert gs.RRBLUPResult is pygapit.RRBLUPResult
+    assert gs.rrblup is pygapit.rrblup
+
+
+@pytest.mark.parametrize("markers", [4, 40])
+def test_canonical_rrblup_reports_full_fit_components(markers: int) -> None:
+    rng = np.random.default_rng(20260905)
+    genotype = rng.normal(size=(17, markers)) + 2.0
+    phenotype = 20.0 + genotype[:, 0] + rng.normal(size=17)
+    fitted = pygapit.rrblup(phenotype, genotype, lambda_=2.5)
+
+    centered = genotype - genotype.mean(axis=0)
+    expected_effects = np.linalg.solve(
+        centered.T @ centered + 2.5 * np.eye(markers),
+        centered.T @ (phenotype - phenotype.mean()),
+    )
+    expected_gebv = centered @ expected_effects
+
+    assert fitted.intercept == pytest.approx(float(phenotype.mean()))
+    assert fitted.regularization == 2.5
+    np.testing.assert_allclose(fitted.marker_means, genotype.mean(axis=0))
+    np.testing.assert_allclose(fitted.effects, expected_effects, rtol=1e-11, atol=1e-11)
+    np.testing.assert_allclose(fitted.gebv, expected_gebv, rtol=1e-11, atol=1e-11)
+    np.testing.assert_allclose(fitted.prediction, fitted.intercept + fitted.gebv)
+    for values in (
+        fitted.marker_means,
+        fitted.effects,
+        fitted.gebv,
+        fitted.prediction,
+    ):
+        assert not values.flags.writeable
 
 
 def test_rrblup_uses_cholesky_for_penalized_gram(
@@ -115,10 +146,12 @@ def test_legacy_wrapper_uses_complete_fold_predictions(method: str) -> None:
     if method == "rr":
         result = cross_validate_rrblup(y, z, lambda_=3)
         gebv, accuracy = RR_BLUP(y, z, lambda_=3)
+        canonical = pygapit.rrblup(y, z, lambda_=3)
         centered = z - z.mean(axis=0)
         expected = centered @ np.linalg.solve(
             centered.T @ centered + 3 * np.eye(6), centered.T @ (y - y.mean())
         )
+        np.testing.assert_array_equal(gebv, canonical.gebv)
     else:
         from pygapit.gs.blup import gblup
 

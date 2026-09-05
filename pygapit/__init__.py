@@ -19,6 +19,7 @@ from .gs.blup import (
     sblup,
     select_super_qtns,
 )
+from .gs.ridge import RRBLUPResult, rrblup
 from .gs.validation import (
     PredictionCVResult,
     cross_validate_gblup,
@@ -75,6 +76,7 @@ __all__ = [
     "ModelRunResult",
     "PhenotypeData",
     "PredictionCVResult",
+    "RRBLUPResult",
     "SUPERSelectionResult",
     "align_inputs",
     "align_taxa",
@@ -109,6 +111,7 @@ __all__ = [
     "read_hapmap",
     "read_numeric",
     "read_phenotype",
+    "rrblup",
     "sblup",
     "select_super_qtns",
     "vanraden_kinship",
