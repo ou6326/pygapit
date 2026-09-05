@@ -86,7 +86,7 @@ def test_canonical_rrblup_accepts_two_samples(lambda_: float | None) -> None:
 
 
 def test_rrblup_cv_still_requires_three_samples() -> None:
-    with pytest.raises(ValueError, match="at least three"):
+    with pytest.raises(ValueError, match="at least 3"):
         cross_validate_rrblup(
             np.array([1.0, 3.0]),
             np.array([[0.0, 2.0], [2.0, 0.0]]),

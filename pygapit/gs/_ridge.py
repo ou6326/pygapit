@@ -22,9 +22,8 @@ __all__ = ["_finite_phenotype", "_genotypes", "_ridge_components", "_ridge_fit"]
 def _finite_phenotype(y: Vector, *, minimum_samples: int) -> FloatVector:
     result = as_float_vector(y, name="phenotype")
     if len(result) < minimum_samples or not np.all(np.isfinite(result)):
-        number = "two" if minimum_samples == 2 else "three"
         raise ValueError(
-            f"phenotype must contain at least {number} finite observations"
+            f"phenotype must contain at least {minimum_samples} finite observations"
         )
     return result
 
