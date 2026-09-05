@@ -12,6 +12,7 @@ import typing as t
 from dataclasses import dataclass
 
 import numpy as np
+from scipy.linalg import cho_factor, cho_solve
 
 from .._typing import (
     FloatMatrix,
@@ -183,6 +184,22 @@ def _genotypes(genotype: Matrix, n: int) -> FloatMatrix:
     return result
 
 
+def _solve_penalized_gram(
+    gram: FloatMatrix,
+    rhs: FloatVector,
+    penalty: float,
+) -> FloatVector:
+    """Solve a positive-penalty Gram system through its Cholesky factor."""
+    system = gram.copy()
+    system.flat[:: len(system) + 1] += penalty
+    try:
+        factor = cho_factor(system, lower=True, check_finite=False)
+        solution: FloatVector = cho_solve(factor, rhs, check_finite=False)
+    except np.linalg.LinAlgError:
+        solution = np.linalg.solve(system, rhs)
+    return solution
+
+
 def _ridge_fit(
     y: FloatVector,
     train: FloatMatrix,
@@ -203,15 +220,19 @@ def _ridge_fit(
     n, m = z.shape
     intercept = float(np.mean(y))
     centered_y = y - intercept
+    sample_gram: FloatMatrix | None = None
     if lambda_ is None:
-        fit = emma_remle(y, np.ones((n, 1)), z @ z.T / m)
+        sample_gram = z @ z.T
+        fit = emma_remle(y, np.ones((n, 1)), sample_gram / m)
         penalty = fit.delta * m
     else:
         penalty = lambda_
     if m <= n:
-        effects = np.linalg.solve(z.T @ z + penalty * np.eye(m), z.T @ centered_y)
+        effects = _solve_penalized_gram(z.T @ z, z.T @ centered_y, penalty)
     else:
-        dual = np.linalg.solve(z @ z.T + penalty * np.eye(n), centered_y)
+        if sample_gram is None:
+            sample_gram = z @ z.T
+        dual = _solve_penalized_gram(sample_gram, centered_y, penalty)
         effects = z.T @ dual
     return z @ effects, z_test @ effects + intercept, penalty
 
@@ -291,9 +312,18 @@ def cross_validate_gblup(
         kt = k[np.ix_(~test, ~test)]
         fit = emma_remle(yt, np.ones((len(yt), 1)), kt)
         penalties[fold] = fit.delta
-        solved = np.linalg.solve(
-            kt + fit.delta * np.eye(len(yt)), np.column_stack((yt, np.ones(len(yt))))
-        )
+        covariance = kt.copy()
+        covariance.flat[:: len(yt) + 1] += fit.delta
+        solve_rhs: FloatMatrix = np.column_stack((yt, np.ones(len(yt))))
+        try:
+            factor = cho_factor(covariance, lower=True, check_finite=False)
+            solved: FloatMatrix = cho_solve(
+                factor,
+                solve_rhs,
+                check_finite=False,
+            )
+        except np.linalg.LinAlgError:
+            solved = np.linalg.solve(covariance, solve_rhs)
         mean = float(np.sum(solved[:, 0]) / np.sum(solved[:, 1]))
         predictions[test] = mean + k[np.ix_(test, ~test)] @ (
             solved[:, 0] - mean * solved[:, 1]

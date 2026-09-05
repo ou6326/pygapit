@@ -3,7 +3,10 @@
 import numpy as np
 import pandas as pd
 import pytest
+from scipy.linalg import cho_factor as scipy_cho_factor
 
+from pygapit._typing import FloatMatrix
+from pygapit.gs import validation
 from pygapit.gs.validation import cross_validate_gblup, cross_validate_rrblup
 from pygapit.models.genomic_prediction import GBLUP, RR_BLUP
 
@@ -24,6 +27,72 @@ def test_rrblup_matches_augmented_ridge_equations(markers: int) -> None:
     np.testing.assert_allclose(result.predictions, expected, rtol=1e-11, atol=1e-11)
     assert np.bincount(result.fold_ids).tolist() == [4, 4, 3, 3, 3]
     np.testing.assert_allclose(result.rmse, np.sqrt(np.mean((y - expected) ** 2)))
+
+
+def test_rrblup_uses_cholesky_for_penalized_gram(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def counting_factor(
+        matrix: FloatMatrix,
+        lower: bool = False,
+        overwrite_a: bool = False,
+        check_finite: bool = True,
+    ):
+        nonlocal calls
+        calls += 1
+        return scipy_cho_factor(
+            matrix,
+            lower=lower,
+            overwrite_a=overwrite_a,
+            check_finite=check_finite,
+        )
+
+    monkeypatch.setattr(validation, "cho_factor", counting_factor)
+    rng = np.random.default_rng(73)
+    result = cross_validate_rrblup(
+        rng.normal(size=20),
+        rng.normal(size=(20, 40)),
+        n_folds=4,
+        lambda_=2.0,
+    )
+
+    assert calls == 4
+    assert np.all(np.isfinite(result.predictions))
+
+
+def test_gblup_uses_cholesky_for_fold_covariance(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    calls = 0
+
+    def counting_factor(
+        matrix: FloatMatrix,
+        lower: bool = False,
+        overwrite_a: bool = False,
+        check_finite: bool = True,
+    ):
+        nonlocal calls
+        calls += 1
+        return scipy_cho_factor(
+            matrix,
+            lower=lower,
+            overwrite_a=overwrite_a,
+            check_finite=check_finite,
+        )
+
+    monkeypatch.setattr(validation, "cho_factor", counting_factor)
+    rng = np.random.default_rng(91)
+    markers = rng.normal(size=(20, 8))
+    result = cross_validate_gblup(
+        rng.normal(size=20),
+        markers @ markers.T / markers.shape[1],
+        n_folds=4,
+    )
+
+    assert calls == 4
+    assert np.all(np.isfinite(result.predictions))
 
 
 @pytest.mark.parametrize("method", ["rr", "gb"])
