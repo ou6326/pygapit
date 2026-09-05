@@ -13,9 +13,15 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   per-fold regularization, Pearson correlation, and RMSE.
 - An equivalent-solve RR-BLUP benchmark comparing marker-space reference
   equations against dimension-adaptive solving.
+- Full-fit RR-BLUP R references for centering, intercept, marker effects and
+  GAPIT's BLUP component, plus automatic-REML constant-phenotype regressions.
 
 ### Fixed
 
+- gBLUP CV now enforces the documented PSD kinship requirement with a
+  scale-aware roundoff tolerance and a consistent symmetric copy.
+- CV grouping accepts Pandas object/string columns containing homogeneous,
+  non-missing string or integer IDs.
 - Standalone RR-BLUP and GBLUP validation now predicts every sample, including
   remainder samples when the sample count is not divisible by the fold count.
 - Standalone RR-BLUP estimates imputation means and REML penalties separately
@@ -27,6 +33,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Changed
 
+- Clarify the distinction between training-only RR-BLUP preprocessing and
+  gBLUP fitting over an externally supplied, possibly transductive kinship.
 - Standalone RR-BLUP solves in sample space when markers outnumber training
   samples, avoiding the marker-by-marker dense system.
 

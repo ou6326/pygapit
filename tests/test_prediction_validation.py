@@ -1,6 +1,7 @@
 """Statistical and split contracts for standalone genomic prediction."""
 
 import numpy as np
+import pandas as pd
 import pytest
 
 from pygapit.gs.validation import cross_validate_gblup, cross_validate_rrblup
@@ -150,3 +151,61 @@ def test_seeded_folds_ignore_global_rng_and_singleton_scores_are_nan() -> None:
     np.testing.assert_array_equal(first.fold_ids, second.fold_ids)
     np.testing.assert_array_equal(first.predictions, second.predictions)
     assert np.all(np.isnan(first.fold_pearson_r))
+
+
+def test_symmetric_indefinite_kinship_is_rejected_before_reml() -> None:
+    k = np.eye(12)
+    k[0, 0] = -1
+    with pytest.raises(ValueError, match="positive semidefinite"):
+        cross_validate_gblup(np.arange(12.0), k, n_folds=3)
+
+
+@pytest.mark.parametrize("scale", [1e-4, 1.0, 1e4])
+def test_rank_deficient_kinship_tolerates_roundoff_and_preserves_input(
+    scale: float,
+) -> None:
+    k = scale * (np.eye(12) - np.ones((12, 12)) / 12)
+    k -= scale * np.finfo(float).eps * np.eye(12)
+    original = k.copy()
+    result = cross_validate_gblup(np.arange(12.0), k, n_folds=3)
+    assert np.all(np.isfinite(result.predictions))
+    np.testing.assert_array_equal(k, original)
+
+
+@pytest.mark.parametrize("kind", ["object", "string", "Int64"])
+def test_pandas_group_labels_match_numpy_splits(kind: str) -> None:
+    labels = np.repeat(np.arange(6), 2)
+    y = np.arange(12.0)
+    z = np.arange(36.0).reshape(12, 3)
+    series = pd.Series(labels if kind == "Int64" else labels.astype(str), dtype=kind)
+    expected = cross_validate_rrblup(y, z, groups=labels, n_folds=3, lambda_=1, seed=8)
+    actual = cross_validate_rrblup(y, z, groups=series, n_folds=3, lambda_=1, seed=8)
+    np.testing.assert_array_equal(actual.fold_ids, expected.fold_ids)
+    np.testing.assert_array_equal(actual.predictions, expected.predictions)
+
+
+@pytest.mark.parametrize("bad", [None, np.nan, pd.NA, ["nested"], 1.5])
+def test_invalid_object_groups_are_rejected(bad: object) -> None:
+    groups = np.array(["a", "a", "b", "b", "c", "c"], dtype=object)
+    groups[0] = bad
+    with pytest.raises(ValueError, match="groups"):
+        cross_validate_rrblup(np.arange(6.0), np.ones((6, 2)), groups=groups, n_folds=3)
+
+
+@pytest.mark.parametrize("method", ["rr", "gb"])
+@pytest.mark.parametrize("constant_markers", [False, True])
+def test_constant_phenotype_with_automatic_reml(
+    method: str, constant_markers: bool
+) -> None:
+    rng = np.random.default_rng(82)
+    z = np.ones((12, 4)) if constant_markers else rng.normal(size=(12, 4))
+    y = np.full(12, 3.0)
+    result = (
+        cross_validate_rrblup(y, z, n_folds=3)
+        if method == "rr"
+        else cross_validate_gblup(y, z @ z.T, n_folds=3)
+    )
+    assert np.all(np.isfinite(result.predictions))
+    assert np.isnan(result.pearson_r)
+    np.testing.assert_allclose(result.predictions, y, atol=1e-12)
+    assert result.rmse < 1e-12

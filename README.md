@@ -333,10 +333,26 @@ intercept and variance components in each fold, treating the supplied kinship
 as fixed. Do not supply a kinship constructed using held-out phenotype-based
 marker selection. This API does not evaluate cBLUP/sBLUP selection pipelines.
 
+For gBLUP, "fold-local" describes model fitting over the fixed supplied
+kinship. If its allele frequencies or centering were estimated from all
+genotypes, held-out genotype information participated in preprocessing
+(a transductive evaluation), even without phenotype leakage. Strict inductive
+evaluation requires training-only preprocessing and construction of both
+training kinship and test-to-training kinship in each fold. The precomputed-K
+API cannot reconstruct that pipeline; RR-BLUP provides training-only marker
+preprocessing directly.
+
+gBLUP checks the full kinship for positive semidefiniteness once before fitting.
+It uses a symmetric copy and accepts negative eigenvalues only within
+`eps * n * max(spectral_radius, 1)`, allowing numerical roundoff in rank-deficient
+kinships. It rejects materially indefinite matrices and preserves caller data.
+
 With `seed=None`, ungrouped folds follow input order. An integer seed shuffles
-samples; grouped splits balance group sizes without splitting groups. Explicit
-integer `fold_ids` override `n_folds` and cannot be combined with `groups` or
-`seed`. Every sample receives one prediction; every training fold needs at
+samples; grouped splits balance group sizes without splitting groups.
+Groups can be NumPy arrays or Pandas Series, including object/string columns
+containing non-missing strings or integers. Mixed object ID types and missing
+IDs are rejected. Explicit integer `fold_ids` override `n_folds` and cannot be
+combined with `groups` or `seed`. Every sample receives one prediction; every training fold needs at
 least two samples. Constant vectors and singleton test folds have undefined
 Pearson correlation (`NaN`), while RMSE remains available. Results own read-only
 copies of their arrays; save the fold IDs to reproduce an exact split.
@@ -346,6 +362,13 @@ retain their `(training_gebv, cv_correlation)` return shape and now use this
 validation machinery. RR-BLUP fits an unpenalized intercept and returns GEBV
 without it, correcting its previous uncentered behavior. The canonical
 `pygapit.gblup` result and top-level GAPIT prediction contract are unchanged.
+
+Full-fit tests independently check centering, the intercept, and marker effects
+against augmented mixed-model equations in R with GAPIT's REML estimator,
+covering fixed/estimated penalties and both solver dimensions. The returned
+centered GEBV also matches the BLUP component of bundled GAPIT.EMMAxP3D for
+the same centered kernel; adding the intercept matches its BLUE + BLUP output.
+This is not a claim of direct `rrBLUP::mixed.solve` package parity.
 
 RR-BLUP uses `K = Z_centered @ Z_centered.T / m` and `lambda = m * delta`,
 consistent with its marker-effect parameterization; see

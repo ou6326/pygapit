@@ -1,12 +1,14 @@
 """Fold-local genomic prediction with explicit out-of-fold results.
 
 RR-BLUP uses y = intercept + Z b + e, K = Z Z' / m and lambda = m * delta.
-See Endelman (2011), doi:10.3835/plantgenome2011.08.0024. Marker means
-and variance components are learned on training samples only.
+See Endelman (2011), doi:10.3835/plantgenome2011.08.0024. RR-BLUP learns
+marker means and variance components on training samples only. gBLUP fits
+each training fold over a fixed, externally supplied kinship.
 """
 
 from __future__ import annotations
 
+import typing as t
 from dataclasses import dataclass
 
 import numpy as np
@@ -68,7 +70,7 @@ def _folds(
     n: int,
     n_folds: object,
     seed: int | None,
-    groups: Vector | None,
+    groups: object | None,
     fold_ids: Vector | None,
 ) -> IntVector:
     if fold_ids is not None:
@@ -98,7 +100,23 @@ def _folds(
                 result[test] = fold
         else:
             labels = np.asarray(groups)
-            if labels.shape != (n,) or labels.dtype.kind not in "iuUS":
+            if labels.shape == (n,) and labels.dtype.kind == "O":
+                values = t.cast(list[object], labels.tolist())
+                string_ids = all(isinstance(value, str) for value in values)
+                integer_ids = all(
+                    isinstance(value, (int, np.integer))
+                    and not isinstance(value, (bool, np.bool_))
+                    for value in values
+                )
+                if not (string_ids or integer_ids):
+                    raise ValueError(
+                        "groups must contain non-missing strings or integers of one kind"
+                    )
+                # Keep integers as objects to avoid overflow or rounding large IDs.
+                # np.unique can sort homogeneous object integers without coercion.
+                if string_ids:
+                    labels = np.asarray(values, dtype=str)
+            elif labels.shape != (n,) or labels.dtype.kind not in "iuUS":
                 raise ValueError(
                     "groups must be an integer or string vector, one per sample"
                 )
@@ -204,15 +222,16 @@ def cross_validate_rrblup(
     *,
     n_folds: int = 5,
     seed: int | None = None,
-    groups: Vector | None = None,
+    groups: object | None = None,
     fold_ids: Vector | None = None,
     lambda_: float | None = None,
 ) -> PredictionCVResult:
     """Validate RR-BLUP with fold-local imputation, centering and REML.
 
     With seed=None, ungrouped folds are contiguous and deterministic. A seed
-    shuffles samples (or group tie order). Groups never cross folds. Explicit
-    integer fold_ids override n_folds and cannot be combined with groups/seed.
+    shuffles samples (or group tie order). Groups never cross folds.
+    Groups may be NumPy arrays or Pandas Series of non-missing strings/integers.
+    Explicit integer fold_ids override n_folds and cannot be combined with groups/seed.
     A supplied positive lambda is fixed by the caller; otherwise each training
     fold estimates its own value. Missing phenotypes must be removed by callers.
     """
@@ -235,7 +254,7 @@ def cross_validate_gblup(
     *,
     n_folds: int = 5,
     seed: int | None = None,
-    groups: Vector | None = None,
+    groups: object | None = None,
     fold_ids: Vector | None = None,
 ) -> PredictionCVResult:
     """Validate intercept-only gBLUP, estimating REML and GLS mean per fold.
@@ -243,13 +262,26 @@ def cross_validate_gblup(
     Kinship must be a finite symmetric positive-semidefinite matrix built
     without phenotype-based selection. It is treated as a fixed input: this
     API cannot undo leakage introduced when constructing a supplied kinship.
+    Full-dataset genotype centering in that input is transductive preprocessing,
+    not strict training-only preprocessing, even without phenotype leakage.
     Split options follow cross_validate_rrblup. No full-data fallback is used.
+    The full kinship is checked once using a symmetric copy; negative
+    eigenvalues within eps * n * max(spectral_radius, 1) are treated as roundoff.
     """
     y = _phenotype(phenotype)
     k = as_float_matrix(kinship, name="kinship matrix")
     require_square(k, size=len(y), name="kinship matrix")
     if not np.all(np.isfinite(k)) or not np.allclose(k, k.T, rtol=1e-10, atol=1e-12):
         raise ValueError("kinship must be finite and symmetric")
+    # Check the full matrix once: acceptable principal submatrices alone do not
+    # guarantee a valid covariance between training and test individuals.
+    # Use the same symmetric copy for validation and every subsequent solve.
+    k = k * 0.5 + k.T * 0.5
+    eigenvalues = np.linalg.eigvalsh(k)
+    scale = max(float(np.max(np.abs(eigenvalues))), 1.0)
+    tolerance = np.finfo(float).eps * len(y) * scale
+    if eigenvalues[0] < -tolerance:
+        raise ValueError("kinship must be positive semidefinite")
     ids = _folds(len(y), n_folds, seed, groups, fold_ids)
     predictions = np.empty(len(y))
     penalties = np.empty(int(ids.max()) + 1)
