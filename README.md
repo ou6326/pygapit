@@ -434,7 +434,7 @@ The main supported GAPIT-style parameters are:
 | `PCA.total` | `PCA_total` | `3` | Number of PCs as covariates |
 | `maf.threshold` | `maf_threshold` | `0.05` | Minimum MAF filter |
 | `SNP.impute` | `SNP_impute` | `"middle"` | Missing genotype imputation |
-| — | `marker_workspace_mib` | `32.0` | Target MiB for one temporary GLM/MLM marker-work matrix |
+| — | `marker_workspace_mib` | `32.0` | Target MiB for one temporary marker-work matrix |
 | `file.output` | `file_output` | `True` | Write result files |
 | `cutOff` | `cutOff` | Bonferroni | Significance threshold |
 | `LD` | `LD` | `0.7` | LD threshold for BLINK pruning |
@@ -460,10 +460,10 @@ during BLINK candidate selection. Multiple-analysis plots join models by SNP,
 chromosome, and position before drawing them on a shared genomic axis; they are
 written only when `file_output=True`.
 
-`marker_workspace_mib` currently controls the batches used by direct GLM and
-MLM scans and by their top-level `GAPIT()` paths, including the MLM scan reused
-by sBLUP. MLM whitens genotype markers one batch at a time instead of creating
-a second full transformed-genotype matrix. The setting bounds one principal
+`marker_workspace_mib` controls batches used by VanRaden kinship construction
+and by direct and top-level GLM/MLM scans, including the MLM scan reused by
+sBLUP. VanRaden accumulates centered marker cross-products by batch, while MLM
+whitens genotype markers one batch at a time. The setting bounds one principal
 sample-by-marker workspace, not total process memory: the input genotype,
 kinship, PCA, result arrays, and native BLAS allocations remain outside it.
 Very small budgets still process at least one marker.
@@ -513,7 +513,10 @@ from pygapit import (
 )
 
 # Compute kinship
-K = vanraden_kinship(GD_array)  # (n, n) VanRaden matrix
+K = vanraden_kinship(
+    GD_array,
+    marker_workspace_mib=32.0,
+)  # (n, n) VanRaden matrix
 
 # PCA for structure control
 pca = compute_pca(GD_array, n_components=3)

@@ -14,6 +14,11 @@ import warnings
 
 import numpy as np
 
+from .._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    marker_batch_size,
+    validate_marker_workspace_mib,
+)
 from .._typing import FloatMatrix, as_float_matrix, require_square
 
 
@@ -37,7 +42,11 @@ def vanraden_factor(GD: FloatMatrix) -> FloatMatrix:
     return centered / t.cast(np.float64, np.sqrt(adjustment))
 
 
-def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
+def vanraden_kinship(
+    GD: FloatMatrix,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> FloatMatrix:
     """
     Compute genomic relationship matrix using VanRaden (2009) method.
     Direct translation of GAPIT.kinship.VanRaden.R
@@ -45,6 +54,7 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
     Parameters
     ----------
     GD : (n_individuals, n_snps) genotype matrix, coded 0/1/2
+    marker_workspace_mib : target MiB for one centered marker batch
 
     Returns
     -------
@@ -52,6 +62,7 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
         K[i,i] ~ 1 for outbred, > 1 for inbred
         K[i,j] > 0 = more related than average
     """
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     GD = as_float_matrix(GD, name="genotype matrix")
     n = GD.shape[0]
 
@@ -62,14 +73,24 @@ def vanraden_kinship(GD: FloatMatrix) -> FloatMatrix:
         warnings.warn("All SNPs are monomorphic; returning identity matrix.")
         return np.eye(n)
 
-    frequencies = frequencies[valid]
-    centered = GD[:, valid]
-    centered -= 2.0 * frequencies
+    valid_indices = np.flatnonzero(valid)
+    frequencies = frequencies[valid_indices]
 
-    # ── Compute K = Z_c' Z_c / adj ───────────────────────────────────────
-    # Note: R uses crossprod(Z, Z) where Z is TRANSPOSED first
-    # In Python: centered is (n, m), so K = centered @ centered.T
-    K = centered @ centered.T
+    # ── Compute K = Z_c' Z_c / adj in marker batches ────────────────────
+    # R uses crossprod(Z, Z) after transposing markers into rows. Accumulate
+    # the equivalent sample-space cross-product without retaining all of Z.
+    batch_size = marker_batch_size(
+        n,
+        marker_workspace_mib,
+        max_markers=len(valid_indices),
+    )
+    K: FloatMatrix = np.zeros((n, n), dtype=np.float64)
+    for start in range(0, len(valid_indices), batch_size):
+        stop = start + batch_size
+        indices = valid_indices[start:stop]
+        centered = GD[:, indices]
+        centered -= 2.0 * frequencies[start:stop]
+        K += centered @ centered.T
 
     # Adjustment factor: 2 * sum(p_j * (1 - p_j))
     adj = 2.0 * np.sum(frequencies * (1.0 - frequencies))

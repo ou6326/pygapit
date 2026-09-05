@@ -12,7 +12,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   marker means, effects, intercept, regularization, GEBV, and phenotype
   prediction.
 - A validated `marker_workspace_mib` option for direct and top-level GLM/MLM
-  scans, also available from the command line.
+  scans and VanRaden kinship construction, also available from the command
+  line.
 - Fold-local RR-BLUP and gBLUP cross-validation APIs with seeded or grouped
   splits, explicit fold assignments, immutable out-of-fold predictions,
   per-fold regularization, Pearson correlation, and RMSE.

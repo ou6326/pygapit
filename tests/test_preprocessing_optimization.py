@@ -6,6 +6,7 @@ import numpy as np
 import pytest
 
 from pygapit.io.formats import impute_missing
+from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import compute_pca
 
 
@@ -77,3 +78,17 @@ def test_mean_imputation_matches_column_means_and_all_missing_fallback() -> None
     expected = np.asarray([[0.0, 1.5, 1.0], [2.0, 1.0, 1.0], [1.0, 2.0, 1.0]])
     np.testing.assert_allclose(result, expected)
     assert np.isnan(genotype).any()
+
+
+def test_batched_vanraden_matches_full_centered_crossproduct() -> None:
+    rng = np.random.default_rng(20260905)
+    genotype = rng.binomial(2, 0.35, size=(40, 257)).astype(np.float64)
+    frequencies = genotype.mean(axis=0) / 2.0
+    valid = (frequencies > 0.0) & (frequencies < 1.0)
+    centered = genotype[:, valid] - 2.0 * frequencies[valid]
+    adjustment = 2.0 * np.sum(frequencies[valid] * (1.0 - frequencies[valid]))
+    expected = centered @ centered.T / adjustment
+
+    actual = vanraden_kinship(genotype, marker_workspace_mib=0.001)
+
+    np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)

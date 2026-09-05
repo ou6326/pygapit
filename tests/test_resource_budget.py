@@ -9,6 +9,7 @@ from pygapit._resources import marker_batch_size, validate_marker_workspace_mib
 from pygapit.gwas.glm import glm_gwas
 from pygapit.gwas.mlm import mlm_gwas
 from pygapit.stats.emma import emmax_p3d
+from pygapit.stats.kinship import vanraden_kinship
 
 
 @pytest.mark.parametrize("value", [0.0, -1.0, np.inf, np.nan])
@@ -59,5 +60,17 @@ def test_direct_scan_boundaries_always_validate_workspace(value: object) -> None
             design,
             genotype,
             kinship,
+            marker_workspace_mib=invalid,
+        )
+
+
+@pytest.mark.parametrize("value", [0.0, -1.0, np.inf, np.nan, True])
+def test_vanraden_always_validates_workspace(value: object) -> None:
+    invalid = t.cast(float, value)
+    error = TypeError if isinstance(value, bool) else ValueError
+
+    with pytest.raises(error, match="marker_workspace_mib"):
+        vanraden_kinship(
+            np.ones((8, 3), dtype=np.float64),
             marker_workspace_mib=invalid,
         )

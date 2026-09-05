@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from benchmarks.run_baseline import _benchmark, _make_data
+from pygapit._resources import DEFAULT_MARKER_WORKSPACE_MIB
 from pygapit.io.formats import impute_missing, read_hapmap, read_numeric
 from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import compute_pca
@@ -68,6 +69,7 @@ def run_preprocessing_benchmark(
     seed: int,
     warmups: int,
     repeats: int,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> dict[str, object]:
     """Run a deterministic preprocessing workload."""
     if not 0.0 <= missing_rate < 1.0:
@@ -101,7 +103,13 @@ def run_preprocessing_benchmark(
             ("impute_middle", lambda: impute_missing(genotype_missing, "middle")),
             ("impute_mean", lambda: impute_missing(genotype_missing, "mean")),
             ("pca", lambda: compute_pca(genotype, n_components=3)),
-            ("vanraden_kinship", lambda: vanraden_kinship(genotype)),
+            (
+                "vanraden_kinship",
+                lambda: vanraden_kinship(
+                    genotype,
+                    marker_workspace_mib=marker_workspace_mib,
+                ),
+            ),
         )
         results = [
             _benchmark(name, operation, warmups=warmups, repeats=repeats)
@@ -116,6 +124,7 @@ def run_preprocessing_benchmark(
             "seed": seed,
             "warmups": warmups,
             "repeats": repeats,
+            "marker_workspace_mib": marker_workspace_mib,
         },
         "measurements": [asdict(result) for result in results],
         "memory_note": (
@@ -133,6 +142,11 @@ def main() -> None:
     parser.add_argument("--seed", type=int, default=20260905)
     parser.add_argument("--warmups", type=int, default=1)
     parser.add_argument("--repeats", type=int, default=3)
+    parser.add_argument(
+        "--marker-workspace-mib",
+        type=float,
+        default=DEFAULT_MARKER_WORKSPACE_MIB,
+    )
     parser.add_argument("--output", type=Path)
     args = parser.parse_args()
 
@@ -143,6 +157,7 @@ def main() -> None:
         seed=args.seed,
         warmups=args.warmups,
         repeats=args.repeats,
+        marker_workspace_mib=args.marker_workspace_mib,
     )
     rendered = json.dumps(report, indent=2)
     if args.output is None:

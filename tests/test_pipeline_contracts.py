@@ -233,10 +233,17 @@ def test_trait_preparation_cache_respects_observed_taxa(
         pca_calls += 1
         return compute_pca(GD, n_components=n_components, maf_filter=maf_filter)
 
-    def counting_kinship(GD: FloatMatrix) -> FloatMatrix:
+    def counting_kinship(
+        GD: FloatMatrix,
+        *,
+        marker_workspace_mib: float = 32.0,
+    ) -> FloatMatrix:
         nonlocal kinship_calls
         kinship_calls += 1
-        return vanraden_kinship(GD)
+        return vanraden_kinship(
+            GD,
+            marker_workspace_mib=marker_workspace_mib,
+        )
 
     monkeypatch.setattr("pygapit.gapit.compute_pca", counting_pca)
     monkeypatch.setattr("pygapit.gapit.vanraden_kinship", counting_kinship)
@@ -254,6 +261,36 @@ def test_trait_preparation_cache_respects_observed_taxa(
     assert set(result) == {"height_GLM", "yield_GLM"}
     assert pca_calls == expected_calls
     assert kinship_calls == expected_calls
+
+
+def test_gapits_forwards_workspace_budget_to_vanraden(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phenotype, genotype, marker_map = _inputs()
+    budgets: list[float] = []
+
+    def recording_kinship(
+        GD: FloatMatrix,
+        *,
+        marker_workspace_mib: float = 32.0,
+    ) -> FloatMatrix:
+        budgets.append(marker_workspace_mib)
+        return np.eye(len(GD), dtype=np.float64)
+
+    monkeypatch.setattr("pygapit.gapit.vanraden_kinship", recording_kinship)
+    GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.0,
+        marker_workspace_mib=0.001,
+        file_output=False,
+    )
+
+    assert budgets == [0.001]
 
 
 @pytest.mark.parametrize(

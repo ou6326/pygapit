@@ -396,6 +396,7 @@ def GAPIT(
             PCA_total,
             maf_threshold,
             normalized_kinship_algorithm,
+            marker_workspace_mib,
             cache=prepared_cache,
         )
         if prepared is None:
@@ -856,6 +857,7 @@ def _prepare_trait(
     pca_total: int,
     maf_threshold: float,
     kinship_algorithm: str,
+    marker_workspace_mib: float,
     cache: dict[tuple[int, ...], PreparedGenotype] | None = None,
 ) -> PreparedTrait | None:
     """Prepare the taxa, markers, kinship, PCA, and design for one trait."""
@@ -896,10 +898,13 @@ def _prepare_trait(
         print("[pyGAPIT] Using provided kinship matrix")
     else:
         print(f"[pyGAPIT] Computing {kinship_algorithm} kinship...")
-        kinship_function = (
-            vanraden_kinship if kinship_algorithm == "VanRaden" else zhang_kinship
-        )
-        kinship = kinship_function(filtered_genotypes)
+        if kinship_algorithm == "VanRaden":
+            kinship = vanraden_kinship(
+                filtered_genotypes,
+                marker_workspace_mib=marker_workspace_mib,
+            )
+        else:
+            kinship = zhang_kinship(filtered_genotypes)
 
     print(f"[pyGAPIT] Computing PCA (k={pca_total})...")
     pca_result = compute_pca(filtered_genotypes, n_components=pca_total)
