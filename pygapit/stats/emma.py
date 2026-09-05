@@ -24,6 +24,7 @@ from scipy.optimize import brentq
 from scipy.special import stdtr
 from scipy.stats import t as t_dist
 
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, marker_batch_size
 from .._typing import (
     BoolVector,
     FloatMatrix,
@@ -37,17 +38,18 @@ from .._typing import (
 from ..io.formats import impute_missing
 
 _EMMAX_MARKER_BATCH_SIZE = 4096
-_EMMAX_MARKER_BATCH_TARGET_BYTES = 32 * 1024**2
-_FLOAT64_BYTES = 8
 
 
-def _emmax_marker_batch_size(n_individuals: int) -> int:
+def _emmax_marker_batch_size(
+    n_individuals: int,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> int:
     """Bound transformed marker work arrays to roughly 32 MiB."""
-    memory_limited_size = max(
-        1,
-        _EMMAX_MARKER_BATCH_TARGET_BYTES // (n_individuals * _FLOAT64_BYTES),
+    return marker_batch_size(
+        n_individuals,
+        marker_workspace_mib,
+        max_markers=_EMMAX_MARKER_BATCH_SIZE,
     )
-    return min(_EMMAX_MARKER_BATCH_SIZE, memory_limited_size)
 
 
 @dataclass(frozen=True, slots=True)
@@ -636,6 +638,7 @@ def emmax_p3d(
     snp_impute: str = "middle",
     Z: FloatMatrix | None = None,
     spectrum: EMMASpectrum | None = None,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GWASResult:
     """
     EMMAxP3D: genome-wide association using EMMA with P3D approximation.
@@ -654,6 +657,7 @@ def emmax_p3d(
     snp_impute : missing-genotype policy; GAPIT defaults to ``"middle"``
     Z  : optional (n, t) incidence matrix for random effects
     spectrum : optional phenotype-independent residual spectrum to reuse
+    marker_workspace_mib : target size of one temporary marker-work matrix
 
     Returns
     -------
@@ -698,19 +702,20 @@ def emmax_p3d(
     # For the ordinary MLM path, a Cholesky solve avoids a second full
     # eigendecomposition after REML.  Retain the spectral construction as a
     # fallback for covariance matrices that are not numerically positive definite.
+    covariance_factor: FloatMatrix | None = None
+    transformed_basis: FloatMatrix | None = None
     if incidence is None:
         null_covariance: FloatMatrix = (K + K.T) / 2.0
         null_covariance = null_covariance.copy()
         null_covariance.flat[:: n + 1] += delta
         try:
-            covariance_factor: FloatMatrix = np.linalg.cholesky(null_covariance)
+            covariance_factor = np.linalg.cholesky(null_covariance)
         except np.linalg.LinAlgError:
             lambda_L, U_L = _eigen_L_wo_Z(K)
             lambda_L = np.maximum(lambda_L, 0)
             transformed_basis = U_L * (1.0 / np.sqrt(lambda_L + delta))
             Uty: FloatVector = transformed_basis.T @ y
             UtX0: FloatMatrix = transformed_basis.T @ X0
-            UtGD: FloatMatrix = transformed_basis.T @ GD
         else:
             Uty = solve_triangular(
                 covariance_factor,
@@ -724,12 +729,6 @@ def emmax_p3d(
                 lower=True,
                 check_finite=False,
             )
-            UtGD = solve_triangular(
-                covariance_factor,
-                GD,
-                lower=True,
-                check_finite=False,
-            )
     else:
         lambda_L, U_L = _eigen_L_w_Z(incidence, K)
         lambda_L = np.maximum(lambda_L, 0)  # numerical stability
@@ -740,7 +739,6 @@ def emmax_p3d(
         transformed_basis = U_L * scale
         Uty = transformed_basis.T @ y
         UtX0 = transformed_basis.T @ X0
-        UtGD = transformed_basis.T @ GD
 
     # ── Step 3: Test each SNP ─────────────────────────────────────────────
     q1 = q0 + 1
@@ -760,12 +758,24 @@ def emmax_p3d(
     if len(complete_marker_indices) > 0:
         null_solver: FloatMatrix = np.linalg.pinv(UtX0)
         transformed_y_residual: FloatVector = Uty - UtX0 @ (null_solver @ Uty)
-        batch_size = _emmax_marker_batch_size(n)
+        batch_size = _emmax_marker_batch_size(n, marker_workspace_mib)
         for batch_start in range(0, len(complete_marker_indices), batch_size):
             marker_indices = complete_marker_indices[
                 batch_start : batch_start + batch_size
             ]
-            transformed_markers = UtGD[:, marker_indices]
+            raw_markers: FloatMatrix = GD[:, marker_indices]
+            transformed_markers: FloatMatrix
+            if covariance_factor is not None:
+                transformed_markers = solve_triangular(
+                    covariance_factor,
+                    raw_markers,
+                    lower=True,
+                    check_finite=False,
+                )
+            else:
+                if transformed_basis is None:
+                    raise RuntimeError("P3D whitening basis was not initialized")
+                transformed_markers = transformed_basis.T @ raw_markers
             residualized = transformed_markers - UtX0 @ (
                 null_solver @ transformed_markers
             )
@@ -779,8 +789,8 @@ def emmax_p3d(
 
             residualized_y: FloatVector = residualized.T @ transformed_y_residual
             stable_ss = residualized_ss[stable]
-            marker_effects = residualized_y[stable] / stable_ss
-            marker_se = np.sqrt(vg / stable_ss)
+            marker_effects: FloatVector = residualized_y[stable] / stable_ss
+            marker_se: FloatVector = np.sqrt(vg / stable_ss)
             stable_se = marker_se >= 1e-12
             p_values[marker_indices[stable][~stable_se]] = 1.0
             if not stable_se.any():
@@ -789,7 +799,7 @@ def emmax_p3d(
             marker_rows = marker_indices[stable][stable_se]
             marker_effects = marker_effects[stable_se]
             marker_se = marker_se[stable_se]
-            marker_stats = marker_effects / marker_se
+            marker_stats: FloatVector = marker_effects / marker_se
             marker_p_values: FloatVector = np.asarray(
                 2.0 * stdtr(df, -np.abs(marker_stats)),
                 dtype=np.float64,

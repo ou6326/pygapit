@@ -924,8 +924,8 @@ class TestModelContracts:
         assert len(result.selected_qtns) > 0
         assert 0.0 <= result.h2 <= 1.0
 
-    def test_cli_advertises_top_level_sblup(self) -> None:
-        """CLI choices must match the models accepted by GAPIT()."""
+    def test_cli_advertises_supported_models_and_workspace_budget(self) -> None:
+        """CLI options must match the controls accepted by GAPIT()."""
         completed = subprocess.run(
             [
                 sys.executable,
@@ -940,6 +940,7 @@ class TestModelContracts:
 
         assert completed.returncode == 0
         assert "sBLUP" in completed.stdout
+        assert "--marker_workspace_mib" in completed.stdout
 
 
 # ─────────────────────────────────────────────────────────────────────────────

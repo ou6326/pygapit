@@ -178,14 +178,11 @@ def test_reward_full_rank_path_computes_one_pseudoinverse(
     assert pinv_calls == 1
 
 
-def test_reward_batch_size_respects_memory_budget(
-    monkeypatch: pytest.MonkeyPatch,
-) -> None:
-    monkeypatch.setattr(glm_module, "_MARKER_BATCH_TARGET_BYTES", 560)
-    monkeypatch.setattr(glm_module, "_MARKER_BATCH_SIZE", 4096)
+def test_reward_batch_size_respects_memory_budget() -> None:
+    workspace_mib = 560 / 1024**2
 
-    assert glm_module._marker_batch_size(10) == 7
-    assert glm_module._marker_batch_size(1000) == 1
+    assert glm_module._marker_batch_size(10, workspace_mib) == 7
+    assert glm_module._marker_batch_size(1000, workspace_mib) == 1
 
 
 def test_glm_marker_batches_preserve_results(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -196,8 +193,7 @@ def test_glm_marker_batches_preserve_results(monkeypatch: pytest.MonkeyPatch) ->
     X0: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
 
     expected = glm_module.glm_gwas(y, X0, GD)
-    monkeypatch.setattr(glm_module, "_MARKER_BATCH_SIZE", 7)
-    actual = glm_module.glm_gwas(y, X0, GD)
+    actual = glm_module.glm_gwas(y, X0, GD, marker_workspace_mib=0.001)
 
     np.testing.assert_allclose(actual.p_values, expected.p_values, rtol=1e-12)
     np.testing.assert_allclose(actual.effects, expected.effects, rtol=1e-12)

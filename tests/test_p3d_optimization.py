@@ -70,12 +70,42 @@ def test_emmax_cholesky_fallback_matches_spectral_whitening() -> None:
 
 
 def test_emmax_marker_batches_respect_memory_target() -> None:
-    n_individuals = 1_000_000
-    batch_size = emma._emmax_marker_batch_size(n_individuals)
+    n_individuals = 1_000
+    workspace_mib = 8.0
+    batch_size = emma._emmax_marker_batch_size(n_individuals, workspace_mib)
 
     assert batch_size >= 1
     assert batch_size <= emma._EMMAX_MARKER_BATCH_SIZE
-    assert (
-        batch_size * n_individuals * emma._FLOAT64_BYTES
-        <= emma._EMMAX_MARKER_BATCH_TARGET_BYTES
+    assert batch_size * n_individuals * 8 <= workspace_mib * 1024**2
+
+
+def test_emmax_marker_workspace_preserves_results() -> None:
+    rng = np.random.default_rng(20260905)
+    genotype = rng.binomial(2, 0.35, size=(30, 50)).astype(np.float64)
+    design = np.ones((30, 1), dtype=np.float64)
+    phenotype = genotype[:, :3] @ np.array([0.7, -0.4, 0.2])
+    phenotype += rng.normal(0.0, 0.5, size=30)
+    kinship = np.eye(30, dtype=np.float64)
+
+    expected = emma.emmax_p3d(phenotype, design, genotype, kinship)
+    actual = emma.emmax_p3d(
+        phenotype,
+        design,
+        genotype,
+        kinship,
+        marker_workspace_mib=0.001,
     )
+
+    for actual_values, expected_values in (
+        (actual.p_values, expected.p_values),
+        (actual.effects, expected.effects),
+        (actual.se, expected.se),
+        (actual.stats, expected.stats),
+    ):
+        np.testing.assert_allclose(
+            actual_values,
+            expected_values,
+            rtol=1e-12,
+            atol=1e-12,
+            equal_nan=True,
+        )

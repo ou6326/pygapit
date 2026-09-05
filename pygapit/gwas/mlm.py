@@ -19,6 +19,7 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB
 from .._typing import FloatMatrix, FloatVector, readonly_copy
 from ..stats.emma import (
     EMMAFixedBasis,
@@ -53,6 +54,8 @@ def mlm_gwas(
     K: FloatMatrix,
     ngrids: int = 100,
     spectrum: EMMASpectrum | None = None,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> MLMResult:
     """
     MLM genome-wide association using EMMA + P3D.
@@ -69,7 +72,15 @@ def mlm_gwas(
     -------
     MLMResult with p_values, effects, vg, ve, h2
     """
-    result = emmax_p3d(y, X0, GD, K, ngrids=ngrids, spectrum=spectrum)
+    result = emmax_p3d(
+        y,
+        X0,
+        GD,
+        K,
+        ngrids=ngrids,
+        spectrum=spectrum,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     return MLMResult(
         p_values=result.p_values,
         effects=result.effects,

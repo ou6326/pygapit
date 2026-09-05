@@ -16,6 +16,7 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import stdtr
 
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, marker_batch_size
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -27,18 +28,19 @@ from .._typing import (
 )
 
 _MARKER_BATCH_SIZE = 4096
-_MARKER_BATCH_TARGET_BYTES = 32 * 1024**2
 _REWARD_MAX_BASE_CONDITION = np.finfo(np.float64).eps ** -0.25
-_FLOAT64_BYTES = 8
 
 
-def _marker_batch_size(n_individuals: int) -> int:
+def _marker_batch_size(
+    n_individuals: int,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> int:
     """Bound a marker-work matrix while retaining large BLAS batches."""
-    memory_limited_size = max(
-        1,
-        _MARKER_BATCH_TARGET_BYTES // (n_individuals * _FLOAT64_BYTES),
+    return marker_batch_size(
+        n_individuals,
+        marker_workspace_mib,
+        max_markers=_MARKER_BATCH_SIZE,
     )
-    return min(_MARKER_BATCH_SIZE, memory_limited_size)
 
 
 @dataclass(frozen=True, slots=True)
@@ -55,7 +57,10 @@ class GLMResult:
 
 
 def _ols_vectorized(
-    y: FloatVector, X0: FloatMatrix, GD: FloatMatrix
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> tuple[FloatVector, FloatVector, FloatVector, FloatVector]:
     """
     Vectorized OLS test for all m SNPs simultaneously.
@@ -83,7 +88,7 @@ def _ols_vectorized(
     t_stats = np.zeros(m)
     p_values = np.ones(m)
 
-    batch_size = _marker_batch_size(n)
+    batch_size = _marker_batch_size(n, marker_workspace_mib)
     for batch_start in range(0, m, batch_size):
         batch_stop = min(batch_start + batch_size, m)
         marker_values = GD[:, batch_start:batch_stop]
@@ -122,6 +127,8 @@ def glm_gwas(
     y: FloatVector,
     X0: FloatMatrix,
     GD: FloatMatrix,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GLMResult:
     """
     GLM genome-wide association scan.
@@ -132,6 +139,7 @@ def glm_gwas(
     y  : (n,) phenotype (no missing values)
     X0 : (n, q) covariate matrix — intercept + PCs + user CVs
     GD : (n, m) genotype matrix, 0/1/2 coded
+    marker_workspace_mib : target size of one temporary marker-work matrix
 
     Returns
     -------
@@ -159,7 +167,12 @@ def glm_gwas(
     except np.linalg.LinAlgError:
         r2_null = 0.0
 
-    effects, se, t_stats, p_values = _ols_vectorized(y, X0, GD)
+    effects, se, t_stats, p_values = _ols_vectorized(
+        y,
+        X0,
+        GD,
+        marker_workspace_mib,
+    )
 
     return GLMResult(
         p_values=p_values,

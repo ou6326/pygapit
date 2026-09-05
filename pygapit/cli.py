@@ -102,6 +102,12 @@ Examples:
         choices=["middle", "major", "minor", "mean", "none"],
         help="Missing genotype imputation method (default: middle)",
     )
+    qc_group.add_argument(
+        "--marker_workspace_mib",
+        type=float,
+        default=32.0,
+        help="Target MiB for one GLM/MLM marker workspace (default: 32)",
+    )
 
     # GWAS thresholds
     thresh_group = parser.add_argument_group("Significance thresholds")
@@ -244,6 +250,7 @@ Examples:
         PCA_total=args.PCA_total,
         maf_threshold=args.maf_threshold,
         SNP_impute=args.SNP_impute,
+        marker_workspace_mib=args.marker_workspace_mib,
         cutOff=args.cutOff,
         LD=args.LD,
         maxLoop=args.maxLoop,

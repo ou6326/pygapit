@@ -25,6 +25,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
+from ._resources import DEFAULT_MARKER_WORKSPACE_MIB, validate_marker_workspace_mib
 from ._typing import (
     Array,
     FloatMatrix,
@@ -274,6 +275,7 @@ def GAPIT(
     p_threshold: float | None = None,  # R: p.threshold (multi-locus)
     FDRcut: bool = False,  # R: filter BLINK pseudo-QTNs by an FDR cutoff
     LD: float = 0.7,  # LD threshold for BLINK
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
     # ── CMLM parameters ─────────────────────────────────────────────────
     group_from: int = 1,  # R: group.from
     group_to: int | None = None,  # R: group.to
@@ -352,6 +354,7 @@ def GAPIT(
         super_qtn_counts=super_qtn_counts,
         h2=h2,
         NQTN=NQTN,
+        marker_workspace_mib=marker_workspace_mib,
     )
     t_start = time.time()
 
@@ -426,6 +429,7 @@ def GAPIT(
                     prepared.genotypes,
                     prepared.kinship,
                     spectrum,
+                    marker_workspace_mib,
                 )
 
             result = _run_model(
@@ -448,6 +452,7 @@ def GAPIT(
                 super_qtn_counts=super_qtn_counts,
                 mlm_spectrum=spectrum,
                 mlm_scan=shared_mlm_scan,
+                marker_workspace_mib=marker_workspace_mib,
             )
 
             elapsed = time.time() - t_model
@@ -558,6 +563,7 @@ def _validate_analysis_options(
     super_qtn_counts: Sequence[int] | None,
     h2: float | None,
     NQTN: int | None,
+    marker_workspace_mib: float,
 ) -> None:
     """Reject invalid numerical options before loading or analyzing data."""
     if PCA_total < 0:
@@ -593,6 +599,7 @@ def _validate_analysis_options(
         raise ValueError("h2 must be greater than 0 and at most 1")
     if NQTN is not None and NQTN < 1:
         raise ValueError("NQTN must be at least 1")
+    validate_marker_workspace_mib(marker_workspace_mib)
 
 
 def _select_traits(trait_names: list[str], trait: str | int | None) -> tuple[str, ...]:
@@ -1034,17 +1041,25 @@ def _run_model(
     super_qtn_counts: Sequence[int] | None,
     mlm_spectrum: EMMASpectrum | None = None,
     mlm_scan: ModelRunResult | None = None,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> ModelRunResult:
     """Dispatch to the correct GWAS/GS model."""
     m = GD.shape[1]
     p_thresh = p_threshold or (1.0 / m)
 
     if model_name == "GLM":
-        r = glm_gwas(y, X0, GD)
+        r = glm_gwas(y, X0, GD, marker_workspace_mib=marker_workspace_mib)
         return ModelRunResult(r.p_values, r.effects, r.se)
 
     elif model_name == "MLM":
-        return mlm_scan or _run_mlm_scan(y, X0, GD, K, mlm_spectrum)
+        return mlm_scan or _run_mlm_scan(
+            y,
+            X0,
+            GD,
+            K,
+            mlm_spectrum,
+            marker_workspace_mib,
+        )
 
     elif model_name == "CMLM":
         n = len(y)
@@ -1115,7 +1130,14 @@ def _run_model(
         )
 
     elif model_name == "SBLUP":
-        scan = mlm_scan or _run_mlm_scan(y, X0, GD, K, mlm_spectrum)
+        scan = mlm_scan or _run_mlm_scan(
+            y,
+            X0,
+            GD,
+            K,
+            mlm_spectrum,
+            marker_workspace_mib,
+        )
         selection = select_super_qtns(
             y,
             X0,
@@ -1152,9 +1174,17 @@ def _run_mlm_scan(
     GD: FloatMatrix,
     K: FloatMatrix,
     spectrum: EMMASpectrum | None,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> ModelRunResult:
     """Run and normalize the MLM scan shared by MLM and sBLUP."""
-    result = mlm_gwas(y, X0, GD, K, spectrum=spectrum)
+    result = mlm_gwas(
+        y,
+        X0,
+        GD,
+        K,
+        spectrum=spectrum,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     return ModelRunResult(
         result.p_values,
         result.effects,

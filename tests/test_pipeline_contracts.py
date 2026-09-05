@@ -80,6 +80,10 @@ def test_invalid_numeric_options_fail_before_input_loading() -> None:
         GAPIT(super_bin_size=0)
     with pytest.raises(ValueError, match="super_qtn_counts"):
         GAPIT(super_qtn_counts=[])
+    with pytest.raises(ValueError, match="marker_workspace_mib"):
+        GAPIT(marker_workspace_mib=0.0)
+    with pytest.raises(TypeError, match="marker_workspace_mib"):
+        GAPIT(marker_workspace_mib=True)
     with pytest.raises(ValueError, match="provided together"):
         GAPIT(h2=0.5)
 
