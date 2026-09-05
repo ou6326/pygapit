@@ -460,13 +460,14 @@ during BLINK candidate selection. Multiple-analysis plots join models by SNP,
 chromosome, and position before drawing them on a shared genomic axis; they are
 written only when `file_output=True`.
 
-`marker_workspace_mib` controls batches used by VanRaden kinship construction
-and by direct and top-level GLM/MLM scans, including the MLM scan reused by
-sBLUP. VanRaden accumulates centered marker cross-products by batch, while MLM
-whitens genotype markers one batch at a time. The setting bounds one principal
-sample-by-marker workspace, not total process memory: the input genotype,
-kinship, PCA, result arrays, and native BLAS allocations remain outside it.
-Very small budgets still process at least one marker.
+`marker_workspace_mib` controls batches used by wide-matrix PCA, VanRaden
+kinship construction, and direct and top-level GLM/MLM scans, including the MLM
+scan reused by sBLUP. PCA and VanRaden accumulate sample-space cross-products
+without retaining a second full centered genotype matrix, while MLM whitens
+markers one batch at a time. The setting bounds one principal sample-by-marker
+workspace, not total process memory: the input genotype, sample-space matrices,
+result arrays, and native BLAS allocations remain outside it. Very small
+budgets still process at least one marker.
 
 ---
 
@@ -519,7 +520,11 @@ K = vanraden_kinship(
 )  # (n, n) VanRaden matrix
 
 # PCA for structure control
-pca = compute_pca(GD_array, n_components=3)
+pca = compute_pca(
+    GD_array,
+    n_components=3,
+    marker_workspace_mib=32.0,
+)
 X0 = build_covariate_matrix(pca, n_pcs=3)
 
 # REML variance components

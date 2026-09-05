@@ -228,10 +228,17 @@ def test_trait_preparation_cache_respects_observed_taxa(
         GD: FloatMatrix,
         n_components: int = 3,
         maf_filter: float = 0.05,
+        *,
+        marker_workspace_mib: float = 32.0,
     ) -> PCAResult:
         nonlocal pca_calls
         pca_calls += 1
-        return compute_pca(GD, n_components=n_components, maf_filter=maf_filter)
+        return compute_pca(
+            GD,
+            n_components=n_components,
+            maf_filter=maf_filter,
+            marker_workspace_mib=marker_workspace_mib,
+        )
 
     def counting_kinship(
         GD: FloatMatrix,
@@ -267,17 +274,34 @@ def test_gapits_forwards_workspace_budget_to_vanraden(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     phenotype, genotype, marker_map = _inputs()
-    budgets: list[float] = []
+    kinship_budgets: list[float] = []
+    pca_budgets: list[float] = []
 
     def recording_kinship(
         GD: FloatMatrix,
         *,
         marker_workspace_mib: float = 32.0,
     ) -> FloatMatrix:
-        budgets.append(marker_workspace_mib)
+        kinship_budgets.append(marker_workspace_mib)
         return np.eye(len(GD), dtype=np.float64)
 
+    def recording_pca(
+        GD: FloatMatrix,
+        n_components: int = 3,
+        maf_filter: float = 0.05,
+        *,
+        marker_workspace_mib: float = 32.0,
+    ) -> PCAResult:
+        pca_budgets.append(marker_workspace_mib)
+        return compute_pca(
+            GD,
+            n_components=n_components,
+            maf_filter=maf_filter,
+            marker_workspace_mib=marker_workspace_mib,
+        )
+
     monkeypatch.setattr("pygapit.gapit.vanraden_kinship", recording_kinship)
+    monkeypatch.setattr("pygapit.gapit.compute_pca", recording_pca)
     GAPIT(
         Y=phenotype,
         GD=genotype,
@@ -290,7 +314,8 @@ def test_gapits_forwards_workspace_budget_to_vanraden(
         file_output=False,
     )
 
-    assert budgets == [0.001]
+    assert kinship_budgets == [0.001]
+    assert pca_budgets == [0.001]
 
 
 @pytest.mark.parametrize(

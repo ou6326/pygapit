@@ -5,9 +5,10 @@ from __future__ import annotations
 import numpy as np
 import pytest
 
+from pygapit.gwas.glm import glm_gwas
 from pygapit.io.formats import impute_missing
 from pygapit.stats.kinship import vanraden_kinship
-from pygapit.stats.pca import compute_pca
+from pygapit.stats.pca import build_covariate_matrix, compute_pca
 
 
 @pytest.mark.parametrize("shape", [(40, 120), (120, 40)])
@@ -92,3 +93,58 @@ def test_batched_vanraden_matches_full_centered_crossproduct() -> None:
     actual = vanraden_kinship(genotype, marker_workspace_mib=0.001)
 
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
+
+
+def test_batched_wide_pca_matches_single_batch() -> None:
+    rng = np.random.default_rng(20260906)
+    genotype = rng.binomial(2, 0.35, size=(40, 257)).astype(np.float64)
+
+    expected = compute_pca(
+        genotype,
+        n_components=4,
+        maf_filter=0.0,
+        marker_workspace_mib=32.0,
+    )
+    actual = compute_pca(
+        genotype,
+        n_components=4,
+        maf_filter=0.0,
+        marker_workspace_mib=0.001,
+    )
+
+    np.testing.assert_allclose(actual.eigenvalues, expected.eigenvalues, rtol=1e-12)
+    np.testing.assert_allclose(
+        actual.var_explained,
+        expected.var_explained,
+        rtol=1e-12,
+    )
+    np.testing.assert_allclose(
+        actual.scores @ actual.scores.T,
+        expected.scores @ expected.scores.T,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+    np.testing.assert_allclose(
+        actual.loadings @ actual.loadings.T,
+        expected.loadings @ expected.loadings.T,
+        rtol=1e-10,
+        atol=1e-11,
+    )
+
+    phenotype = genotype[:, 0] + rng.normal(size=len(genotype))
+    expected_scan = glm_gwas(
+        phenotype,
+        build_covariate_matrix(expected, 4),
+        genotype,
+    )
+    actual_scan = glm_gwas(
+        phenotype,
+        build_covariate_matrix(actual, 4),
+        genotype,
+    )
+    np.testing.assert_allclose(
+        actual_scan.p_values,
+        expected_scan.p_values,
+        rtol=1e-10,
+        atol=1e-12,
+    )

@@ -16,7 +16,7 @@ import numpy as np
 
 from .._resources import (
     DEFAULT_MARKER_WORKSPACE_MIB,
-    marker_batch_size,
+    iter_marker_slices,
     validate_marker_workspace_mib,
 )
 from .._typing import FloatMatrix, as_float_matrix, require_square
@@ -79,18 +79,17 @@ def vanraden_kinship(
     # ── Compute K = Z_c' Z_c / adj in marker batches ────────────────────
     # R uses crossprod(Z, Z) after transposing markers into rows. Accumulate
     # the equivalent sample-space cross-product without retaining all of Z.
-    batch_size = marker_batch_size(
-        n,
-        marker_workspace_mib,
-        max_markers=len(valid_indices),
-    )
     K: FloatMatrix = np.zeros((n, n), dtype=np.float64)
-    for start in range(0, len(valid_indices), batch_size):
-        stop = start + batch_size
-        indices = valid_indices[start:stop]
+    for marker_slice in iter_marker_slices(
+        n,
+        len(valid_indices),
+        marker_workspace_mib,
+    ):
+        indices = valid_indices[marker_slice]
         centered = GD[:, indices]
-        centered -= 2.0 * frequencies[start:stop]
+        centered -= 2.0 * frequencies[marker_slice]
         K += centered @ centered.T
+        del centered
 
     # Adjustment factor: 2 * sum(p_j * (1 - p_j))
     adj = 2.0 * np.sum(frequencies * (1.0 - frequencies))

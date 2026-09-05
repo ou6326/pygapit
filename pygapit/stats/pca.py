@@ -14,6 +14,11 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.linalg import eigh as scipy_eigh
 
+from .._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    iter_marker_slices,
+    validate_marker_workspace_mib,
+)
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -39,6 +44,8 @@ def compute_pca(
     GD: FloatMatrix,
     n_components: int = 3,
     maf_filter: float = 0.05,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> PCAResult:
     """
     Compute principal components from genotype matrix.
@@ -49,11 +56,13 @@ def compute_pca(
     GD : (n_individuals, n_snps) genotype matrix, 0/1/2 coded
     n_components : number of PCs to return (PCA.total parameter in GAPIT)
     maf_filter : minimum MAF for SNPs used in PCA
+    marker_workspace_mib : target MiB for one centered marker batch
 
     Returns
     -------
     PCAResult with scores, loadings, variance explained
     """
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     GD = as_float_matrix(GD, name="genotype matrix")
     n, _m = GD.shape
     if n < 2:
@@ -68,22 +77,29 @@ def compute_pca(
     if valid_snps.sum() < n_components:
         valid_snps = maf > 0  # relax if too few pass filter
 
-    GD_centered = GD[:, valid_snps]
-
-    # ── Center each SNP as in R's prcomp(scale. = FALSE) ────────────────
-    col_means = GD_centered.mean(axis=0)
-    GD_centered -= col_means
-
     # ── Leading singular triplets through the smaller Gram matrix ───────
-    k = min(n_components, min(GD_centered.shape))
-    marker_count = GD_centered.shape[1]
-    total_var: np.float64 = np.einsum("ij,ij->", GD_centered, GD_centered) / (n - 1)
+    valid_indices = np.flatnonzero(valid_snps)
+    marker_count = len(valid_indices)
+    col_means = 2.0 * freq[valid_indices]
+    k = min(n_components, n, marker_count)
     if k == 0:
         scores = np.empty((n, 0), dtype=np.float64)
         loadings = np.empty((marker_count, 0), dtype=np.float64)
         eigenvalues = np.empty(0, dtype=np.float64)
+        total_var = np.float64(0.0)
     elif n <= marker_count:
-        gram: FloatMatrix = GD_centered @ GD_centered.T
+        gram: FloatMatrix = np.zeros((n, n), dtype=np.float64)
+        for marker_slice in iter_marker_slices(
+            n,
+            marker_count,
+            marker_workspace_mib,
+        ):
+            centered = GD[:, valid_indices[marker_slice]]
+            centered -= col_means[marker_slice]
+            gram += centered @ centered.T
+            del centered
+        wide_total_sum: np.float64 = np.trace(gram)
+        total_var = wide_total_sum / (n - 1)
         gram_values, left_vectors = scipy_eigh(
             gram,
             subset_by_index=(n - k, n - 1),
@@ -95,11 +111,28 @@ def compute_pca(
         scores = left_vectors * singular_values
         loadings = np.zeros((marker_count, k), dtype=np.float64)
         nonzero = singular_values > np.finfo(np.float64).eps * singular_values[0]
-        loadings[:, nonzero] = (
-            GD_centered.T @ left_vectors[:, nonzero]
-        ) / singular_values[nonzero]
+        safe_singular_values = np.where(nonzero, singular_values, 1.0)
+        for marker_slice in iter_marker_slices(
+            n,
+            marker_count,
+            marker_workspace_mib,
+        ):
+            centered = GD[:, valid_indices[marker_slice]]
+            centered -= col_means[marker_slice]
+            batch_loadings = (centered.T @ left_vectors) / safe_singular_values
+            batch_loadings[:, ~nonzero] = 0.0
+            loadings[marker_slice] = batch_loadings
+            del centered, batch_loadings
         eigenvalues = gram_values / (n - 1)
     else:
+        GD_centered = GD[:, valid_indices]
+        GD_centered -= col_means
+        tall_total_sum: np.float64 = np.einsum(
+            "ij,ij->",
+            GD_centered,
+            GD_centered,
+        )
+        total_var = tall_total_sum / (n - 1)
         gram = GD_centered.T @ GD_centered
         gram_values, loadings = scipy_eigh(
             gram,

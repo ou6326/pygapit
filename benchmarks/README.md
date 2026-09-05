@@ -25,6 +25,14 @@ internally by native BLAS libraries and should not be presented as whole-process
 peak RSS. The script deliberately remains outside the regular pytest and CI
 suites so noisy machine-dependent timings cannot fail correctness checks.
 
+The preprocessing benchmark also accepts `--marker-workspace-mib` for wide
+PCA and VanRaden. On the development Windows machine (Python 3.12.14, NumPy
+2.5.2; 500 individuals, 50,000 markers; one warm-up, three repetitions), PCA
+before batching measured 0.198 s / 197.36 MiB traced peak. The equivalent
+32 MiB batched path measured 0.227 s / 21.02 MiB, while a 1 MiB budget measured
+0.304 s / 6.39 MiB. These workload-specific values document the memory/runtime
+trade-off and are not CI thresholds.
+
 ## Hotspot profiles
 
 After recording a baseline, use deterministic profiler scenarios to separate

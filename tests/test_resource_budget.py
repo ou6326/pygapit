@@ -5,11 +5,16 @@ import typing as t
 import numpy as np
 import pytest
 
-from pygapit._resources import marker_batch_size, validate_marker_workspace_mib
+from pygapit._resources import (
+    iter_marker_slices,
+    marker_batch_size,
+    validate_marker_workspace_mib,
+)
 from pygapit.gwas.glm import glm_gwas
 from pygapit.gwas.mlm import mlm_gwas
 from pygapit.stats.emma import emmax_p3d
 from pygapit.stats.kinship import vanraden_kinship
+from pygapit.stats.pca import compute_pca
 
 
 @pytest.mark.parametrize("value", [0.0, -1.0, np.inf, np.nan])
@@ -28,6 +33,13 @@ def test_marker_batch_size_respects_budget_and_cap() -> None:
     assert marker_batch_size(100, 1.0) == 1_310
     assert marker_batch_size(10, 32.0) == 4_096
     assert marker_batch_size(1_000_000, 1.0) == 1
+
+
+def test_marker_slices_cover_each_marker_with_shared_batch_sizing() -> None:
+    slices = list(iter_marker_slices(100, 3_000, 1.0))
+
+    assert slices == [slice(0, 1_310), slice(1_310, 2_620), slice(2_620, 3_000)]
+    assert list(iter_marker_slices(100, 0, 1.0)) == []
 
 
 @pytest.mark.parametrize("value", [0.0, -1.0, np.inf, np.nan, True])
@@ -71,6 +83,11 @@ def test_vanraden_always_validates_workspace(value: object) -> None:
 
     with pytest.raises(error, match="marker_workspace_mib"):
         vanraden_kinship(
+            np.ones((8, 3), dtype=np.float64),
+            marker_workspace_mib=invalid,
+        )
+    with pytest.raises(error, match="marker_workspace_mib"):
+        compute_pca(
             np.ones((8, 3), dtype=np.float64),
             marker_workspace_mib=invalid,
         )

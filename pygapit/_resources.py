@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from collections.abc import Iterator
 from numbers import Real
 
 import numpy as np
@@ -40,3 +41,22 @@ def marker_batch_size(
         target_bytes // (n_individuals * _FLOAT64_BYTES),
     )
     return min(max_markers, memory_limited_size)
+
+
+def iter_marker_slices(
+    n_individuals: int,
+    n_markers: int,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+    *,
+    max_markers: int = MAX_MARKERS_PER_BATCH,
+) -> Iterator[slice]:
+    """Yield contiguous marker slices sized for one float64 workspace."""
+    if isinstance(n_markers, bool) or n_markers < 0:
+        raise ValueError("n_markers must be non-negative")
+    batch_size = marker_batch_size(
+        n_individuals,
+        marker_workspace_mib,
+        max_markers=max_markers,
+    )
+    for start in range(0, n_markers, batch_size):
+        yield slice(start, min(start + batch_size, n_markers))

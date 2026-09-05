@@ -106,7 +106,7 @@ Examples:
         "--marker_workspace_mib",
         type=float,
         default=32.0,
-        help="Target MiB for one GLM/MLM marker workspace (default: 32)",
+        help="Target MiB for one marker workspace (default: 32)",
     )
 
     # GWAS thresholds

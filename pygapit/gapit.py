@@ -907,7 +907,11 @@ def _prepare_trait(
             kinship = zhang_kinship(filtered_genotypes)
 
     print(f"[pyGAPIT] Computing PCA (k={pca_total})...")
-    pca_result = compute_pca(filtered_genotypes, n_components=pca_total)
+    pca_result = compute_pca(
+        filtered_genotypes,
+        n_components=pca_total,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     extra_covariates = (
         aligned.covariates[valid_indices] if aligned.covariates is not None else None
     )

@@ -102,7 +102,14 @@ def run_preprocessing_benchmark(
             ("read_hapmap", lambda: read_hapmap(hapmap_path, impute_method="mean")),
             ("impute_middle", lambda: impute_missing(genotype_missing, "middle")),
             ("impute_mean", lambda: impute_missing(genotype_missing, "mean")),
-            ("pca", lambda: compute_pca(genotype, n_components=3)),
+            (
+                "pca",
+                lambda: compute_pca(
+                    genotype,
+                    n_components=3,
+                    marker_workspace_mib=marker_workspace_mib,
+                ),
+            ),
             (
                 "vanraden_kinship",
                 lambda: vanraden_kinship(
