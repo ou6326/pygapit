@@ -33,6 +33,11 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Changed
 
+- Expose canonical genomic prediction fits and validation APIs consistently
+  from both `pygapit` and `pygapit.gs`, while retaining the uppercase
+  standalone functions as compatibility wrappers.
+- Use Cholesky solves for positive-penalty RR-BLUP and gBLUP validation
+  systems, with a general-solve fallback for numerical failures.
 - Clarify the distinction between training-only RR-BLUP preprocessing and
   gBLUP fitting over an externally supplied, possibly transductive kinship.
 - Standalone RR-BLUP solves in sample space when markers outnumber training

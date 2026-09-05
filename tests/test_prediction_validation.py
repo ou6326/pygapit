@@ -5,6 +5,8 @@ import pandas as pd
 import pytest
 from scipy.linalg import cho_factor as scipy_cho_factor
 
+import pygapit
+from pygapit import gs
 from pygapit._typing import FloatMatrix
 from pygapit.gs import validation
 from pygapit.gs.validation import cross_validate_gblup, cross_validate_rrblup
@@ -27,6 +29,16 @@ def test_rrblup_matches_augmented_ridge_equations(markers: int) -> None:
     np.testing.assert_allclose(result.predictions, expected, rtol=1e-11, atol=1e-11)
     assert np.bincount(result.fold_ids).tolist() == [4, 4, 3, 3, 3]
     np.testing.assert_allclose(result.rmse, np.sqrt(np.mean((y - expected) ** 2)))
+
+
+def test_prediction_validation_is_exposed_by_public_namespaces() -> None:
+    assert gs.PredictionCVResult is pygapit.PredictionCVResult
+    assert gs.cross_validate_rrblup is pygapit.cross_validate_rrblup
+    assert gs.cross_validate_gblup is pygapit.cross_validate_gblup
+    assert gs.gblup is pygapit.gblup
+    assert gs.cblup is pygapit.cblup
+    assert gs.sblup is pygapit.sblup
+    assert gs.select_super_qtns is pygapit.select_super_qtns
 
 
 def test_rrblup_uses_cholesky_for_penalized_gram(

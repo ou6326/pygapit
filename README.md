@@ -301,7 +301,22 @@ print(result.Pred)
 
 ---
 
-## Prediction cross-validation (1.3 development)
+## Genomic prediction interfaces
+
+The prediction API has three distinct layers:
+
+- `GAPIT(...)` is the aligned end-to-end GWAS and genomic-selection workflow.
+- `gblup`, `cblup`, and `sblup` are canonical full-data fits; they are exported
+  from both `pygapit` and `pygapit.gs` and return typed result objects.
+- `cross_validate_rrblup` and `cross_validate_gblup` perform fold-local
+  validation and return every out-of-fold prediction and fold metric.
+
+The uppercase `pygapit.models.genomic_prediction.RR_BLUP` and `GBLUP`
+functions remain compatibility wrappers with their historical
+`(training_gebv, cv_correlation)` return shape. New code should use the typed
+fit and validation interfaces above.
+
+### Prediction cross-validation
 
 Evaluate prediction on held-out samples independently of the full-data
 `GAPIT(...).Pred` fit:
