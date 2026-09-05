@@ -24,7 +24,11 @@ from scipy.optimize import brentq
 from scipy.special import stdtr
 from scipy.stats import t as t_dist
 
-from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, marker_batch_size
+from .._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    marker_batch_size,
+    validate_marker_workspace_mib,
+)
 from .._typing import (
     BoolVector,
     FloatMatrix,
@@ -663,6 +667,7 @@ def emmax_p3d(
     -------
     GWASResult with p_values, effects, se, stats, vg, ve, h2
     """
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
     GD = as_float_matrix(GD, name="genotype matrix")

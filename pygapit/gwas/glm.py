@@ -16,7 +16,11 @@ from dataclasses import dataclass
 import numpy as np
 from scipy.special import stdtr
 
-from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, marker_batch_size
+from .._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    marker_batch_size,
+    validate_marker_workspace_mib,
+)
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -145,6 +149,7 @@ def glm_gwas(
     -------
     GLMResult with p_values, effects, se, t_stats for all m SNPs
     """
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
     GD = as_float_matrix(GD, name="genotype matrix")

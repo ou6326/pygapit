@@ -19,7 +19,7 @@ import numpy as np
 from scipy.cluster.hierarchy import fcluster, linkage
 from scipy.spatial.distance import pdist
 
-from .._resources import DEFAULT_MARKER_WORKSPACE_MIB
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, validate_marker_workspace_mib
 from .._typing import FloatMatrix, FloatVector, readonly_copy
 from ..stats.emma import (
     EMMAFixedBasis,
@@ -72,6 +72,7 @@ def mlm_gwas(
     -------
     MLMResult with p_values, effects, vg, ve, h2
     """
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     result = emmax_p3d(
         y,
         X0,

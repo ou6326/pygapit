@@ -20,6 +20,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Fixed
 
+- Validate marker workspace budgets at every direct GLM/MLM public boundary,
+  even when the genotype contains no variable markers to scan.
 - gBLUP CV now enforces the documented PSD kinship requirement with a
   scale-aware roundoff tolerance and a consistent symmetric copy.
 - CV grouping accepts Pandas object/string columns containing homogeneous,
