@@ -10,8 +10,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 - A chunk-readable `GenotypeStore` contract with in-memory, NumPy memory-mapped,
   and optional HDF5 backends. Unified open/write functions select an available
-  disk backend automatically; VanRaden kinship and PCA consume each without
-  implicitly materializing a disk-backed genotype matrix.
+  disk backend automatically; VanRaden kinship, PCA, and direct GLM scans
+  consume each without implicitly materializing a disk-backed genotype matrix.
 
 ## [1.2.3] - 2026-09-06
 

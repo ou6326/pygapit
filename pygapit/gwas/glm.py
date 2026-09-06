@@ -30,6 +30,7 @@ from .._typing import (
     readonly_copy,
     require_row_count,
 )
+from ..io.storage import GenotypeStore, as_genotype_store
 
 _MARKER_BATCH_SIZE = 4096
 _REWARD_MAX_BASE_CONDITION = np.finfo(np.float64).eps ** -0.25
@@ -63,7 +64,7 @@ class GLMResult:
 def _ols_vectorized(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> tuple[FloatVector, FloatVector, FloatVector, FloatVector]:
     """
@@ -74,7 +75,8 @@ def _ols_vectorized(
     Returns (effects, se, t_stats, p_values)
     """
     n, q0 = X0.shape
-    m = GD.shape[1]
+    genotype = as_genotype_store(GD)
+    m = genotype.shape[1]
     df = n - q0 - 1
 
     # ── Project y and GD onto null space of X0 ───────────────────────────
@@ -95,7 +97,7 @@ def _ols_vectorized(
     batch_size = _marker_batch_size(n, marker_workspace_mib)
     for batch_start in range(0, m, batch_size):
         batch_stop = min(batch_start + batch_size, m)
-        marker_values = GD[:, batch_start:batch_stop]
+        marker_values = genotype.read_markers(slice(batch_start, batch_stop))
         residualized = marker_values - X0 @ (null_solver @ marker_values)
         residualized_ss: FloatVector = np.einsum("ij,ij->j", residualized, residualized)
         valid = residualized_ss > 1e-10
@@ -130,7 +132,7 @@ def _ols_vectorized(
 def glm_gwas(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     *,
     marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GLMResult:
@@ -142,7 +144,7 @@ def glm_gwas(
     ----------
     y  : (n,) phenotype (no missing values)
     X0 : (n, q) covariate matrix — intercept + PCs + user CVs
-    GD : (n, m) genotype matrix, 0/1/2 coded
+    GD : (n, m) genotype matrix or chunk-readable store, 0/1/2 coded
     marker_workspace_mib : target size of one temporary marker-work matrix
 
     Returns
@@ -152,10 +154,11 @@ def glm_gwas(
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
-    GD = as_float_matrix(GD, name="genotype matrix")
+    genotype = as_genotype_store(GD)
     n = len(y)
     require_row_count(X0, n, name="covariate matrix")
-    require_row_count(GD, n, name="genotype matrix")
+    if genotype.shape[0] != n:
+        raise ValueError(f"genotype matrix must have {n} rows; got {genotype.shape[0]}")
     if X0.shape[1] == 0:
         raise ValueError("covariate matrix must contain at least one column")
     if n <= X0.shape[1] + 1:
@@ -175,7 +178,7 @@ def glm_gwas(
     effects, se, t_stats, p_values = _ols_vectorized(
         y,
         X0,
-        GD,
+        genotype,
         marker_workspace_mib,
     )
 

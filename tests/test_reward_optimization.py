@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 from scipy.stats import t as t_dist
 
@@ -13,6 +14,38 @@ from pygapit.gwas.glm import (
     glm_scan_with_cofactors,
     reward_substitute_cofactor_statistics,
 )
+
+
+class _RecordingGenotypeStore:
+    """Store double that exposes each bounded marker read to the test."""
+
+    def __init__(self, genotype: npt.NDArray[np.float64]) -> None:
+        self._genotype: npt.NDArray[np.float64] = genotype
+        self.marker_slices: list[slice] = []
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._genotype.shape
+
+    def __array__(
+        self,
+        dtype: np.dtype[np.generic] | None = None,
+        copy: bool | None = None,
+    ) -> npt.NDArray[np.float64]:
+        raise AssertionError("GLM must not materialize a genotype store")
+
+    def read_markers(
+        self,
+        marker_slice: slice,
+        sample_indices: npt.NDArray[np.int_] | slice | None = None,
+    ) -> npt.NDArray[np.float64]:
+        self.marker_slices.append(marker_slice)
+        block = self._genotype[:, marker_slice]
+        if sample_indices is not None:
+            block = block[sample_indices]
+        result = np.asarray(block, dtype=np.float64).copy()
+        result.setflags(write=False)
+        return result
 
 
 def _reference_ols_vectorized(
@@ -199,6 +232,48 @@ def test_glm_marker_batches_preserve_results(monkeypatch: pytest.MonkeyPatch) ->
     np.testing.assert_allclose(actual.effects, expected.effects, rtol=1e-12)
     np.testing.assert_allclose(actual.se, expected.se, rtol=1e-12)
     np.testing.assert_allclose(actual.t_stats, expected.t_stats, rtol=1e-12)
+
+
+def test_glm_reads_store_in_workspace_bounded_marker_batches() -> None:
+    rng = np.random.default_rng(20260907)
+    n, m = 40, 24
+    genotype = rng.binomial(2, 0.35, size=(n, m)).astype(np.float64)
+    phenotype = rng.normal(size=n)
+    design: FloatMatrix = np.column_stack([np.ones(n), np.linspace(-1.0, 1.0, n)])
+    workspace_mib = 0.001
+    store = _RecordingGenotypeStore(genotype)
+    batch_size = glm_module._marker_batch_size(n, workspace_mib)
+
+    assert batch_size == 3
+
+    expected = glm_module.glm_gwas(
+        phenotype,
+        design,
+        genotype,
+        marker_workspace_mib=workspace_mib,
+    )
+    actual = glm_module.glm_gwas(
+        phenotype,
+        design,
+        store,
+        marker_workspace_mib=workspace_mib,
+    )
+
+    np.testing.assert_allclose(actual.p_values, expected.p_values, rtol=1e-12)
+    np.testing.assert_allclose(actual.effects, expected.effects, rtol=1e-12)
+    np.testing.assert_allclose(actual.se, expected.se, rtol=1e-12)
+    np.testing.assert_allclose(actual.t_stats, expected.t_stats, rtol=1e-12)
+    assert store.marker_slices == [
+        slice(start, min(start + batch_size, m)) for start in range(0, m, batch_size)
+    ]
+
+
+def test_glm_validates_genotype_store_row_count() -> None:
+    genotype = np.ones((3, 2), dtype=np.float64)
+    store = _RecordingGenotypeStore(genotype)
+
+    with pytest.raises(ValueError, match="genotype matrix must have 4 rows"):
+        glm_module.glm_gwas(np.arange(4.0), np.ones((4, 1)), store)
 
 
 @pytest.mark.parametrize("near_collinear", [False, True])
