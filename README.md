@@ -491,9 +491,9 @@ with open_genotype_store("genotype-store") as store:
     pca = compute_pca(store, n_components=3, marker_workspace_mib=64)
 ```
 
-The direct `glm_gwas()` API also accepts an open store and reads markers within
-the configured workspace budget. Iterative FarmCPU/BLINK scans still require an
-in-memory genotype matrix.
+The direct `glm_gwas()` and `mlm_gwas()` APIs also accept an open store and read
+markers within the configured workspace budget. Iterative CMLM, MLMM,
+FarmCPU, and BLINK scans still require an in-memory genotype matrix.
 
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the

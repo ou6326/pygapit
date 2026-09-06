@@ -21,6 +21,7 @@ from scipy.spatial.distance import pdist
 
 from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, validate_marker_workspace_mib
 from .._typing import FloatMatrix, FloatVector, readonly_copy
+from ..io.storage import GenotypeStore, as_genotype_store
 from ..stats.emma import (
     EMMAFixedBasis,
     EMMAResult,
@@ -50,7 +51,7 @@ class MLMResult:
 def mlm_gwas(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     ngrids: int = 100,
     spectrum: EMMASpectrum | None = None,
@@ -65,7 +66,7 @@ def mlm_gwas(
     ----------
     y  : (n,) phenotype vector
     X0 : (n, q) covariate matrix (intercept + PCs)
-    GD : (n, m) genotype matrix, 0/1/2 coded
+    GD : (n, m) genotype matrix or chunk-readable store, 0/1/2 coded
     K  : (n, n) kinship matrix (VanRaden or user-supplied)
 
     Returns
@@ -73,10 +74,11 @@ def mlm_gwas(
     MLMResult with p_values, effects, vg, ve, h2
     """
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
+    genotype = as_genotype_store(GD)
     result = emmax_p3d(
         y,
         X0,
-        GD,
+        genotype,
         K,
         ngrids=ngrids,
         spectrum=spectrum,

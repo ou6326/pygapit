@@ -33,6 +33,7 @@ from .._typing import (
     BoolVector,
     FloatMatrix,
     FloatVector,
+    IntVector,
     as_float_matrix,
     as_float_vector,
     readonly_copy,
@@ -40,6 +41,7 @@ from .._typing import (
     require_square,
 )
 from ..io.formats import impute_missing
+from ..io.storage import GenotypeStore, as_genotype_store
 
 _EMMAX_MARKER_BATCH_SIZE = 4096
 
@@ -634,7 +636,7 @@ def emma_remle(
 def emmax_p3d(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     ngrids: int = 100,
     llim: float = -10.0,
@@ -656,7 +658,7 @@ def emmax_p3d(
     ----------
     y  : (n,) phenotype
     X0 : (n, q) covariate matrix (intercept + PCs)
-    GD : (n, m) genotype matrix, 0/1/2 coded
+    GD : (n, m) genotype matrix or chunk-readable store, 0/1/2 coded
     K  : kinship matrix; (n, n) without Z or (t, t) with Z
     snp_impute : missing-genotype policy; GAPIT defaults to ``"middle"``
     Z  : optional (n, t) incidence matrix for random effects
@@ -670,11 +672,12 @@ def emmax_p3d(
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
-    GD = as_float_matrix(GD, name="genotype matrix")
+    genotype = as_genotype_store(GD)
     K = as_float_matrix(K, name="kinship matrix")
     n = len(y)
     require_row_count(X0, n, name="covariate matrix")
-    require_row_count(GD, n, name="genotype matrix")
+    if genotype.shape[0] != n:
+        raise ValueError(f"genotype matrix must have {n} rows; got {genotype.shape[0]}")
     incidence: FloatMatrix | None = None
     if Z is None:
         require_square(K, name="kinship matrix", size=n)
@@ -682,8 +685,7 @@ def emmax_p3d(
         incidence = as_float_matrix(Z, name="incidence matrix")
         require_row_count(incidence, n, name="incidence matrix")
         require_square(K, name="kinship matrix", size=incidence.shape[1])
-    GD = impute_missing(GD, method=snp_impute)
-    n, m = GD.shape
+    m = genotype.shape[1]
     q0 = X0.shape[1]
 
     # ── Step 1: Estimate delta from null model (P3D) ──────────────────────
@@ -753,22 +755,28 @@ def emmax_p3d(
     stats_arr = np.full(m, np.nan)
     df = n - q1
 
-    # Complete markers share the transformed null design, so apply the
-    # Frisch-Waugh-Lovell reduction in bounded batches instead of solving and
-    # inverting one augmented normal-equation system per marker.
-    complete: BoolVector = np.all(np.isfinite(GD), axis=0)
-    variable: BoolVector = np.std(GD, axis=0) >= 1e-8
-    p_values[complete & ~variable] = 1.0
-    complete_marker_indices = np.flatnonzero(complete & variable)
-    if len(complete_marker_indices) > 0:
-        null_solver: FloatMatrix = np.linalg.pinv(UtX0)
-        transformed_y_residual: FloatVector = Uty - UtX0 @ (null_solver @ Uty)
-        batch_size = _emmax_marker_batch_size(n, marker_workspace_mib)
-        for batch_start in range(0, len(complete_marker_indices), batch_size):
-            marker_indices = complete_marker_indices[
-                batch_start : batch_start + batch_size
-            ]
-            raw_markers: FloatMatrix = GD[:, marker_indices]
+    se: np.float64
+    t_stat: np.float64
+    null_solver: FloatMatrix | None = None
+    transformed_y_residual: FloatVector | None = None
+    batch_size = _emmax_marker_batch_size(n, marker_workspace_mib)
+    for batch_start in range(0, m, batch_size):
+        batch_stop = min(batch_start + batch_size, m)
+        marker_indices = np.arange(batch_start, batch_stop, dtype=np.int_)
+        markers = impute_missing(
+            genotype.read_markers(slice(batch_start, batch_stop)),
+            method=snp_impute,
+        )
+        complete: BoolVector = np.all(np.isfinite(markers), axis=0)
+        variable: BoolVector = np.std(markers, axis=0) >= 1e-8
+        complete_variable = complete & variable
+        p_values[marker_indices[complete & ~variable]] = 1.0
+
+        if complete_variable.any():
+            if null_solver is None or transformed_y_residual is None:
+                null_solver = np.linalg.pinv(UtX0)
+                transformed_y_residual = Uty - UtX0 @ (null_solver @ Uty)
+            raw_markers: FloatMatrix = markers[:, complete_variable]
             transformed_markers: FloatMatrix
             if covariance_factor is not None:
                 transformed_markers = solve_triangular(
@@ -788,68 +796,64 @@ def emmax_p3d(
                 "ij,ij->j", residualized, residualized
             )
             stable = residualized_ss > 1e-12
-            p_values[marker_indices[~stable]] = 1.0
-            if not stable.any():
-                continue
+            complete_indices = marker_indices[complete_variable]
+            p_values[complete_indices[~stable]] = 1.0
+            if stable.any():
+                residualized_y: FloatVector = residualized.T @ transformed_y_residual
+                stable_ss = residualized_ss[stable]
+                marker_effects: FloatVector = residualized_y[stable] / stable_ss
+                marker_se: FloatVector = np.sqrt(vg / stable_ss)
+                stable_se = marker_se >= 1e-12
+                p_values[complete_indices[stable][~stable_se]] = 1.0
+                if stable_se.any():
+                    marker_rows = complete_indices[stable][stable_se]
+                    marker_effects = marker_effects[stable_se]
+                    marker_se = marker_se[stable_se]
+                    marker_stats: FloatVector = marker_effects / marker_se
+                    marker_p_values: FloatVector = np.asarray(
+                        2.0 * stdtr(df, -np.abs(marker_stats)),
+                        dtype=np.float64,
+                    )
+                    np.clip(marker_p_values, 0.0, 1.0, out=marker_p_values)
+                    p_values[marker_rows] = marker_p_values
+                    effects[marker_rows] = marker_effects
+                    se_arr[marker_rows] = marker_se
+                    stats_arr[marker_rows] = marker_stats
 
-            residualized_y: FloatVector = residualized.T @ transformed_y_residual
-            stable_ss = residualized_ss[stable]
-            marker_effects: FloatVector = residualized_y[stable] / stable_ss
-            marker_se: FloatVector = np.sqrt(vg / stable_ss)
-            stable_se = marker_se >= 1e-12
-            p_values[marker_indices[stable][~stable_se]] = 1.0
-            if not stable_se.any():
+        incomplete_marker_indices: IntVector = marker_indices[~complete]
+        for marker_index in incomplete_marker_indices:
+            raw_snp = markers[:, marker_index - batch_start]
+            observed = np.isfinite(raw_snp)
+            if np.count_nonzero(observed) <= q1 or np.nanstd(raw_snp) < 1e-8:
+                p_values[marker_index] = 1.0
                 continue
-
-            marker_rows = marker_indices[stable][stable_se]
-            marker_effects = marker_effects[stable_se]
-            marker_se = marker_se[stable_se]
-            marker_stats: FloatVector = marker_effects / marker_se
-            marker_p_values: FloatVector = np.asarray(
-                2.0 * stdtr(df, -np.abs(marker_stats)),
-                dtype=np.float64,
+            observed_count = int(np.count_nonzero(observed))
+            random_covariance: FloatMatrix
+            if incidence is None:
+                random_covariance = K[np.ix_(observed, observed)]
+            else:
+                observed_incidence: FloatMatrix = incidence[observed]
+                random_covariance = observed_incidence @ K @ observed_incidence.T
+            covariance: FloatMatrix = random_covariance + delta * np.eye(observed_count)
+            precision: FloatMatrix = np.linalg.pinv(covariance)
+            marker_design: FloatMatrix = np.column_stack([
+                X0[observed],
+                raw_snp[observed],
+            ])
+            information: FloatMatrix = marker_design.T @ precision @ marker_design
+            information_inverse: FloatMatrix = np.linalg.pinv(information)
+            beta: FloatVector = (
+                information_inverse @ marker_design.T @ precision @ y[observed]
             )
-            np.clip(marker_p_values, 0.0, 1.0, out=marker_p_values)
-            p_values[marker_rows] = marker_p_values
-            effects[marker_rows] = marker_effects
-            se_arr[marker_rows] = marker_se
-            stats_arr[marker_rows] = marker_stats
-
-    se: np.float64
-    t_stat: np.float64
-    for i in np.flatnonzero(~complete):
-        raw_snp = GD[:, i]
-        observed = np.isfinite(raw_snp)
-        if np.count_nonzero(observed) <= q1 or np.nanstd(raw_snp) < 1e-8:
-            p_values[i] = 1.0
-            continue
-        observed_count = int(np.count_nonzero(observed))
-        random_covariance: FloatMatrix
-        if incidence is None:
-            random_covariance = K[np.ix_(observed, observed)]
-        else:
-            observed_incidence: FloatMatrix = incidence[observed]
-            random_covariance = observed_incidence @ K @ observed_incidence.T
-        covariance: FloatMatrix = random_covariance + delta * np.eye(observed_count)
-        precision: FloatMatrix = np.linalg.pinv(covariance)
-        marker_design: FloatMatrix = np.column_stack([
-            X0[observed],
-            raw_snp[observed],
-        ])
-        information: FloatMatrix = marker_design.T @ precision @ marker_design
-        information_inverse: FloatMatrix = np.linalg.pinv(information)
-        beta: FloatVector = (
-            information_inverse @ marker_design.T @ precision @ y[observed]
-        )
-        se = np.sqrt(information_inverse[q0, q0] * vg)
-        if se < 1e-12:
-            p_values[i] = 1.0
-            continue
-        t_stat = beta[q0] / se
-        p_values[i] = 2.0 * t_dist.sf(abs(t_stat), observed_count - q1)
-        effects[i] = beta[q0]
-        se_arr[i] = se
-        stats_arr[i] = t_stat
+            se = np.sqrt(information_inverse[q0, q0] * vg)
+            if se < 1e-12:
+                p_values[marker_index] = 1.0
+                continue
+            t_stat = beta[q0] / se
+            p_values[marker_index] = 2.0 * t_dist.sf(abs(t_stat), observed_count - q1)
+            effects[marker_index] = beta[q0]
+            se_arr[marker_index] = se
+            stats_arr[marker_index] = t_stat
 
     return GWASResult(
         p_values=p_values,
