@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import json
 import warnings
+from importlib.util import find_spec
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, cast
@@ -26,6 +27,18 @@ from pygapit.io.storage import (
     write_numpy_genotype,
 )
 from pygapit.stats.kinship import vanraden_kinship
+
+_STORAGE_BACKENDS = [
+    pytest.param("numpy", id="numpy"),
+    pytest.param(
+        "hdf5",
+        id="hdf5",
+        marks=pytest.mark.skipif(
+            find_spec("h5py") is None,
+            reason="h5py is not installed",
+        ),
+    ),
+]
 
 
 class _NoMaterializationStore:
@@ -267,7 +280,7 @@ def test_generic_reader_rejects_unknown_backend(
         )
 
 
-@pytest.mark.parametrize("backend", ["numpy", "hdf5"])
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 def test_blocks_survive_close_and_file_removal(
     tmp_path: Path, backend: StorageBackend
 ) -> None:
@@ -290,7 +303,7 @@ def test_blocks_survive_close_and_file_removal(
         store.read_markers(slice(0, 1))
 
 
-@pytest.mark.parametrize("backend", ["numpy", "hdf5"])
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 @pytest.mark.parametrize("complete,schema", [(False, 1), (True, 2)])
 def test_store_rejects_incomplete_or_unsupported_format(
     tmp_path: Path, backend: StorageBackend, complete: bool, schema: int
@@ -312,7 +325,7 @@ def test_store_rejects_incomplete_or_unsupported_format(
         open_genotype_store(path, backend=backend)
 
 
-@pytest.mark.parametrize("backend", ["numpy", "hdf5"])
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 @pytest.mark.parametrize(
     "field,value",
     [
@@ -343,7 +356,7 @@ def test_store_rejects_invalid_header_types(
         open_genotype_store(path, backend=backend)
 
 
-@pytest.mark.parametrize("backend", ["numpy", "hdf5"])
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 @pytest.mark.parametrize(
     "values",
     [np.ones(4, dtype=np.float64), np.ones((4, 4), dtype=np.int32)],
@@ -367,7 +380,7 @@ def test_store_rejects_invalid_genotype_array(
         open_genotype_store(path, backend=backend)
 
 
-@pytest.mark.parametrize("backend", ["numpy", "hdf5"])
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 @pytest.mark.parametrize("field", ["taxa", "marker_id"])
 def test_store_rejects_misaligned_metadata(
     tmp_path: Path,

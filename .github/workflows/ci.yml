@@ -47,7 +47,7 @@ jobs:
           "$RUNNER_TEMP/pygapit-wheel-test/bin/pygapit" --help
 
   quality:
-    name: Quality and Python tests
+    name: Quality and bigdata tests
     runs-on: ubuntu-latest
     env:
       RPY2_CFFI_MODE: ABI
@@ -76,11 +76,14 @@ jobs:
       - name: Pyrefly
         run: pixi run -e full pyrefly check -p all
 
-      - name: Python tests
+      - name: Verify bigdata dependencies
+        run: pixi run -e full python -c "import dask, h5py, zarr"
+
+      - name: Python tests with bigdata dependencies
         run: pixi run -e full pytest tests -q --ignore=tests/cross_language
 
   windows:
-    name: Windows Python ${{ matrix.python-version }}
+    name: Windows Python ${{ matrix.python-version }} (base dependencies)
     runs-on: windows-latest
     strategy:
       fail-fast: false
@@ -100,7 +103,10 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e . "pytest>=9.1.1"
 
-      - name: Python tests
+      - name: Verify optional dependencies are absent
+        run: python -c "import importlib.util; assert all(importlib.util.find_spec(name) is None for name in ('dask', 'h5py', 'zarr'))"
+
+      - name: Python tests with base dependencies
         run: pytest tests -q --ignore=tests/cross_language
 
   parity:
