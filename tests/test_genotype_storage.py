@@ -18,6 +18,7 @@ from pygapit._typing import FloatMatrix, IntVector
 from pygapit.io.formats import GenotypeData
 from pygapit.io.storage import (
     ArrayGenotypeStore,
+    GenotypeView,
     HDF5GenotypeStore,
     NumpyGenotypeStore,
     StorageBackend,
@@ -69,6 +70,40 @@ class _NoMaterializationStore:
         return result.copy()
 
 
+class _RecordingParentStore:
+    """Read-only parent double that records bounded reads from GenotypeView."""
+
+    def __init__(self, values: FloatMatrix) -> None:
+        self._values: FloatMatrix = values
+        self.marker_slices: list[slice] = []
+        self.sample_requests: list[IntVector | slice | None] = []
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._values.shape
+
+    def __array__(
+        self,
+        dtype: np.dtype[np.generic] | None = None,
+        copy: bool | None = None,
+    ) -> FloatMatrix:
+        raise AssertionError("GenotypeView must not materialize its parent")
+
+    def read_markers(
+        self,
+        marker_slice: slice,
+        sample_indices: IntVector | slice | None = None,
+    ) -> FloatMatrix:
+        self.marker_slices.append(marker_slice)
+        self.sample_requests.append(sample_indices)
+        block = self._values[:, marker_slice]
+        if sample_indices is not None:
+            block = block[sample_indices]
+        result = np.array(block, dtype=np.float64, copy=True)
+        result.setflags(write=False)
+        return result
+
+
 def _genotype_data() -> GenotypeData:
     values = np.asarray([
         [0.0, 1.0, 2.0, 0.0],
@@ -105,6 +140,134 @@ def test_vanraden_reads_store_blocks_without_whole_array_conversion() -> None:
 
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
     assert store.read_count >= 2
+
+
+def test_genotype_view_reads_contiguous_parent_markers_with_selected_samples() -> None:
+    values = _genotype_data().GD
+    parent = _RecordingParentStore(values)
+    view = GenotypeView(
+        parent,
+        sample_indices=np.asarray([3, 1], dtype=np.int_),
+        marker_indices=np.asarray([1, 2, 3], dtype=np.int_),
+    )
+
+    actual = view.read_markers(slice(0, 2))
+
+    assert view.shape == (2, 3)
+    np.testing.assert_array_equal(actual, values[[3, 1], 1:3])
+    assert parent.marker_slices == [slice(1, 3)]
+    np.testing.assert_array_equal(parent.sample_requests[0], np.asarray([3, 1]))
+    assert not actual.flags.writeable
+
+
+def test_genotype_view_identity_forwards_relative_sample_selection() -> None:
+    values = _genotype_data().GD
+    parent = _RecordingParentStore(values)
+    view = GenotypeView(parent)
+
+    actual = view.read_markers(slice(1, 3), slice(3, 0, -2))
+
+    np.testing.assert_array_equal(actual, values[3:0:-2, 1:3])
+    assert parent.marker_slices == [slice(1, 3)]
+    assert parent.sample_requests == [slice(3, 0, -2)]
+
+
+def test_genotype_view_coalesces_ordered_runs_and_preserves_repeats() -> None:
+    values = _genotype_data().GD
+    parent = _RecordingParentStore(values)
+    marker_indices = np.asarray([3, 1, 2, 0, 0], dtype=np.int_)
+    view = GenotypeView(parent, marker_indices=marker_indices)
+
+    actual = view.read_markers(slice(None))
+
+    np.testing.assert_array_equal(actual, values[:, marker_indices])
+    assert parent.marker_slices == [
+        slice(3, 4),
+        slice(1, 3),
+        slice(0, 1),
+        slice(0, 1),
+    ]
+
+
+def test_genotype_view_composes_nested_samples_and_markers() -> None:
+    values = _genotype_data().GD
+    parent = _RecordingParentStore(values)
+    outer = GenotypeView(
+        parent,
+        sample_indices=np.asarray([3, 1, 0], dtype=np.int_),
+        marker_indices=np.asarray([3, 1, 2], dtype=np.int_),
+    )
+    inner = GenotypeView(
+        outer,
+        sample_indices=np.asarray([1, 1], dtype=np.int_),
+        marker_indices=np.asarray([2, 0], dtype=np.int_),
+    )
+
+    actual = inner.read_markers(slice(None), np.asarray([1, 0], dtype=np.int_))
+
+    np.testing.assert_array_equal(actual, values[[1, 1], :][:, [2, 3]])
+    assert parent.marker_slices == [slice(2, 3), slice(3, 4)]
+    np.testing.assert_array_equal(parent.sample_requests[0], np.asarray([1, 1]))
+
+
+def test_genotype_view_empty_selection_returns_independent_readonly_block() -> None:
+    values = _genotype_data().GD
+    parent = _RecordingParentStore(values)
+    view = GenotypeView(
+        parent,
+        sample_indices=np.asarray([], dtype=np.int_),
+        marker_indices=np.asarray([], dtype=np.int_),
+    )
+
+    actual = view.read_markers(slice(None))
+
+    assert view.shape == (0, 0)
+    assert actual.shape == (0, 0)
+    assert parent.marker_slices == []
+    assert not actual.flags.writeable
+
+
+@pytest.mark.parametrize(
+    ("sample_indices", "marker_indices", "error", "message"),
+    [
+        (
+            np.asarray([True, False]),
+            None,
+            TypeError,
+            "integer indices",
+        ),
+        (
+            None,
+            np.asarray([1.0]),
+            TypeError,
+            "integer indices",
+        ),
+        (
+            np.asarray([[0]], dtype=np.int_),
+            None,
+            ValueError,
+            "one-dimensional",
+        ),
+        (
+            None,
+            np.asarray([4], dtype=np.int_),
+            IndexError,
+            "outside",
+        ),
+    ],
+)
+def test_genotype_view_rejects_invalid_selection_indices(
+    sample_indices: np.ndarray[tuple[int, ...], np.dtype[np.generic]] | None,
+    marker_indices: np.ndarray[tuple[int, ...], np.dtype[np.generic]] | None,
+    error: type[Exception],
+    message: str,
+) -> None:
+    with pytest.raises(error, match=message):
+        GenotypeView(
+            _RecordingParentStore(_genotype_data().GD),
+            sample_indices=sample_indices,
+            marker_indices=marker_indices,
+        )
 
 
 def test_numpy_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> None:

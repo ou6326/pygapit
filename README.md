@@ -495,6 +495,10 @@ The direct `glm_gwas()` and `mlm_gwas()` APIs also accept an open store and read
 markers within the configured workspace budget. Iterative CMLM, MLMM,
 FarmCPU, and BLINK scans still require an in-memory genotype matrix.
 
+`GenotypeView` applies sample subsets, marker filters, or marker reordering
+without copying the complete genotype matrix. Sparse marker selections are
+translated into contiguous reads from the parent store where possible.
+
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the
 sample-by-marker layout; VanRaden kinship and PCA read both in contiguous marker

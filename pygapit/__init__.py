@@ -44,6 +44,7 @@ from .io.formats import (
 from .io.storage import (
     ArrayGenotypeStore,
     GenotypeStore,
+    GenotypeView,
     HDF5GenotypeStore,
     NumpyGenotypeStore,
     open_genotype_store,
@@ -83,6 +84,7 @@ __all__ = [
     "GLMResult",
     "GenotypeData",
     "GenotypeStore",
+    "GenotypeView",
     "HDF5GenotypeStore",
     "MLMMResult",
     "MLMResult",

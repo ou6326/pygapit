@@ -12,6 +12,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   and optional HDF5 backends. Unified open/write functions select an available
   disk backend automatically; VanRaden kinship, PCA, and direct GLM/MLM scans
   consume each without implicitly materializing a disk-backed genotype matrix.
+- `GenotypeView` composes sample and marker selections over any genotype store
+  while preserving bounded, contiguous reads from the parent store.
 
 ## [1.2.3] - 2026-09-06
 

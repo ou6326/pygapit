@@ -13,6 +13,7 @@ from .formats import (
 from .storage import (
     ArrayGenotypeStore,
     GenotypeStore,
+    GenotypeView,
     HDF5GenotypeStore,
     NumpyGenotypeStore,
     as_genotype_store,
@@ -27,6 +28,7 @@ __all__ = [
     "ArrayGenotypeStore",
     "GenotypeData",
     "GenotypeStore",
+    "GenotypeView",
     "HDF5GenotypeStore",
     "NumpyGenotypeStore",
     "PhenotypeData",
