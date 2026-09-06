@@ -478,18 +478,24 @@ budgets still process at least one marker.
 Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
 
 ```python
-from pygapit import open_genotype_store, write_genotype_store
+from pygapit import (
+    compute_pca,
+    open_genotype_store,
+    vanraden_kinship,
+    write_genotype_store,
+)
 
 write_genotype_store("genotype-store", genotype)
 with open_genotype_store("genotype-store") as store:
     kinship = vanraden_kinship(store, marker_workspace_mib=64)
+    pca = compute_pca(store, n_components=3, marker_workspace_mib=64)
 ```
 
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the
-sample-by-marker layout and VanRaden reads both in contiguous marker blocks
-without materializing the complete matrix. A `.h5`/`.hdf5` filename or explicit
-`backend="hdf5"` requests HDF5; if `h5py` is unavailable, the resulting warning
+sample-by-marker layout; VanRaden kinship and PCA read both in contiguous marker
+blocks without materializing the complete matrix. A `.h5`/`.hdf5` filename or
+explicit `backend="hdf5"` requests HDF5; if `h5py` is unavailable, the resulting warning
 includes the `pygapit-ng[bigdata]` installation command. Explicit
 `backend="numpy"` is always available.
 

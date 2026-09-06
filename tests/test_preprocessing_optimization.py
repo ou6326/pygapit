@@ -3,12 +3,45 @@
 from __future__ import annotations
 
 import numpy as np
+import numpy.typing as npt
 import pytest
 
 from pygapit.gwas.glm import glm_gwas
 from pygapit.io.formats import impute_missing
 from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import build_covariate_matrix, compute_pca
+
+
+class _NoArrayGenotypeStore:
+    """Store double that permits only bounded marker reads."""
+
+    def __init__(self, genotype: npt.NDArray[np.float64]) -> None:
+        self._genotype: npt.NDArray[np.float64] = genotype
+        self.read_count: int = 0
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._genotype.shape
+
+    def __array__(
+        self,
+        dtype: np.dtype[np.generic] | None = None,
+        copy: bool | None = None,
+    ) -> npt.NDArray[np.float64]:
+        raise AssertionError("PCA must not materialize a genotype store")
+
+    def read_markers(
+        self,
+        marker_slice: slice,
+        sample_indices: npt.NDArray[np.int_] | slice | None = None,
+    ) -> npt.NDArray[np.float64]:
+        self.read_count += 1
+        block = self._genotype[:, marker_slice]
+        if sample_indices is not None:
+            block = block[sample_indices]
+        result = np.asarray(block, dtype=np.float64).copy()
+        result.setflags(write=False)
+        return result
 
 
 @pytest.mark.parametrize("shape", [(40, 120), (120, 40)])
@@ -169,3 +202,41 @@ def test_batched_wide_pca_matches_single_batch() -> None:
         rtol=1e-10,
         atol=1e-12,
     )
+
+
+@pytest.mark.parametrize("shape", [(40, 257), (257, 40)])
+def test_pca_reads_genotype_store_in_marker_blocks(
+    shape: tuple[int, int],
+) -> None:
+    rng = np.random.default_rng(20260907)
+    genotype = rng.binomial(2, 0.35, size=shape).astype(np.float64)
+    store = _NoArrayGenotypeStore(genotype)
+
+    expected = compute_pca(
+        genotype,
+        n_components=4,
+        maf_filter=0.0,
+        marker_workspace_mib=0.001,
+    )
+    actual = compute_pca(
+        store,
+        n_components=4,
+        maf_filter=0.0,
+        marker_workspace_mib=0.001,
+    )
+
+    np.testing.assert_allclose(actual.eigenvalues, expected.eigenvalues, rtol=1e-12)
+    np.testing.assert_allclose(actual.var_explained, expected.var_explained, rtol=1e-12)
+    np.testing.assert_allclose(
+        actual.scores @ actual.scores.T,
+        expected.scores @ expected.scores.T,
+        rtol=1e-11,
+        atol=1e-11,
+    )
+    np.testing.assert_allclose(
+        actual.loadings @ actual.loadings.T,
+        expected.loadings @ expected.loadings.T,
+        rtol=1e-10,
+        atol=1e-11,
+    )
+    assert store.read_count > 2

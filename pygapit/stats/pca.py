@@ -26,6 +26,7 @@ from .._typing import (
     readonly_copy,
     require_row_count,
 )
+from ..io.storage import GenotypeStore, as_genotype_store
 
 
 @dataclass(frozen=True, slots=True)
@@ -41,7 +42,7 @@ class PCAResult:
 
 
 def compute_pca(
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     n_components: int = 3,
     maf_filter: float = 0.05,
     *,
@@ -53,7 +54,8 @@ def compute_pca(
 
     Parameters
     ----------
-    GD : (n_individuals, n_snps) genotype matrix, 0/1/2 coded
+    GD : genotype matrix or GenotypeStore, with shape (n_individuals, n_snps)
+        Marker values are 0/1/2 coded. Stores are read in bounded marker blocks.
     n_components : number of PCs to return (PCA.total parameter in GAPIT)
     maf_filter : minimum MAF for SNPs used in PCA
     marker_workspace_mib : target MiB for one centered marker batch
@@ -63,24 +65,30 @@ def compute_pca(
     PCAResult with scores, loadings, variance explained
     """
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
-    GD = as_float_matrix(GD, name="genotype matrix")
-    n, _m = GD.shape
+    genotype = as_genotype_store(GD)
+    n, total_marker_count = genotype.shape
     if n < 2:
         raise ValueError("PCA requires at least two individuals")
     if n_components < 0:
         raise ValueError("n_components must be non-negative")
 
     # ── MAF filter ────────────────────────────────────────────────────────
-    freq = GD.sum(axis=0) / (2 * n)
+    freq = np.empty(total_marker_count, dtype=np.float64)
+    for marker_slice in iter_marker_slices(
+        n,
+        total_marker_count,
+        marker_workspace_mib,
+    ):
+        block = genotype.read_markers(marker_slice)
+        freq[marker_slice] = np.sum(block, axis=0) / (2.0 * n)
+        del block
     maf = np.minimum(freq, 1.0 - freq)
     valid_snps = maf >= maf_filter
     if valid_snps.sum() < n_components:
         valid_snps = maf > 0  # relax if too few pass filter
 
     # ── Leading singular triplets through the smaller Gram matrix ───────
-    valid_indices = np.flatnonzero(valid_snps)
-    marker_count = len(valid_indices)
-    col_means = 2.0 * freq[valid_indices]
+    marker_count = int(np.sum(valid_snps))
     k = min(n_components, n, marker_count)
     if k == 0:
         scores = np.empty((n, 0), dtype=np.float64)
@@ -91,11 +99,14 @@ def compute_pca(
         gram: FloatMatrix = np.zeros((n, n), dtype=np.float64)
         for marker_slice in iter_marker_slices(
             n,
-            marker_count,
+            total_marker_count,
             marker_workspace_mib,
         ):
-            centered = GD[:, valid_indices[marker_slice]]
-            centered -= col_means[marker_slice]
+            batch_valid = valid_snps[marker_slice]
+            if not batch_valid.any():
+                continue
+            centered = genotype.read_markers(marker_slice)[:, batch_valid]
+            centered -= 2.0 * freq[marker_slice][batch_valid]
             gram += centered @ centered.T
             del centered
         wide_total_sum: np.float64 = np.trace(gram)
@@ -112,21 +123,45 @@ def compute_pca(
         loadings = np.zeros((marker_count, k), dtype=np.float64)
         nonzero = singular_values > np.finfo(np.float64).eps * singular_values[0]
         safe_singular_values = np.where(nonzero, singular_values, 1.0)
+        loading_start = 0
         for marker_slice in iter_marker_slices(
             n,
-            marker_count,
+            total_marker_count,
             marker_workspace_mib,
         ):
-            centered = GD[:, valid_indices[marker_slice]]
-            centered -= col_means[marker_slice]
+            batch_valid = valid_snps[marker_slice]
+            batch_marker_count = int(np.sum(batch_valid))
+            if batch_marker_count == 0:
+                continue
+            centered = genotype.read_markers(marker_slice)[:, batch_valid]
+            centered -= 2.0 * freq[marker_slice][batch_valid]
             batch_loadings = (centered.T @ left_vectors) / safe_singular_values
             batch_loadings[:, ~nonzero] = 0.0
-            loadings[marker_slice] = batch_loadings
+            loadings[loading_start : loading_start + batch_marker_count] = (
+                batch_loadings
+            )
+            loading_start += batch_marker_count
             del centered, batch_loadings
         eigenvalues = gram_values / (n - 1)
     else:
-        GD_centered = GD[:, valid_indices]
-        GD_centered -= col_means
+        GD_centered: FloatMatrix = np.empty((n, marker_count), dtype=np.float64)
+        centered_start = 0
+        for marker_slice in iter_marker_slices(
+            n,
+            total_marker_count,
+            marker_workspace_mib,
+        ):
+            batch_valid = valid_snps[marker_slice]
+            batch_marker_count = int(np.sum(batch_valid))
+            if batch_marker_count == 0:
+                continue
+            centered = genotype.read_markers(marker_slice)[:, batch_valid]
+            centered -= 2.0 * freq[marker_slice][batch_valid]
+            GD_centered[:, centered_start : centered_start + batch_marker_count] = (
+                centered
+            )
+            centered_start += batch_marker_count
+            del centered
         tall_total_sum: np.float64 = np.einsum(
             "ij,ij->",
             GD_centered,
