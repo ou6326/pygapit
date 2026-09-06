@@ -89,6 +89,12 @@ pip install pygapit-ng
 pip install "pygapit-ng[bigdata]"  # include HDF5, Zarr, and Dask for larger datasets
 ```
 
+The default installation supports both in-memory analysis and disk-backed
+NumPy memory maps. Optional backends are imported only when selected: the
+unified storage API silently uses the NumPy backend when `h5py` is unavailable,
+while an explicit HDF5 request emits an actionable warning to install
+`pygapit-ng[bigdata]` or select `backend="numpy"`.
+
 **Runtime dependencies** are installed automatically: `numpy`, `scipy`,
 `pandas`, `matplotlib`, `seaborn`, `plotly`, `joblib`,
 `biopython`, and `jinja2`.
@@ -468,6 +474,30 @@ markers one batch at a time. The setting bounds one principal sample-by-marker
 workspace, not total process memory: the input genotype, sample-space matrices,
 result arrays, and native BLAS allocations remain outside it. Very small
 budgets still process at least one marker.
+
+Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
+
+```python
+from pygapit import open_genotype_store, write_genotype_store
+
+write_genotype_store("genotype-store", genotype)
+with open_genotype_store("genotype-store") as store:
+    kinship = vanraden_kinship(store, marker_workspace_mib=64)
+```
+
+The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
+falls back to a dependency-free NumPy memory-mapped store. Both preserve the
+sample-by-marker layout and VanRaden reads both in contiguous marker blocks
+without materializing the complete matrix. A `.h5`/`.hdf5` filename or explicit
+`backend="hdf5"` requests HDF5; if `h5py` is unavailable, the resulting warning
+includes the `pygapit-ng[bigdata]` installation command. Explicit
+`backend="numpy"` is always available.
+
+Disk stores read the layout produced by the corresponding writer and check the
+completion flag and schema version. Reading errors propagate from NumPy/HDF5.
+Returned marker blocks remain usable after the store is closed.
+Use `store.taxa`, `store.marker_ids`, `store.chromosomes`, and `store.positions`
+for typed NumPy metadata arrays; `store.marker_map` provides a pandas table.
 
 ---
 

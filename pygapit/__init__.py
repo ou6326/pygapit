@@ -41,6 +41,16 @@ from .io.formats import (
     read_numeric,
     read_phenotype,
 )
+from .io.storage import (
+    ArrayGenotypeStore,
+    GenotypeStore,
+    HDF5GenotypeStore,
+    NumpyGenotypeStore,
+    open_genotype_store,
+    write_genotype_store,
+    write_hdf5_genotype,
+    write_numpy_genotype,
+)
 from .stats.emma import emma_remle, emmax_p3d
 from .stats.kinship import vanraden_kinship, zhang_kinship
 from .stats.pca import build_covariate_matrix, compute_pca
@@ -64,6 +74,7 @@ from .visualization.plots import (
 __all__ = [
     "GAPIT",
     "AlignedData",
+    "ArrayGenotypeStore",
     "BLINKResult",
     "FarmCPUResult",
     "GAPITOutputFiles",
@@ -71,9 +82,12 @@ __all__ = [
     "GBLUPResult",
     "GLMResult",
     "GenotypeData",
+    "GenotypeStore",
+    "HDF5GenotypeStore",
     "MLMMResult",
     "MLMResult",
     "ModelRunResult",
+    "NumpyGenotypeStore",
     "PhenotypeData",
     "PredictionCVResult",
     "RRBLUPResult",
@@ -103,6 +117,7 @@ __all__ = [
     "manhattan_plot",
     "mlm_gwas",
     "mlmm_gwas",
+    "open_genotype_store",
     "pca_plot_2d",
     "pca_plot_3d_interactive",
     "phenotype_distribution",
@@ -115,5 +130,8 @@ __all__ = [
     "sblup",
     "select_super_qtns",
     "vanraden_kinship",
+    "write_genotype_store",
+    "write_hdf5_genotype",
+    "write_numpy_genotype",
     "zhang_kinship",
 ]

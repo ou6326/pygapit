@@ -10,16 +10,36 @@ from .formats import (
     read_numeric,
     read_phenotype,
 )
+from .storage import (
+    ArrayGenotypeStore,
+    GenotypeStore,
+    HDF5GenotypeStore,
+    NumpyGenotypeStore,
+    as_genotype_store,
+    open_genotype_store,
+    write_genotype_store,
+    write_hdf5_genotype,
+    write_numpy_genotype,
+)
 
 __all__ = [
     "AlignedData",
+    "ArrayGenotypeStore",
     "GenotypeData",
+    "GenotypeStore",
+    "HDF5GenotypeStore",
+    "NumpyGenotypeStore",
     "PhenotypeData",
     "align_inputs",
     "align_taxa",
+    "as_genotype_store",
     "impute_missing",
     "maf_filter",
+    "open_genotype_store",
     "read_hapmap",
     "read_numeric",
     "read_phenotype",
+    "write_genotype_store",
+    "write_hdf5_genotype",
+    "write_numpy_genotype",
 ]

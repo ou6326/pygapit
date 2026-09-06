@@ -6,6 +6,13 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+### Added
+
+- A chunk-readable `GenotypeStore` contract with in-memory, NumPy memory-mapped,
+  and optional HDF5 backends. Unified open/write functions select an available
+  disk backend automatically, and VanRaden kinship consumes each without
+  implicitly materializing a disk-backed genotype matrix.
+
 ## [1.2.3] - 2026-09-06
 
 ### Added

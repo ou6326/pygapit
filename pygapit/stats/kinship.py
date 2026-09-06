@@ -20,6 +20,7 @@ from .._resources import (
     validate_marker_workspace_mib,
 )
 from .._typing import FloatMatrix, as_float_matrix, require_square
+from ..io.storage import GenotypeStore, as_genotype_store
 
 
 def vanraden_factor(GD: FloatMatrix) -> FloatMatrix:
@@ -43,7 +44,7 @@ def vanraden_factor(GD: FloatMatrix) -> FloatMatrix:
 
 
 def vanraden_kinship(
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     *,
     marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> FloatMatrix:
@@ -63,18 +64,19 @@ def vanraden_kinship(
         K[i,j] > 0 = more related than average
     """
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
-    GD = as_float_matrix(GD, name="genotype matrix")
-    n = GD.shape[0]
+    genotype = as_genotype_store(GD)
+    n, marker_count = genotype.shape
 
     # ── Remove monomorphic SNPs ────────────────────────────────────────────
-    frequencies = GD.sum(axis=0) / (2.0 * n)
+    frequencies = np.empty(marker_count, dtype=np.float64)
+    for marker_slice in iter_marker_slices(n, marker_count, marker_workspace_mib):
+        block = genotype.read_markers(marker_slice)
+        frequencies[marker_slice] = np.sum(block, axis=0) / (2.0 * n)
+        del block
     valid = (frequencies > 0.0) & (frequencies < 1.0)
     if not valid.any():
         warnings.warn("All SNPs are monomorphic; returning identity matrix.")
         return np.eye(n)
-
-    valid_indices = np.flatnonzero(valid)
-    frequencies = frequencies[valid_indices]
 
     # ── Compute K = Z_c' Z_c / adj in marker batches ────────────────────
     # R uses crossprod(Z, Z) after transposing markers into rows. Accumulate
@@ -82,17 +84,21 @@ def vanraden_kinship(
     K: FloatMatrix = np.zeros((n, n), dtype=np.float64)
     for marker_slice in iter_marker_slices(
         n,
-        len(valid_indices),
+        marker_count,
         marker_workspace_mib,
     ):
-        indices = valid_indices[marker_slice]
-        centered = GD[:, indices]
-        centered -= 2.0 * frequencies[marker_slice]
+        batch_valid = valid[marker_slice]
+        if not batch_valid.any():
+            continue
+        # Boolean selection already makes an independent, writable array.
+        centered = genotype.read_markers(marker_slice)[:, batch_valid]
+        centered -= 2.0 * frequencies[marker_slice][batch_valid]
         K += centered @ centered.T
         del centered
 
     # Adjustment factor: 2 * sum(p_j * (1 - p_j))
-    adj = 2.0 * np.sum(frequencies * (1.0 - frequencies))
+    valid_frequencies = frequencies[valid]
+    adj = 2.0 * np.sum(valid_frequencies * (1.0 - valid_frequencies))
     if adj < 1e-12:
         warnings.warn("Adjustment factor near zero; check allele frequencies.")
         adj = 1.0
