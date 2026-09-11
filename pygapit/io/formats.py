@@ -26,8 +26,6 @@ import pandas as pd
 
 from .._resources import (
     DEFAULT_MARKER_WORKSPACE_MIB,
-    iter_marker_slices,
-    validate_marker_workspace_mib,
 )
 from .._typing import (
     FloatMatrix,
@@ -40,7 +38,8 @@ from .._typing import (
     as_str_vector,
     require_length,
 )
-from ._genotype_store import GenotypeStore, GenotypeView
+from ._genotype_qc import filter_markers_by_maf
+from ._genotype_store import GenotypeStore, GenotypeView, LabeledGenotypeStore
 
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
@@ -165,13 +164,17 @@ class AlignedData:
 
     taxa: StrVector
     phenotypes: pd.DataFrame
-    genotypes: FloatMatrix
+    genotypes: FloatMatrix | GenotypeStore
     markers: pd.DataFrame
     kinship: FloatMatrix | None = None
     covariates: FloatMatrix | None = None
 
     def as_legacy_dict(self) -> LegacyAlignedData:
         """Return the historical mapping produced by :func:`align_taxa`."""
+        if isinstance(self.genotypes, GenotypeStore):
+            raise TypeError(
+                "The legacy alignment mapping does not support genotype stores"
+            )
         result: LegacyAlignedData = {
             "taxa": self.taxa,
             "Y": self.phenotypes,
@@ -585,7 +588,7 @@ def read_phenotype(filepath: str | Path) -> PhenotypeData:
 
 def align_inputs(
     pheno: PhenotypeData,
-    geno: GenotypeData,
+    geno: GenotypeData | LabeledGenotypeStore,
     cv_df: pd.DataFrame | None = None,
     ki_df: pd.DataFrame | None = None,
 ) -> AlignedData:
@@ -602,15 +605,37 @@ def align_inputs(
     """
     if len(pheno.Y) != len(pheno.taxa):
         raise ValueError("Phenotype rows and phenotype taxa must have equal length")
-    if geno.GD.ndim != 2:
+    if isinstance(geno, LabeledGenotypeStore):
+        genotype: FloatMatrix | GenotypeStore = geno
+        genotype_taxa = geno.taxa
+        row_count, marker_count = geno.shape
+        if genotype_taxa.ndim != 1 or len(genotype_taxa) != row_count:
+            raise ValueError(f"genotype taxa must contain {row_count} values")
+        for name, values in (
+            ("marker ids", geno.marker_ids),
+            ("chromosomes", geno.chromosomes),
+            ("marker positions", geno.positions),
+        ):
+            if values.ndim != 1 or len(values) != marker_count:
+                raise ValueError(f"{name} must contain {marker_count} values")
+        marker_map = pd.DataFrame({
+            "SNP": geno.marker_ids,
+            "Chromosome": geno.chromosomes,
+            "Position": geno.positions,
+        })
+    else:
+        genotype = geno.GD
+        genotype_taxa = geno.taxa
+        marker_map = geno.GM
+    if isinstance(genotype, np.ndarray) and genotype.ndim != 2:
         raise ValueError("Genotype matrix must be two-dimensional")
-    if geno.GD.shape[0] != len(geno.taxa):
+    if genotype.shape[0] != len(genotype_taxa):
         raise ValueError("Genotype rows and genotype taxa must have equal length")
-    if geno.GD.shape[1] != len(geno.GM):
+    if genotype.shape[1] != len(marker_map):
         raise ValueError("Genotype columns and marker-map rows must have equal length")
 
     phenotype_index = _unique_taxa_index(pheno.taxa, "phenotype")
-    genotype_index = _unique_taxa_index(geno.taxa, "genotype")
+    genotype_index = _unique_taxa_index(genotype_taxa, "genotype")
     common = set(phenotype_index) & set(genotype_index)
 
     covariate_index: dict[str, int] | None = None
@@ -662,7 +687,13 @@ def align_inputs(
     pheno_idx = [phenotype_index[taxon] for taxon in common_taxa]
     Y_aligned = pheno.Y.iloc[pheno_idx].reset_index(drop=True)
     geno_idx = [genotype_index[taxon] for taxon in common_taxa]
-    GD_aligned = geno.GD[geno_idx, :]
+    if isinstance(genotype, GenotypeStore):
+        GD_aligned: FloatMatrix | GenotypeStore = GenotypeView(
+            genotype,
+            sample_indices=np.asarray(geno_idx, dtype=np.int_),
+        )
+    else:
+        GD_aligned = genotype[geno_idx, :]
 
     KI_aligned = None
     if kinship_index is not None and kinship_values is not None:
@@ -678,7 +709,7 @@ def align_inputs(
         taxa=taxa_arr,
         phenotypes=Y_aligned,
         genotypes=GD_aligned,
-        markers=geno.GM,
+        markers=marker_map,
         kinship=KI_aligned,
         covariates=CV_aligned,
     )
@@ -732,22 +763,9 @@ def maf_filter(
     -------
     (filtered_GD, kept_indices)
     """
-    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
-    n, marker_count = GD.shape
-    if isinstance(GD, GenotypeStore):
-        freq = np.empty(marker_count, dtype=np.float64)
-        for marker_slice in iter_marker_slices(
-            n,
-            marker_count,
-            marker_workspace_mib,
-        ):
-            block = GD.read_markers(marker_slice)
-            freq[marker_slice] = np.nansum(block, axis=0) / (2.0 * n)
-    else:
-        freq = np.nansum(GD, axis=0) / (2.0 * n)
-    maf = np.minimum(freq, 1.0 - freq)
-    keep = maf >= threshold
-    kept_indices: IntVector = np.flatnonzero(keep)
-    if isinstance(GD, GenotypeStore):
-        return GenotypeView(GD, marker_indices=kept_indices), kept_indices
-    return GD[:, keep], kept_indices
+    filtered, kept_indices, _ = filter_markers_by_maf(
+        GD,
+        threshold,
+        marker_workspace_mib=marker_workspace_mib,
+    )
+    return filtered, kept_indices

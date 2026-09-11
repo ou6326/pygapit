@@ -48,6 +48,7 @@ def test_align_inputs_preserves_phenotype_order_and_reorders_all_inputs() -> Non
         aligned = align_inputs(phenotype, genotype, cv_df=covariates, ki_df=kinship)
 
     assert isinstance(aligned, AlignedData)
+    assert isinstance(aligned.genotypes, np.ndarray)
     np.testing.assert_array_equal(aligned.taxa, ["C", "A", "B"])
     np.testing.assert_array_equal(aligned.phenotypes["Taxa"], ["C", "A", "B"])
     np.testing.assert_array_equal(aligned.genotypes[:, 0], [30.0, 10.0, 20.0])

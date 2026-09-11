@@ -466,14 +466,16 @@ during BLINK candidate selection. Multiple-analysis plots join models by SNP,
 chromosome, and position before drawing them on a shared genomic axis; they are
 written only when `file_output=True`.
 
-`marker_workspace_mib` controls batches used by wide-matrix PCA, VanRaden
+`marker_workspace_mib` controls source-read batches used by PCA, VanRaden
 kinship construction, and direct and top-level GLM/MLM scans, including the MLM
-scan reused by sBLUP. PCA and VanRaden accumulate sample-space cross-products
-without retaining a second full centered genotype matrix, while MLM whitens
-markers one batch at a time. The setting bounds one principal sample-by-marker
-workspace, not total process memory: the input genotype, sample-space matrices,
-result arrays, and native BLAS allocations remain outside it. Very small
-budgets still process at least one marker.
+scan reused by sBLUP. Wide-matrix PCA and VanRaden accumulate sample-space
+cross-products without retaining a complete centered genotype matrix, while MLM
+whitens markers one batch at a time. When PCA has fewer retained markers than
+samples, its exact marker-space solve still assembles the complete centered
+retained matrix. The setting bounds source marker blocks, not total process
+memory: the input genotype, PCA work arrays, sample-space matrices, result
+arrays, and native BLAS allocations remain outside it. Very small budgets still
+process at least one marker.
 
 Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
 
@@ -493,9 +495,12 @@ with open_genotype_store("genotype-store") as store:
     pca = compute_pca(filtered, n_components=3, marker_workspace_mib=64)
 ```
 
-The direct `glm_gwas()` and `mlm_gwas()` APIs also accept an open store and read
-markers within the configured workspace budget. Iterative CMLM, MLMM,
-FarmCPU, and BLINK scans still require an in-memory genotype matrix.
+The top-level `GAPIT()` pipeline and the direct `glm_gwas()` and `mlm_gwas()`
+APIs accept an open labeled store and read its source data in bounded marker
+blocks. Top-level stores supply their own taxa and marker metadata, must contain
+finite pre-imputed values, omit `GM`, and currently use VanRaden kinship without
+genomic-prediction output. Iterative CMLM, MLMM, FarmCPU, and BLINK scans still
+require an in-memory genotype matrix.
 
 `maf_filter()` returns a `GenotypeView` when its input is a store, so filtering
 does not copy the complete genotype matrix. `GenotypeView` also supports sample
@@ -505,10 +510,11 @@ contiguous reads from the parent store where possible.
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the
 sample-by-marker layout; VanRaden kinship and PCA read both in contiguous marker
-blocks without materializing the complete matrix. A `.h5`/`.hdf5` filename or
-explicit `backend="hdf5"` requests HDF5; if `h5py` is unavailable, the resulting warning
-includes the `pygapit-ng[bigdata]` installation command. Explicit
-`backend="numpy"` is always available.
+blocks. PCA's exact tall-matrix branch retains the centered filtered matrix as
+described above. A `.h5`/`.hdf5` filename or explicit `backend="hdf5"` requests
+HDF5; if `h5py` is unavailable, the resulting warning includes the
+`pygapit-ng[bigdata]` installation command. Explicit `backend="numpy"` is always
+available.
 
 Disk stores read the layout produced by the corresponding writer and check the
 completion flag and schema version. Reading errors propagate from NumPy/HDF5.

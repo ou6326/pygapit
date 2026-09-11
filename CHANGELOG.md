@@ -11,10 +11,14 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - A chunk-readable `GenotypeStore` contract with in-memory, NumPy memory-mapped,
   and optional HDF5 backends. Unified open/write functions select an available
   disk backend automatically; MAF filtering, VanRaden kinship, PCA, and direct
-  GLM/MLM scans consume each without implicitly materializing a disk-backed
-  genotype matrix.
+  GLM/MLM scans read each in bounded marker blocks. Wide-matrix PCA, VanRaden,
+  and marker scans avoid materializing a complete centered genotype matrix;
+  exact tall-matrix PCA retains its centered filtered matrix.
 - `GenotypeView` composes sample and marker selections over any genotype store
   while preserving bounded, contiguous reads from the parent store.
+- Top-level `GAPIT()` GLM and MLM workflows accept labeled genotype stores and
+  perform taxa alignment, trait filtering, MAF filtering, PCA, kinship, and
+  marker scans through bounded source reads.
 
 ## [1.2.3] - 2026-09-06
 

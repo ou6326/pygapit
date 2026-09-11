@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pygapit._typing import FloatMatrix
+from pygapit._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from pygapit.gapit import (
     GAPIT,
     GAPITResult,
@@ -21,9 +21,51 @@ from pygapit.gapit import (
 from pygapit.gs.blup import cblup, gblup, sblup
 from pygapit.gwas.blink import _candidate_mask
 from pygapit.gwas.mlm import mlm_gwas
+from pygapit.io.formats import GenotypeData, PhenotypeData, align_inputs
+from pygapit.io.storage import (
+    ArrayGenotypeStore,
+    open_genotype_store,
+    write_numpy_genotype,
+)
 from pygapit.stats.emma import EMMASpectrum, prepare_emma_spectrum
 from pygapit.stats.kinship import vanraden_kinship, zhang_kinship
 from pygapit.stats.pca import PCAResult, compute_pca
+
+
+class _RecordingLabeledStore:
+    def __init__(self, genotype: GenotypeData) -> None:
+        self._values: FloatMatrix = genotype.GD
+        self.taxa: StrVector = genotype.taxa
+        self.marker_ids: StrVector = np.asarray(genotype.GM["SNP"], dtype=str)
+        self.chromosomes: StrVector = np.asarray(genotype.GM["Chromosome"], dtype=str)
+        self.positions: FloatVector = np.asarray(
+            genotype.GM["Position"], dtype=np.float64
+        )
+        self.marker_slices: list[slice] = []
+        self.sample_requests: list[IntVector | slice | None] = []
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._values.shape
+
+    def __array__(
+        self,
+        dtype: np.dtype[np.generic] | None = None,
+        copy: bool | None = None,
+    ) -> FloatMatrix:
+        raise AssertionError("GAPIT must not materialize a complete genotype store")
+
+    def read_markers(
+        self,
+        marker_slice: slice,
+        sample_indices: IntVector | slice | None = None,
+    ) -> FloatMatrix:
+        self.marker_slices.append(marker_slice)
+        self.sample_requests.append(sample_indices)
+        block = self._values[:, marker_slice]
+        if sample_indices is not None:
+            block = block[sample_indices]
+        return block.copy()
 
 
 def _inputs(n: int = 12, invariant: bool = False) -> tuple[pd.DataFrame, ...]:
@@ -142,6 +184,157 @@ def test_multiple_traits_and_models_return_named_results() -> None:
 
     assert isinstance(result, dict)
     assert set(result) == {"height_GLM", "height_MLM", "yield_GLM", "yield_MLM"}
+
+
+@pytest.mark.parametrize("model", ["GLM", "MLM"])
+def test_gapit_disk_store_matches_aligned_in_memory_pipeline(
+    tmp_path: Path,
+    model: str,
+) -> None:
+    phenotype, genotype, marker_map = _inputs()
+    phenotype.loc[0, "height"] = np.nan
+    reordered = genotype.iloc[::-1].reset_index(drop=True)
+    genotype_data = GenotypeData.from_numeric_frame(reordered, marker_map)
+    store_path = tmp_path / "genotype-store"
+    write_numpy_genotype(store_path, genotype_data, marker_chunk_size=2)
+
+    expected = GAPIT(
+        Y=phenotype,
+        GD=reordered,
+        GM=marker_map,
+        model=model,
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.0,
+        marker_workspace_mib=0.0002,
+        file_output=False,
+    )
+    with open_genotype_store(store_path, backend="numpy") as store:
+        actual = GAPIT(
+            Y=phenotype,
+            GD=store,
+            model=model,
+            trait="height",
+            PCA_total=1,
+            maf_threshold=0.0,
+            marker_workspace_mib=0.0002,
+            file_output=False,
+        )
+
+    assert isinstance(expected, GAPITResult)
+    assert isinstance(actual, GAPITResult)
+    assert expected.GWAS is not None
+    assert actual.GWAS is not None
+    assert expected.kinship is not None
+    assert actual.kinship is not None
+    pd.testing.assert_frame_equal(actual.GWAS, expected.GWAS)
+    np.testing.assert_allclose(actual.kinship, expected.kinship, rtol=1e-12, atol=1e-12)
+    np.testing.assert_array_equal(actual.taxa, expected.taxa)
+
+
+def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() -> None:
+    phenotype, genotype, marker_map = _inputs()
+    phenotype.loc[0, "height"] = np.nan
+    reordered = genotype.iloc[::-1].reset_index(drop=True)
+    store = _RecordingLabeledStore(
+        GenotypeData.from_numeric_frame(reordered, marker_map)
+    )
+
+    result = GAPIT(
+        Y=phenotype,
+        GD=store,
+        model=["GLM", "MLM"],
+        trait="height",
+        PCA_total=1,
+        maf_threshold=0.2,
+        marker_workspace_mib=0.0002,
+        file_output=False,
+    )
+
+    assert isinstance(result, dict)
+    assert set(result) == {"height_GLM", "height_MLM"}
+    assert len(store.marker_slices) > 2
+    assert all(
+        marker_slice.start is not None
+        and marker_slice.stop is not None
+        and marker_slice.stop - marker_slice.start <= 2
+        for marker_slice in store.marker_slices
+    )
+    assert all(request is not None for request in store.sample_requests)
+
+
+def test_align_inputs_validates_custom_store_metadata_lengths() -> None:
+    phenotype, genotype, marker_map = _inputs()
+    store = _RecordingLabeledStore(
+        GenotypeData.from_numeric_frame(genotype, marker_map)
+    )
+    store.marker_ids = store.marker_ids[:-1]
+
+    with pytest.raises(ValueError, match="marker ids must contain 4 values"):
+        align_inputs(PhenotypeData.from_frame(phenotype), store)
+
+
+def test_gapit_requires_labeled_store_metadata() -> None:
+    phenotype, genotype, _ = _inputs()
+    unlabeled = ArrayGenotypeStore(
+        genotype.drop(columns="Taxa").to_numpy(dtype=np.float64)
+    )
+
+    with pytest.raises(TypeError, match="LabeledGenotypeStore"):
+        GAPIT(Y=phenotype, GD=unlabeled, model="GLM", file_output=False)
+
+
+def test_gapit_disk_store_rejects_unsupported_paths(tmp_path: Path) -> None:
+    phenotype, genotype, marker_map = _inputs()
+    genotype_data = GenotypeData.from_numeric_frame(genotype, marker_map)
+    store_path = tmp_path / "genotype-store"
+    write_numpy_genotype(store_path, genotype_data)
+
+    with open_genotype_store(store_path, backend="numpy") as store:
+        with pytest.raises(ValueError, match="only GLM and MLM"):
+            GAPIT(Y=phenotype, GD=store, model="BLINK", file_output=False)
+        with pytest.raises(ValueError, match="requires kinship_algorithm"):
+            GAPIT(
+                Y=phenotype,
+                GD=store,
+                model="GLM",
+                kinship_algorithm="Zhang",
+                file_output=False,
+            )
+        with pytest.raises(ValueError, match="prediction output"):
+            GAPIT(
+                Y=phenotype,
+                GD=store,
+                model="GLM",
+                buspred=True,
+                file_output=False,
+            )
+        with pytest.raises(ValueError, match="GM must not be provided"):
+            GAPIT(
+                Y=phenotype,
+                GD=store,
+                GM=marker_map,
+                model="GLM",
+                file_output=False,
+            )
+
+
+def test_gapit_disk_store_requires_preimputed_values(tmp_path: Path) -> None:
+    phenotype, genotype, marker_map = _inputs()
+    genotype.loc[0, "s1"] = np.nan
+    genotype_data = GenotypeData.from_numeric_frame(
+        genotype,
+        marker_map,
+        impute_method="none",
+    )
+    store_path = tmp_path / "genotype-store"
+    write_numpy_genotype(store_path, genotype_data)
+
+    with (
+        open_genotype_store(store_path, backend="numpy") as store,
+        pytest.raises(ValueError, match="finite, pre-imputed"),
+    ):
+        GAPIT(Y=phenotype, GD=store, model="GLM", file_output=False)
 
 
 @pytest.mark.parametrize(

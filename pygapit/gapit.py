@@ -25,7 +25,10 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from ._resources import DEFAULT_MARKER_WORKSPACE_MIB, validate_marker_workspace_mib
+from ._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    validate_marker_workspace_mib,
+)
 from ._typing import (
     Array,
     FloatMatrix,
@@ -46,16 +49,17 @@ from .gwas.farmcpu import farmcpu_gwas
 from .gwas.glm import glm_gwas
 from .gwas.mlm import cmlm_gwas, mlm_gwas
 from .gwas.mlmm import mlmm_gwas
+from .io._genotype_qc import filter_markers_by_maf
 from .io.formats import (
     AlignedData,
     GenotypeData,
     PhenotypeData,
     align_inputs,
-    maf_filter,
     read_hapmap,
     read_numeric,
     read_phenotype,
 )
+from .io.storage import GenotypeStore, GenotypeView, LabeledGenotypeStore
 from .stats.emma import EMMASpectrum, prepare_emma_spectrum
 from .stats.kinship import vanraden_kinship, zhang_kinship
 from .stats.pca import PCAResult, build_covariate_matrix, compute_pca
@@ -125,7 +129,7 @@ class ModelRunResult:
 class PreparedGenotype:
     """Genotype-derived preparation shared by traits with the same taxa."""
 
-    genotypes: FloatMatrix
+    genotypes: FloatMatrix | GenotypeStore
     kinship: FloatMatrix
     design: FloatMatrix
     taxa: StrVector
@@ -136,8 +140,9 @@ class PreparedGenotype:
     maf: FloatVector
 
     def __post_init__(self) -> None:
+        if isinstance(self.genotypes, np.ndarray):
+            object.__setattr__(self, "genotypes", readonly_copy(self.genotypes))
         for field in (
-            "genotypes",
             "kinship",
             "design",
             "taxa",
@@ -161,7 +166,7 @@ class PreparedTrait:
         object.__setattr__(self, "y", readonly_copy(self.y))
 
     @property
-    def genotypes(self) -> FloatMatrix:
+    def genotypes(self) -> FloatMatrix | GenotypeStore:
         return self.shared.genotypes
 
     @property
@@ -258,7 +263,7 @@ def GAPIT(
     # ── Input data ──────────────────────────────────────────────────────
     Y: pd.DataFrame | str | Path | None = None,  # phenotype
     G: pd.DataFrame | str | Path | None = None,  # HapMap genotype
-    GD: pd.DataFrame | Matrix | str | Path | None = None,  # numeric genotype
+    GD: pd.DataFrame | Matrix | GenotypeStore | str | Path | None = None,
     GM: pd.DataFrame | str | Path | None = None,  # SNP map
     KI: Matrix | pd.DataFrame | None = None,  # kinship
     CV: pd.DataFrame | Array | None = None,  # covariates
@@ -305,6 +310,9 @@ def GAPIT(
     GAPIT-style Python pipeline targeting selected GAPIT 3.5 workflows.
     Currently dispatches GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP,
     cBLUP, and sBLUP.
+
+    Disk-backed genotype stores must contain finite, pre-imputed values.
+    ``SNP_impute`` applies only while loading file or in-memory inputs.
 
     Examples
     --------
@@ -361,8 +369,26 @@ def GAPIT(
     # ── Load data ────────────────────────────────────────────────────────
     pheno, geno = _load_data(Y, G, GD, GM, SNP_impute)
 
+    if isinstance(geno, LabeledGenotypeStore):
+        unsupported = [name for name in models if name not in {"GLM", "MLM"}]
+        if unsupported:
+            raise ValueError(
+                "Disk-backed GAPIT currently supports only GLM and MLM; "
+                f"unsupported model(s): {', '.join(unsupported)}"
+            )
+        if normalized_kinship_algorithm != "VanRaden":
+            raise ValueError(
+                "Disk-backed GAPIT currently requires kinship_algorithm='VanRaden'"
+            )
+        if buspred or normalized_prediction_model is not None:
+            raise ValueError(
+                "Disk-backed GAPIT does not yet support genomic prediction output"
+            )
+
     # ── Simulation mode ──────────────────────────────────────────────────
     if h2 is not None and NQTN is not None:
+        if isinstance(geno, LabeledGenotypeStore):
+            raise ValueError("Disk-backed GAPIT does not support phenotype simulation")
         if NQTN > geno.GD.shape[1]:
             raise ValueError(
                 f"NQTN ({NQTN}) cannot exceed the marker count ({geno.GD.shape[1]})"
@@ -627,10 +653,10 @@ def _select_traits(trait_names: list[str], trait: str | int | None) -> tuple[str
 def _load_data(
     Y: pd.DataFrame | str | Path | None,
     G: pd.DataFrame | str | Path | None,
-    GD: pd.DataFrame | Matrix | str | Path | None,
+    GD: pd.DataFrame | Matrix | GenotypeStore | str | Path | None,
     GM: pd.DataFrame | str | Path | None,
     snp_impute: str,
-) -> tuple[PhenotypeData, GenotypeData]:
+) -> tuple[PhenotypeData, GenotypeData | LabeledGenotypeStore]:
     """Load and parse all input data."""
     # Phenotype
     if isinstance(Y, (str, Path)):
@@ -645,7 +671,18 @@ def _load_data(
         raise ValueError("Provide either G or GD with GM, not both input formats")
     if G is not None:
         geno = read_hapmap(G, impute_method=snp_impute)
+    elif isinstance(GD, LabeledGenotypeStore):
+        if GM is not None:
+            raise ValueError(
+                "GM must not be provided when GD is a labeled genotype store"
+            )
+        geno = GD
     else:
+        if isinstance(GD, GenotypeStore):
+            raise TypeError(
+                "Disk-backed GAPIT requires a LabeledGenotypeStore with taxa and "
+                "marker metadata"
+            )
         if (GD is None) != (GM is None):
             raise ValueError("GD and GM must be provided together")
         if GD is None or GM is None:
@@ -877,12 +914,21 @@ def _prepare_trait(
     if cache is not None and cache_key in cache:
         return PreparedTrait(name=trait_name, y=y, shared=cache[cache_key])
 
-    genotypes = aligned.genotypes[valid_indices, :]
+    if isinstance(aligned.genotypes, GenotypeStore):
+        genotypes: FloatMatrix | GenotypeStore = GenotypeView(
+            aligned.genotypes,
+            sample_indices=valid_indices,
+        )
+    else:
+        genotypes = aligned.genotypes[valid_indices, :]
     taxa = aligned.taxa[valid_indices]
     print(f"[pyGAPIT] n={len(y)} individuals, m={genotypes.shape[1]} SNPs")
 
-    filtered_genotypes, kept_marker_indices = maf_filter(
-        genotypes, threshold=maf_threshold
+    filtered_genotypes, kept_marker_indices, retained_maf = filter_markers_by_maf(
+        genotypes,
+        maf_threshold,
+        marker_workspace_mib=marker_workspace_mib,
+        require_finite=isinstance(genotypes, GenotypeStore),
     )
     marker_map = aligned.markers.iloc[kept_marker_indices].reset_index(drop=True)
     marker_count = filtered_genotypes.shape[1]
@@ -904,6 +950,10 @@ def _prepare_trait(
                 marker_workspace_mib=marker_workspace_mib,
             )
         else:
+            if isinstance(filtered_genotypes, GenotypeStore):
+                raise ValueError(
+                    "Disk-backed GAPIT currently requires kinship_algorithm='VanRaden'"
+                )
             kinship = zhang_kinship(filtered_genotypes)
 
     print(f"[pyGAPIT] Computing PCA (k={pca_total})...")
@@ -926,7 +976,7 @@ def _prepare_trait(
         snp_names=np.asarray(marker_map["SNP"], dtype=str),
         chromosomes=np.asarray(marker_map["Chromosome"], dtype=str),
         positions=np.asarray(marker_map["Position"], dtype=np.float64),
-        maf=_compute_maf(filtered_genotypes),
+        maf=retained_maf,
     )
     if cache is not None:
         cache[cache_key] = shared
@@ -981,6 +1031,10 @@ def _assemble_result(
             "SBLUP",
         )
     ):
+        if isinstance(prepared.genotypes, GenotypeStore):
+            raise ValueError(
+                "Disk-backed GAPIT does not yet support genomic prediction output"
+            )
         prediction = _run_gs_and_build_pred(
             y=prepared.y,
             X0=prepared.design,
@@ -1034,7 +1088,7 @@ def _run_model(
     model_name: str,
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     chromosomes: LabelVector,
     positions: FloatVector,
@@ -1070,7 +1124,13 @@ def _run_model(
             marker_workspace_mib,
         )
 
-    elif model_name == "CMLM":
+    if isinstance(GD, GenotypeStore):
+        raise TypeError(
+            "Disk-backed GAPIT currently supports only GLM and MLM; "
+            f"unsupported model: {model_name}"
+        )
+
+    if model_name == "CMLM":
         n = len(y)
         r = cmlm_gwas(
             y, X0, GD, K, group_from=group_from, group_to=min(group_to or n, n)
@@ -1180,7 +1240,7 @@ def _run_model(
 def _run_mlm_scan(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     spectrum: EMMASpectrum | None,
     marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
@@ -1202,13 +1262,6 @@ def _run_mlm_scan(
         result.vg,
         result.ve,
     )
-
-
-def _compute_maf(GD: FloatMatrix) -> FloatVector:
-    """Compute MAF for each SNP."""
-    n = GD.shape[0]
-    freq = np.nansum(GD, axis=0) / (2.0 * n)
-    return np.minimum(freq, 1.0 - freq)
 
 
 def _build_gwas_table(
