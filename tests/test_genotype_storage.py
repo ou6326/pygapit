@@ -15,7 +15,7 @@ import pandas as pd
 import pytest
 
 from pygapit._typing import FloatMatrix, IntVector
-from pygapit.io.formats import GenotypeData
+from pygapit.io.formats import GenotypeData, maf_filter
 from pygapit.io.storage import (
     ArrayGenotypeStore,
     GenotypeView,
@@ -140,6 +140,32 @@ def test_vanraden_reads_store_blocks_without_whole_array_conversion() -> None:
 
     np.testing.assert_allclose(actual, expected, rtol=1e-12, atol=1e-12)
     assert store.read_count >= 2
+
+
+def test_maf_filter_returns_bounded_store_view_without_materialization() -> None:
+    genotype = np.asarray([
+        [0.0, 0.0, 2.0, 0.0, 1.0, 2.0],
+        [0.0, 1.0, 2.0, 0.0, 1.0, 2.0],
+        [0.0, 2.0, 2.0, 1.0, np.nan, 2.0],
+        [0.0, 1.0, 2.0, 1.0, 1.0, 2.0],
+    ])
+    store = _RecordingParentStore(genotype)
+
+    expected, expected_indices = maf_filter(
+        genotype,
+        threshold=0.2,
+        marker_workspace_mib=0.0001,
+    )
+    actual, actual_indices = maf_filter(
+        store,
+        threshold=0.2,
+        marker_workspace_mib=0.0001,
+    )
+
+    np.testing.assert_array_equal(actual_indices, expected_indices)
+    np.testing.assert_array_equal(actual.read_markers(slice(None)), expected)
+    assert store.marker_slices[:2] == [slice(0, 3), slice(3, 6)]
+    assert not actual.read_markers(slice(None)).flags.writeable
 
 
 def test_genotype_view_reads_contiguous_parent_markers_with_selected_samples() -> None:
@@ -593,6 +619,12 @@ if TYPE_CHECKING:
         hdf5_store = open_genotype_store(path, backend="hdf5")
         assert_type(numpy_store, NumpyGenotypeStore)
         assert_type(hdf5_store, HDF5GenotypeStore)
+        array_filtered, array_indices = maf_filter(np.empty((2, 3)))
+        store_filtered, store_indices = maf_filter(numpy_store)
+        assert_type(array_filtered, FloatMatrix)
+        assert_type(store_filtered, GenotypeView)
+        assert_type(array_indices, IntVector)
+        assert_type(store_indices, IntVector)
         for store in (numpy_store, hdf5_store):
             assert_type(store.read_markers(slice(None)), FloatMatrix)
             assert_type(store.taxa, StrVector)

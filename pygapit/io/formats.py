@@ -13,11 +13,22 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any
+from sys import version_info
+from typing import Any, TypedDict, overload
+
+if version_info >= (3, 11):
+    from typing import NotRequired
+else:
+    from typing_extensions import NotRequired
 
 import numpy as np
 import pandas as pd
 
+from .._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    iter_marker_slices,
+    validate_marker_workspace_mib,
+)
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -29,6 +40,7 @@ from .._typing import (
     as_str_vector,
     require_length,
 )
+from ._genotype_store import GenotypeStore, GenotypeView
 
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
@@ -136,6 +148,17 @@ class PhenotypeData:
         return _phenotype_from_frame(phenotype, "Phenotype data")
 
 
+class LegacyAlignedData(TypedDict):
+    """Historical mapping returned by :func:`align_taxa`."""
+
+    taxa: StrVector
+    Y: pd.DataFrame
+    GD: FloatMatrix
+    GM: pd.DataFrame
+    KI: NotRequired[FloatMatrix]
+    CV: NotRequired[FloatMatrix]
+
+
 @dataclass(frozen=True, slots=True)
 class AlignedData:
     """Typed result of aligning phenotype, genotype, and optional inputs."""
@@ -147,9 +170,9 @@ class AlignedData:
     kinship: FloatMatrix | None = None
     covariates: FloatMatrix | None = None
 
-    def as_legacy_dict(self) -> dict[str, Any]:
+    def as_legacy_dict(self) -> LegacyAlignedData:
         """Return the historical mapping produced by :func:`align_taxa`."""
-        result: dict[str, Any] = {
+        result: LegacyAlignedData = {
             "taxa": self.taxa,
             "Y": self.phenotypes,
             "GD": self.genotypes,
@@ -666,29 +689,65 @@ def align_taxa(
     geno: GenotypeData,
     cv_df: pd.DataFrame | None = None,
     ki_df: pd.DataFrame | None = None,
-) -> dict[str, Any]:
+) -> LegacyAlignedData:
     """Return the legacy mapping form of :func:`align_inputs`."""
     return align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df).as_legacy_dict()
 
 
+@overload
 def maf_filter(
-    GD: FloatMatrix, threshold: float = 0.05
-) -> tuple[FloatMatrix, IntVector]:
+    GD: FloatMatrix,
+    threshold: float = 0.05,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> tuple[FloatMatrix, IntVector]: ...
+
+
+@overload
+def maf_filter(
+    GD: GenotypeStore,
+    threshold: float = 0.05,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> tuple[GenotypeView, IntVector]: ...
+
+
+def maf_filter(
+    GD: FloatMatrix | GenotypeStore,
+    threshold: float = 0.05,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> tuple[FloatMatrix | GenotypeView, IntVector]:
     """
     Filter SNPs by minor allele frequency.
     Translates GAPIT.QC.R MAF filtering logic.
 
     Parameters
     ----------
-    GD : (n, m) genotype matrix
+    GD : (n, m) genotype matrix or chunk-readable store
     threshold : minimum MAF (default 0.05)
+    marker_workspace_mib : target MiB for one store marker block
 
     Returns
     -------
     (filtered_GD, kept_indices)
     """
-    n = GD.shape[0]
-    freq = np.nansum(GD, axis=0) / (2.0 * n)
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
+    n, marker_count = GD.shape
+    if isinstance(GD, GenotypeStore):
+        freq = np.empty(marker_count, dtype=np.float64)
+        for marker_slice in iter_marker_slices(
+            n,
+            marker_count,
+            marker_workspace_mib,
+        ):
+            block = GD.read_markers(marker_slice)
+            freq[marker_slice] = np.nansum(block, axis=0) / (2.0 * n)
+    else:
+        freq = np.nansum(GD, axis=0) / (2.0 * n)
     maf = np.minimum(freq, 1.0 - freq)
     keep = maf >= threshold
-    return GD[:, keep], np.where(keep)[0]
+    kept_indices: IntVector = np.flatnonzero(keep)
+    if isinstance(GD, GenotypeStore):
+        return GenotypeView(GD, marker_indices=kept_indices), kept_indices
+    return GD[:, keep], kept_indices

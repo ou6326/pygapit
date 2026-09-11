@@ -128,7 +128,7 @@ def real_data() -> RealDataset:
     geno = read_numeric(GENOTYPE_PATH, MAP_PATH)
     aligned = align_taxa(pheno, geno)
 
-    y_full = aligned["Y"]["EarHT"].values.astype(float)
+    y_full = as_float_vector(aligned["Y"]["EarHT"].to_numpy(), name="EarHT")
     valid = ~np.isnan(y_full)
     y = y_full[valid]
     GD, kept = maf_filter(aligned["GD"][valid, :], 0.05)

@@ -81,6 +81,7 @@ from pygapit import (
     sblup,
     vanraden_kinship,
 )
+from pygapit._typing import as_float_vector, as_str_vector
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE = Path(
@@ -170,7 +171,7 @@ pheno = read_phenotype(PHENO_FILE)
 geno = read_numeric(GD_FILE, GM_FILE)
 aligned = align_taxa(pheno, geno)
 
-y_full = aligned["Y"]["EarHT"].values.astype(float)
+y_full = as_float_vector(aligned["Y"]["EarHT"].to_numpy(), name="EarHT")
 valid = ~np.isnan(y_full)
 y = y_full[valid]
 GD_arr, kept = maf_filter(aligned["GD"][valid, :], threshold=0.05)
@@ -208,9 +209,9 @@ print(
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n-- Section 4: GWAS model comparison ------------------------")
 
-chromosomes = GM_arr["Chromosome"].values
-positions = GM_arr["Position"].values.astype(float)
-snp_names = GM_arr["SNP"].values.astype(str)
+chromosomes = as_str_vector(GM_arr["Chromosome"].to_numpy(), name="chromosomes")
+positions = as_float_vector(GM_arr["Position"].to_numpy(), name="positions")
+snp_names = as_str_vector(GM_arr["SNP"].to_numpy(), name="SNP names")
 thresh_bon = bonferroni_threshold(len(snp_names))
 
 gwas_results: dict[str, ndarray] = {}
@@ -420,8 +421,7 @@ y_sim = g + np.random.normal(0, np.sqrt(e_var), len(y))
 
 print("  True QTN positions (chr:pos): ", end="")
 for idx in qtn_idx[:5]:
-    snp = GM_arr.iloc[idx]
-    print(f"chr{snp['Chromosome']}:{int(snp['Position']):,}", end=" ")
+    print(f"chr{chromosomes[idx]}:{int(positions[idx]):,}", end=" ")
 print("...")
 
 # Quick GLM and BLINK on simulated phenotype

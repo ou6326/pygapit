@@ -480,6 +480,7 @@ Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
 ```python
 from pygapit import (
     compute_pca,
+    maf_filter,
     open_genotype_store,
     vanraden_kinship,
     write_genotype_store,
@@ -487,17 +488,19 @@ from pygapit import (
 
 write_genotype_store("genotype-store", genotype)
 with open_genotype_store("genotype-store") as store:
-    kinship = vanraden_kinship(store, marker_workspace_mib=64)
-    pca = compute_pca(store, n_components=3, marker_workspace_mib=64)
+    filtered, kept = maf_filter(store, marker_workspace_mib=64)
+    kinship = vanraden_kinship(filtered, marker_workspace_mib=64)
+    pca = compute_pca(filtered, n_components=3, marker_workspace_mib=64)
 ```
 
 The direct `glm_gwas()` and `mlm_gwas()` APIs also accept an open store and read
 markers within the configured workspace budget. Iterative CMLM, MLMM,
 FarmCPU, and BLINK scans still require an in-memory genotype matrix.
 
-`GenotypeView` applies sample subsets, marker filters, or marker reordering
-without copying the complete genotype matrix. Sparse marker selections are
-translated into contiguous reads from the parent store where possible.
+`maf_filter()` returns a `GenotypeView` when its input is a store, so filtering
+does not copy the complete genotype matrix. `GenotypeView` also supports sample
+subsets and marker reordering; sparse marker selections are translated into
+contiguous reads from the parent store where possible.
 
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the
