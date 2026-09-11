@@ -471,11 +471,12 @@ kinship construction, and direct and top-level GLM/MLM scans, including the MLM
 scan reused by sBLUP. Wide-matrix PCA and VanRaden accumulate sample-space
 cross-products without retaining a complete centered genotype matrix, while MLM
 whitens markers one batch at a time. When PCA has fewer retained markers than
-samples, its exact marker-space solve still assembles the complete centered
-retained matrix. The setting bounds source marker blocks, not total process
-memory: the input genotype, PCA work arrays, sample-space matrices, result
-arrays, and native BLAS allocations remain outside it. Very small budgets still
-process at least one marker.
+samples, it retains the complete centered matrix while that matrix remains
+within twice the workspace budget; larger tall matrices use an exact two-pass
+sample-batched accumulation. The setting bounds source blocks, not total process
+memory: the input genotype, PCA Gram and result arrays, sample-space matrices,
+and native BLAS allocations remain outside it. Very small budgets still process
+at least one row or marker.
 
 Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
 
@@ -510,9 +511,9 @@ contiguous reads from the parent store where possible.
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the
 sample-by-marker layout; VanRaden kinship and PCA read both in contiguous marker
-blocks. PCA's exact tall-matrix branch retains the centered filtered matrix as
-described above. A `.h5`/`.hdf5` filename or explicit `backend="hdf5"` requests
-HDF5; if `h5py` is unavailable, the resulting warning includes the
+blocks. PCA's exact tall-matrix branch switches to sample batches under memory
+pressure as described above. A `.h5`/`.hdf5` filename or explicit
+`backend="hdf5"` requests HDF5; if `h5py` is unavailable, the resulting warning includes the
 `pygapit-ng[bigdata]` installation command. Explicit `backend="numpy"` is always
 available.
 

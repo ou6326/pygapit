@@ -22,11 +22,16 @@ from .._resources import (
 from .._typing import (
     FloatMatrix,
     FloatVector,
+    IntVector,
     as_float_matrix,
     readonly_copy,
     require_row_count,
 )
-from ..io.storage import GenotypeStore, as_genotype_store
+from ..io.storage import GenotypeStore, GenotypeView, as_genotype_store
+
+_FLOAT64_BYTES = np.dtype(np.float64).itemsize
+_MIB = 1024**2
+_TALL_PCA_BLOCK_COPIES = 2
 
 
 @dataclass(frozen=True, slots=True)
@@ -58,7 +63,9 @@ def compute_pca(
         Marker values are 0/1/2 coded. Stores are read in bounded marker blocks.
     n_components : number of PCs to return (PCA.total parameter in GAPIT)
     maf_filter : minimum MAF for SNPs used in PCA
-    marker_workspace_mib : target MiB for one centered marker batch
+    marker_workspace_mib : target MiB for one centered source block. A tall
+        matrix that would require more than twice this budget for its complete
+        centered copy is accumulated in sample batches instead.
 
     Returns
     -------
@@ -144,31 +151,65 @@ def compute_pca(
             del centered, batch_loadings
         eigenvalues = gram_values / (n - 1)
     else:
-        GD_centered: FloatMatrix = np.empty((n, marker_count), dtype=np.float64)
-        centered_start = 0
-        for marker_slice in iter_marker_slices(
-            n,
-            total_marker_count,
-            marker_workspace_mib,
-        ):
-            batch_valid = valid_snps[marker_slice]
-            batch_marker_count = int(np.sum(batch_valid))
-            if batch_marker_count == 0:
-                continue
-            centered = genotype.read_markers(marker_slice)[:, batch_valid]
-            centered -= 2.0 * freq[marker_slice][batch_valid]
-            GD_centered[:, centered_start : centered_start + batch_marker_count] = (
-                centered
+        centered_bytes = n * marker_count * _FLOAT64_BYTES
+        workspace_bytes = int(marker_workspace_mib * _MIB)
+        sample_batched = centered_bytes > _TALL_PCA_BLOCK_COPIES * workspace_bytes
+        GD_centered: FloatMatrix | None = None
+        sample_batch_size = n
+        marker_indices: IntVector | None = None
+        tall_total_sum: np.float64
+        if sample_batched:
+            marker_indices = np.flatnonzero(valid_snps)
+            filtered = GenotypeView(genotype, marker_indices=marker_indices)
+            means = 2.0 * freq[marker_indices]
+            sample_batch_size = min(
+                n,
+                max(1, workspace_bytes // (marker_count * _FLOAT64_BYTES)),
             )
-            centered_start += batch_marker_count
-            del centered
-        tall_total_sum: np.float64 = np.einsum(
-            "ij,ij->",
-            GD_centered,
-            GD_centered,
-        )
+            gram = np.zeros((marker_count, marker_count), dtype=np.float64)
+            tall_total_sum = np.float64(0.0)
+            for start in range(0, n, sample_batch_size):
+                sample_slice = slice(start, min(start + sample_batch_size, n))
+                centered = np.array(
+                    filtered.read_markers(slice(None), sample_slice),
+                    dtype=np.float64,
+                    copy=True,
+                )
+                centered -= means
+                gram += centered.T @ centered
+                batch_sum: np.float64 = np.einsum(
+                    "ij,ij->",
+                    centered,
+                    centered,
+                )
+                tall_total_sum += batch_sum
+                del centered
+        else:
+            GD_centered = np.empty((n, marker_count), dtype=np.float64)
+            centered_start = 0
+            for marker_slice in iter_marker_slices(
+                n,
+                total_marker_count,
+                marker_workspace_mib,
+            ):
+                batch_valid = valid_snps[marker_slice]
+                batch_marker_count = int(np.sum(batch_valid))
+                if batch_marker_count == 0:
+                    continue
+                centered = genotype.read_markers(marker_slice)[:, batch_valid]
+                centered -= 2.0 * freq[marker_slice][batch_valid]
+                GD_centered[:, centered_start : centered_start + batch_marker_count] = (
+                    centered
+                )
+                centered_start += batch_marker_count
+                del centered
+            tall_total_sum = np.einsum(
+                "ij,ij->",
+                GD_centered,
+                GD_centered,
+            )
+            gram = GD_centered.T @ GD_centered
         total_var = tall_total_sum / (n - 1)
-        gram = GD_centered.T @ GD_centered
         gram_values, loadings = scipy_eigh(
             gram,
             subset_by_index=(marker_count - k, marker_count - 1),
@@ -176,7 +217,23 @@ def compute_pca(
         )
         gram_values = np.maximum(gram_values[::-1], 0.0)
         loadings = loadings[:, ::-1]
-        scores = GD_centered @ loadings
+        if GD_centered is not None:
+            scores = GD_centered @ loadings
+        else:
+            assert marker_indices is not None
+            filtered = GenotypeView(genotype, marker_indices=marker_indices)
+            means = 2.0 * freq[marker_indices]
+            scores = np.empty((n, k), dtype=np.float64)
+            for start in range(0, n, sample_batch_size):
+                sample_slice = slice(start, min(start + sample_batch_size, n))
+                centered = np.array(
+                    filtered.read_markers(slice(None), sample_slice),
+                    dtype=np.float64,
+                    copy=True,
+                )
+                centered -= means
+                scores[sample_slice] = centered @ loadings
+                del centered
         eigenvalues = gram_values / (n - 1)
 
     var_explained: FloatVector = (

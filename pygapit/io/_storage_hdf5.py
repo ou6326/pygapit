@@ -111,13 +111,33 @@ class HDF5GenotypeStore:
     ) -> FloatMatrix:
         if self.closed:
             raise ValueError("HDF5 genotype store is closed")
-        block: FloatMatrix = np.asarray(
-            t.cast(FloatMatrix, self._dataset[:, marker_slice]),
-            dtype=np.float64,
-        )
-        if sample_indices is not None:
-            block = block[sample_indices]
-        result = np.asarray(block, dtype=np.float64)
+        if sample_indices is None:
+            selected = t.cast(FloatMatrix, self._dataset[:, marker_slice])
+        elif isinstance(sample_indices, slice):
+            start, stop, step = sample_indices.indices(self.shape[0])
+            if step > 0:
+                selected = t.cast(
+                    FloatMatrix,
+                    self._dataset[slice(start, stop, step), marker_slice],
+                )
+            else:
+                requested: IntVector = np.arange(start, stop, step, dtype=np.int_)
+                unique_indices: IntVector
+                inverse: IntVector
+                unique_indices, inverse = np.unique(requested, return_inverse=True)
+                unique_block = t.cast(
+                    FloatMatrix,
+                    self._dataset[unique_indices, marker_slice],
+                )
+                selected = unique_block[inverse]
+        else:
+            unique_indices, inverse = np.unique(sample_indices, return_inverse=True)
+            unique_block = t.cast(
+                FloatMatrix,
+                self._dataset[unique_indices, marker_slice],
+            )
+            selected = unique_block[inverse]
+        result = np.asarray(selected, dtype=np.float64)
         result.setflags(write=False)
         return result
 

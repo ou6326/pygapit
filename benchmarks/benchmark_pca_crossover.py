@@ -27,7 +27,8 @@ class PCAComparison:
     marker_to_sample_ratio: float
     centered_matrix_mib: float
     marker_gram_mib: float
-    production: BenchmarkResult
+    reference_workspace_mib: float
+    reference: BenchmarkResult
     sample_batched: BenchmarkResult | None
 
 
@@ -171,15 +172,26 @@ def run_pca_crossover_benchmark(
             seed + index,
         )
         store = as_genotype_store(genotype)
+        centered_matrix_mib = (
+            n_individuals * marker_count * np.dtype(np.float64).itemsize / 1024**2
+        )
+        reference_workspace_mib = (
+            max(marker_workspace_mib, centered_matrix_mib)
+            if marker_count < n_individuals
+            else marker_workspace_mib
+        )
 
-        def production(current_store: GenotypeStore = store) -> PCAResult:
+        def reference_operation(
+            current_store: GenotypeStore = store,
+            current_workspace_mib: float = reference_workspace_mib,
+        ) -> PCAResult:
             return compute_pca(
                 current_store,
                 n_components=n_components,
-                marker_workspace_mib=marker_workspace_mib,
+                marker_workspace_mib=current_workspace_mib,
             )
 
-        reference = production()
+        reference = reference_operation()
         candidate_result: BenchmarkResult | None = None
         if marker_count < n_individuals:
 
@@ -204,18 +216,16 @@ def run_pca_crossover_benchmark(
                 individuals=n_individuals,
                 markers=marker_count,
                 marker_to_sample_ratio=marker_count / n_individuals,
-                centered_matrix_mib=(
-                    n_individuals
-                    * marker_count
-                    * np.dtype(np.float64).itemsize
-                    / 1024**2
-                ),
+                centered_matrix_mib=centered_matrix_mib,
                 marker_gram_mib=(
                     marker_count**2 * np.dtype(np.float64).itemsize / 1024**2
                 ),
-                production=_benchmark(
-                    "production",
-                    production,
+                reference_workspace_mib=reference_workspace_mib,
+                reference=_benchmark(
+                    "retained_centered"
+                    if marker_count < n_individuals
+                    else "production_wide",
+                    reference_operation,
                     warmups=warmups,
                     repeats=repeats,
                 ),

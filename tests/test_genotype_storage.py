@@ -29,6 +29,7 @@ from pygapit.io.storage import (
     write_numpy_genotype,
 )
 from pygapit.stats.kinship import vanraden_kinship
+from pygapit.stats.pca import compute_pca
 
 _STORAGE_BACKENDS = [
     pytest.param("numpy", id="numpy"),
@@ -344,6 +345,17 @@ def test_hdf5_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> No
             store.read_markers(slice(1, 4), np.asarray([3, 0], dtype=np.int_)),
             genotype.GD[[3, 0], 1:4],
         )
+        np.testing.assert_array_equal(
+            store.read_markers(
+                slice(1, 4),
+                np.asarray([3, 0, 3], dtype=np.int_),
+            ),
+            genotype.GD[[3, 0, 3], 1:4],
+        )
+        np.testing.assert_array_equal(
+            store.read_markers(slice(1, 4), slice(3, 0, -2)),
+            genotype.GD[3:0:-2, 1:4],
+        )
         assert store.marker_map["SNP"].tolist() == genotype.GM["SNP"].tolist()
         assert store.marker_map["Chromosome"].tolist() == ["1", "1", "2", "2"]
         np.testing.assert_array_equal(
@@ -357,6 +369,41 @@ def test_hdf5_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> No
         )
 
     assert store.closed
+
+
+def test_hdf5_store_supports_sample_batched_tall_pca(tmp_path: Path) -> None:
+    pytest.importorskip("h5py")
+    base = _genotype_data()
+    values = np.tile(base.GD, (5, 1))
+    genotype = GenotypeData(
+        values,
+        base.GM,
+        np.asarray([f"sample-{index}" for index in range(len(values))]),
+    )
+    path = tmp_path / "tall-genotype.h5"
+    write_hdf5_genotype(path, genotype, marker_chunk_size=2)
+
+    expected = compute_pca(
+        values,
+        n_components=2,
+        maf_filter=0.0,
+        marker_workspace_mib=32.0,
+    )
+    with HDF5GenotypeStore(path) as store:
+        actual = compute_pca(
+            store,
+            n_components=2,
+            maf_filter=0.0,
+            marker_workspace_mib=0.0001,
+        )
+
+    np.testing.assert_allclose(actual.eigenvalues, expected.eigenvalues, rtol=1e-12)
+    np.testing.assert_allclose(
+        actual.scores @ actual.scores.T,
+        expected.scores @ expected.scores.T,
+        rtol=1e-11,
+        atol=1e-11,
+    )
 
 
 def test_auto_backend_uses_hdf5_when_available(tmp_path: Path) -> None:

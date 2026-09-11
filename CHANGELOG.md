@@ -13,7 +13,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   disk backend automatically; MAF filtering, VanRaden kinship, PCA, and direct
   GLM/MLM scans read each in bounded marker blocks. Wide-matrix PCA, VanRaden,
   and marker scans avoid materializing a complete centered genotype matrix;
-  exact tall-matrix PCA retains its centered filtered matrix.
+  exact tall-matrix PCA switches to two-pass sample batching when its centered
+  matrix would substantially exceed the workspace budget.
 - `GenotypeView` composes sample and marker selections over any genotype store
   while preserving bounded, contiguous reads from the parent store.
 - Top-level `GAPIT()` GLM and MLM workflows accept labeled genotype stores and

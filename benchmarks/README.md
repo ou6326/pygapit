@@ -39,11 +39,12 @@ the owned output buffer instead of creating `np.nansum`'s full-size temporary.
 
 ## PCA sample/marker-space crossover
 
-`benchmark_pca_crossover.py` measures production PCA across tall, square, and
-wide genotype shapes. For tall inputs it also evaluates an exact candidate that
-accumulates the marker-space Gram matrix in sample batches instead of retaining
-the complete centered genotype matrix. Each candidate timing is preceded by
-eigenvalue, explained-variance, score, and loading equivalence checks.
+`benchmark_pca_crossover.py` measures exact PCA across tall, square, and wide
+genotype shapes. For tall inputs it compares a retained-centered reference with
+sample-batched marker-space Gram accumulation. Each candidate timing is
+preceded by eigenvalue, explained-variance, score, and loading equivalence
+checks. The report records the enlarged workspace used to force the retained
+reference after production PCA gained its adaptive path.
 
 Run the default workload and retain its JSON report:
 

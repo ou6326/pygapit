@@ -18,6 +18,7 @@ class _NoArrayGenotypeStore:
     def __init__(self, genotype: npt.NDArray[np.float64]) -> None:
         self._genotype: npt.NDArray[np.float64] = genotype
         self.read_count: int = 0
+        self.sample_read_count: int = 0
 
     @property
     def shape(self) -> tuple[int, int]:
@@ -36,6 +37,8 @@ class _NoArrayGenotypeStore:
         sample_indices: npt.NDArray[np.int_] | slice | None = None,
     ) -> npt.NDArray[np.float64]:
         self.read_count += 1
+        if sample_indices is not None:
+            self.sample_read_count += 1
         block = self._genotype[:, marker_slice]
         if sample_indices is not None:
             block = block[sample_indices]
@@ -240,3 +243,22 @@ def test_pca_reads_genotype_store_in_marker_blocks(
         atol=1e-11,
     )
     assert store.read_count > 2
+    if shape[0] > shape[1]:
+        assert store.sample_read_count > 0
+    else:
+        assert store.sample_read_count == 0
+
+
+def test_tall_pca_retains_centered_matrix_when_it_fits_workspace() -> None:
+    rng = np.random.default_rng(20260912)
+    genotype = rng.binomial(2, 0.35, size=(120, 40)).astype(np.float64)
+    store = _NoArrayGenotypeStore(genotype)
+
+    compute_pca(
+        store,
+        n_components=4,
+        maf_filter=0.0,
+        marker_workspace_mib=32.0,
+    )
+
+    assert store.sample_read_count == 0
