@@ -62,6 +62,26 @@ The sample-batched candidate makes a second pass to compute scores and can
 increase disk I/O. Prefer it only when the traced-memory reduction remains
 material at representative scales without an unacceptable runtime penalty.
 
+`benchmark_pca_store_io.py` isolates another disk-specific effect: a dense
+retained marker range can be served by one parent read, while an interleaved MAF
+selection may require many small reads for every sample batch. It compares both
+layouts on NumPy mmap and, when installed, HDF5 while recording parent read
+calls and cells transferred:
+
+```powershell
+pixi run -e full python benchmarks/benchmark_pca_store_io.py --output benchmarks/results/pca-store-io.json
+```
+
+Use this report to decide whether a storage-chunk-aware read planner is worth
+the added complexity; timing differences alone are not CI thresholds.
+
+On the development Windows machine (2,000 samples, 2,000 parent markers, 500
+retained markers, 1 MiB workspace), dense and interleaved layouts each
+transferred 3,000,000 cells. Dense HDF5 used 24 parent reads and 0.083 s median;
+interleaved HDF5 used 8,500 reads and 5.209 s. NumPy mmap measured 0.044 s and
+0.088 s respectively. This workload demonstrates call amplification rather
+than establishing a universal timing threshold.
+
 ## Hotspot profiles
 
 After recording a baseline, use deterministic profiler scenarios to separate
