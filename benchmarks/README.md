@@ -37,6 +37,30 @@ On the same machine, mean imputation of a 500 by 20,000 matrix with 5% missing
 values improved from 0.0755 s / 172.12 MiB to 0.0405 s / 86.37 MiB by reusing
 the owned output buffer instead of creating `np.nansum`'s full-size temporary.
 
+## PCA sample/marker-space crossover
+
+`benchmark_pca_crossover.py` measures production PCA across tall, square, and
+wide genotype shapes. For tall inputs it also evaluates an exact candidate that
+accumulates the marker-space Gram matrix in sample batches instead of retaining
+the complete centered genotype matrix. Each candidate timing is preceded by
+eigenvalue, explained-variance, score, and loading equivalence checks.
+
+Run the default workload and retain its JSON report:
+
+```powershell
+pixi run -e full python benchmarks/benchmark_pca_crossover.py --output benchmarks/results/pca-crossover.json
+```
+
+For a quick validation run:
+
+```powershell
+pixi run -e full python benchmarks/benchmark_pca_crossover.py --individuals 120 --marker-ratios 0.25 0.75 1 2 --warmups 0 --repeats 1
+```
+
+The sample-batched candidate makes a second pass to compute scores and can
+increase disk I/O. Prefer it only when the traced-memory reduction remains
+material at representative scales without an unacceptable runtime penalty.
+
 ## Hotspot profiles
 
 After recording a baseline, use deterministic profiler scenarios to separate
