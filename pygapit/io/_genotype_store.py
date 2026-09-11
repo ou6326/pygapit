@@ -7,7 +7,7 @@ import typing as t
 import numpy as np
 import numpy.typing as npt
 
-from .._typing import FloatMatrix, IntVector, as_float_matrix
+from .._typing import FloatMatrix, FloatVector, IntVector, StrVector, as_float_matrix
 
 
 @t.runtime_checkable
@@ -28,6 +28,23 @@ class GenotypeStore(t.Protocol):
         marker_slice: slice,
         sample_indices: IntVector | slice | None = None,
     ) -> FloatMatrix: ...
+
+
+@t.runtime_checkable
+class LabeledGenotypeStore(GenotypeStore, t.Protocol):
+    """A genotype store carrying aligned sample and marker metadata."""
+
+    @property
+    def taxa(self) -> StrVector: ...
+
+    @property
+    def marker_ids(self) -> StrVector: ...
+
+    @property
+    def chromosomes(self) -> StrVector: ...
+
+    @property
+    def positions(self) -> FloatVector: ...
 
 
 class ArrayGenotypeStore:

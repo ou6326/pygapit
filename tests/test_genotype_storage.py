@@ -20,6 +20,7 @@ from pygapit.io.storage import (
     ArrayGenotypeStore,
     GenotypeView,
     HDF5GenotypeStore,
+    LabeledGenotypeStore,
     NumpyGenotypeStore,
     StorageBackend,
     open_genotype_store,
@@ -304,6 +305,7 @@ def test_numpy_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> N
 
     with open_genotype_store(path) as store:
         assert isinstance(store, NumpyGenotypeStore)
+        assert isinstance(store, LabeledGenotypeStore)
         assert store.shape == genotype.GD.shape
         np.testing.assert_array_equal(store.taxa, genotype.taxa)
         np.testing.assert_array_equal(
@@ -335,6 +337,7 @@ def test_hdf5_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> No
     write_hdf5_genotype(path, genotype, marker_chunk_size=2)
 
     with HDF5GenotypeStore(path) as store:
+        assert isinstance(store, LabeledGenotypeStore)
         assert store.shape == genotype.GD.shape
         np.testing.assert_array_equal(store.taxa, genotype.taxa)
         np.testing.assert_array_equal(
