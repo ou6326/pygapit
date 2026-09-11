@@ -9,6 +9,8 @@ import numpy.typing as npt
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector, as_float_matrix
 
+_MAX_MARKER_READ_AMPLIFICATION = 4
+
 
 @t.runtime_checkable
 class GenotypeStore(t.Protocol):
@@ -28,6 +30,14 @@ class GenotypeStore(t.Protocol):
         marker_slice: slice,
         sample_indices: IntVector | slice | None = None,
     ) -> FloatMatrix: ...
+
+
+@t.runtime_checkable
+class MarkerChunkedGenotypeStore(GenotypeStore, t.Protocol):
+    """A store exposing a positive physical marker-chunk width, when known."""
+
+    @property
+    def marker_chunk_size(self) -> int | None: ...
 
 
 @t.runtime_checkable
@@ -152,6 +162,14 @@ class GenotypeView:
             else len(self._marker_indices),
         )
 
+    @property
+    def marker_chunk_size(self) -> int | None:
+        if self._marker_indices is not None:
+            return None
+        if isinstance(self._parent, MarkerChunkedGenotypeStore):
+            return self._parent.marker_chunk_size
+        return None
+
     def read_markers(
         self,
         marker_slice: slice,
@@ -198,12 +216,37 @@ class GenotypeView:
             result.setflags(write=False)
             return result
 
-        output_start = 0
+        planned = np.zeros(len(parent_markers), dtype=np.bool_)
+        if isinstance(self._parent, MarkerChunkedGenotypeStore):
+            chunk_size = self._parent.marker_chunk_size
+            if chunk_size is not None and chunk_size > 0:
+                marker_chunks = parent_markers // chunk_size
+                for chunk_index in np.unique(marker_chunks):
+                    positions = np.flatnonzero(marker_chunks == chunk_index)
+                    chunk_markers = parent_markers[positions]
+                    unique_markers = np.unique(chunk_markers)
+                    read_start = int(unique_markers[0])
+                    read_stop = int(unique_markers[-1]) + 1
+                    if read_stop - read_start > _MAX_MARKER_READ_AMPLIFICATION * len(
+                        unique_markers
+                    ):
+                        continue
+                    block = self._parent.read_markers(
+                        slice(read_start, read_stop),
+                        parent_samples,
+                    )
+                    result[:, positions] = block[:, chunk_markers - read_start]
+                    planned[positions] = True
+
         run_start = 0
         while run_start < len(parent_markers):
+            if planned[run_start]:
+                run_start += 1
+                continue
             run_stop = run_start + 1
             while (
                 run_stop < len(parent_markers)
+                and not planned[run_stop]
                 and parent_markers[run_stop] == parent_markers[run_stop - 1] + 1
             ):
                 run_stop += 1
@@ -212,8 +255,7 @@ class GenotypeView:
                 parent_samples,
             )
             width = run_stop - run_start
-            result[:, output_start : output_start + width] = block
-            output_start += width
+            result[:, run_start:run_stop] = block[:, :width]
             run_start = run_stop
         result.setflags(write=False)
         return result

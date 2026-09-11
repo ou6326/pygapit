@@ -10,6 +10,7 @@ from ._genotype_store import (
     GenotypeStore,
     GenotypeView,
     LabeledGenotypeStore,
+    MarkerChunkedGenotypeStore,
     as_genotype_store,
 )
 from ._storage_hdf5 import HDF5GenotypeStore, write_hdf5_genotype
@@ -28,6 +29,7 @@ __all__ = [
     "GenotypeView",
     "HDF5GenotypeStore",
     "LabeledGenotypeStore",
+    "MarkerChunkedGenotypeStore",
     "NumpyGenotypeStore",
     "StorageBackend",
     "as_genotype_store",

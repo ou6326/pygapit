@@ -93,6 +93,11 @@ class HDF5GenotypeStore:
         return shape[0], shape[1]
 
     @property
+    def marker_chunk_size(self) -> int | None:
+        chunks = t.cast(tuple[int, ...] | None, self._dataset.chunks)
+        return None if chunks is None else chunks[1]
+
+    @property
     def marker_map(self) -> pd.DataFrame:
         return pd.DataFrame({
             "SNP": self.marker_ids,

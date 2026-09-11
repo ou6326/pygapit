@@ -20,6 +20,7 @@ from pygapit.io.storage import (
     GenotypeStore,
     GenotypeView,
     HDF5GenotypeStore,
+    MarkerChunkedGenotypeStore,
     NumpyGenotypeStore,
     write_hdf5_genotype,
     write_numpy_genotype,
@@ -64,6 +65,12 @@ class _CountingStore:
     @property
     def shape(self) -> tuple[int, int]:
         return self.parent.shape
+
+    @property
+    def marker_chunk_size(self) -> int | None:
+        if isinstance(self.parent, MarkerChunkedGenotypeStore):
+            return self.parent.marker_chunk_size
+        return None
 
     def reset(self) -> None:
         self.parent_read_calls = 0

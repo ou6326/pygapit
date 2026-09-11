@@ -106,6 +106,16 @@ class _RecordingParentStore:
         return result
 
 
+class _ChunkedRecordingStore(_RecordingParentStore):
+    def __init__(self, values: FloatMatrix, marker_chunk_size: int = 8) -> None:
+        super().__init__(values)
+        self._marker_chunk_size: int = marker_chunk_size
+
+    @property
+    def marker_chunk_size(self) -> int:
+        return self._marker_chunk_size
+
+
 def _genotype_data() -> GenotypeData:
     values = np.asarray([
         [0.0, 1.0, 2.0, 0.0],
@@ -215,6 +225,46 @@ def test_genotype_view_coalesces_ordered_runs_and_preserves_repeats() -> None:
         slice(0, 1),
         slice(0, 1),
     ]
+
+
+def test_genotype_view_coalesces_dense_selections_within_storage_chunks() -> None:
+    values = np.arange(64, dtype=np.float64).reshape(4, 16)
+    parent = _ChunkedRecordingStore(values)
+    marker_indices = np.asarray([6, 0, 2, 6, 8, 10, 12, 14], dtype=np.int_)
+    view = GenotypeView(parent, marker_indices=marker_indices)
+
+    actual = view.read_markers(slice(None))
+
+    np.testing.assert_array_equal(actual, values[:, marker_indices])
+    assert parent.marker_slices == [slice(0, 7), slice(8, 15)]
+
+
+def test_genotype_view_does_not_overread_sparse_storage_chunks() -> None:
+    values = np.arange(64, dtype=np.float64).reshape(4, 16)
+    parent = _ChunkedRecordingStore(values, marker_chunk_size=16)
+    marker_indices = np.asarray([0, 15], dtype=np.int_)
+    view = GenotypeView(parent, marker_indices=marker_indices)
+
+    actual = view.read_markers(slice(None))
+
+    np.testing.assert_array_equal(actual, values[:, marker_indices])
+    assert parent.marker_slices == [slice(0, 1), slice(15, 16)]
+
+
+def test_genotype_view_propagates_chunks_through_sample_only_view() -> None:
+    values = np.arange(64, dtype=np.float64).reshape(4, 16)
+    parent = _ChunkedRecordingStore(values)
+    samples = GenotypeView(
+        parent,
+        sample_indices=np.asarray([3, 1], dtype=np.int_),
+    )
+    markers = np.asarray([0, 2, 4, 6], dtype=np.int_)
+    view = GenotypeView(samples, marker_indices=markers)
+
+    actual = view.read_markers(slice(None))
+
+    np.testing.assert_array_equal(actual, values[[3, 1]][:, markers])
+    assert parent.marker_slices == [slice(0, 7)]
 
 
 def test_genotype_view_composes_nested_samples_and_markers() -> None:
@@ -340,6 +390,7 @@ def test_hdf5_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> No
     with HDF5GenotypeStore(path) as store:
         assert isinstance(store, LabeledGenotypeStore)
         assert store.shape == genotype.GD.shape
+        assert store.marker_chunk_size == 2
         np.testing.assert_array_equal(store.taxa, genotype.taxa)
         np.testing.assert_array_equal(
             store.read_markers(slice(1, 4), np.asarray([3, 0], dtype=np.int_)),

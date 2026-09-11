@@ -16,7 +16,9 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   exact tall-matrix PCA switches to two-pass sample batching when its centered
   matrix would substantially exceed the workspace budget.
 - `GenotypeView` composes sample and marker selections over any genotype store
-  while preserving bounded, contiguous reads from the parent store.
+  while preserving bounded, contiguous reads from the parent store. Sparse
+  selections over chunked backends are coalesced within physical marker chunks
+  under a bounded over-read policy.
 - Top-level `GAPIT()` GLM and MLM workflows accept labeled genotype stores and
   perform taxa alignment, trait filtering, MAF filtering, PCA, kinship, and
   marker scans through bounded source reads.

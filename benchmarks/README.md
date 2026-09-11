@@ -72,15 +72,17 @@ calls and cells transferred:
 pixi run -e full python benchmarks/benchmark_pca_store_io.py --output benchmarks/results/pca-store-io.json
 ```
 
-Use this report to decide whether a storage-chunk-aware read planner is worth
-the added complexity; timing differences alone are not CI thresholds.
+Use this report to verify the storage-chunk-aware read planner against new
+backends and chunk layouts; timing differences alone are not CI thresholds.
 
 On the development Windows machine (2,000 samples, 2,000 parent markers, 500
-retained markers, 1 MiB workspace), dense and interleaved layouts each
-transferred 3,000,000 cells. Dense HDF5 used 24 parent reads and 0.083 s median;
-interleaved HDF5 used 8,500 reads and 5.209 s. NumPy mmap measured 0.044 s and
-0.088 s respectively. This workload demonstrates call amplification rather
-than establishing a universal timing threshold.
+retained markers, 1 MiB workspace), the original interleaved HDF5 path used
+8,500 parent reads and 5.209 s. Chunk-aware coalescing reduced that case to 41
+reads and 0.207 s while transferring 11,922,000 cells, below the planner's 4x
+over-read limit relative to the 3,000,000 requested cells. Dense HDF5 remained
+at 24 reads. NumPy mmap deliberately retains exact sparse reads because it does
+not expose a physical marker-chunk width. This workload demonstrates I/O call
+amplification rather than establishing a universal timing threshold.
 
 ## Hotspot profiles
 

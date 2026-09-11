@@ -506,7 +506,10 @@ require an in-memory genotype matrix.
 `maf_filter()` returns a `GenotypeView` when its input is a store, so filtering
 does not copy the complete genotype matrix. `GenotypeView` also supports sample
 subsets and marker reordering; sparse marker selections are translated into
-contiguous reads from the parent store where possible.
+contiguous reads from the parent store where possible. Stores that expose a
+physical marker-chunk width, including HDF5 stores written by pyGAPIT, can
+coalesce nearby sparse selections within a chunk while limiting the read span
+to four times the requested unique markers.
 
 The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
 falls back to a dependency-free NumPy memory-mapped store. Both preserve the
