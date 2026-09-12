@@ -2,23 +2,30 @@
 
 from __future__ import annotations
 
-from typing import TypeAlias, cast, final
+from typing import Protocol, TypeAlias, cast, final
 
 import numpy as np
+import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from ._genotype_store import LabeledGenotypeStore
-from .formats import GenotypeData
 
-GenotypeWriteSource: TypeAlias = GenotypeData | LabeledGenotypeStore
+
+class _InMemoryGenotypeData(Protocol):
+    GD: FloatMatrix
+    GM: pd.DataFrame
+    taxa: StrVector
+
+
+GenotypeWriteSource: TypeAlias = _InMemoryGenotypeData | LabeledGenotypeStore
 
 
 @final
 class _GenotypeDataSource:
     """Expose ``GenotypeData`` only to storage writers as a labeled source."""
 
-    def __init__(self, genotype: GenotypeData) -> None:
-        self._genotype: GenotypeData = genotype
+    def __init__(self, genotype: _InMemoryGenotypeData) -> None:
+        self._genotype: _InMemoryGenotypeData = genotype
         self._marker_ids = cast(
             StrVector,
             np.asarray(genotype.GM["SNP"].to_numpy(dtype=str), dtype=str),

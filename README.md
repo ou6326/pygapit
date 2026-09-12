@@ -475,10 +475,20 @@ Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
 ```python
 from pygapit import (
     compute_pca,
+    import_numeric_genotype_store,
     maf_filter,
     open_genotype_store,
     vanraden_kinship,
     write_genotype_store,
+)
+
+# Convert numeric GD/GM files directly into a disk-backed store. The input GD
+# matrix is read in marker blocks instead of being retained in full.
+import_numeric_genotype_store(
+    "genotype.zarr",
+    "genotype.txt",
+    "marker-map.txt",
+    marker_chunk_size=2048,
 )
 
 write_genotype_store("genotype-store", genotype)
@@ -487,6 +497,12 @@ with open_genotype_store("genotype-store") as store:
     kinship = vanraden_kinship(filtered, marker_workspace_mib=64)
     pca = compute_pca(filtered, n_components=3, marker_workspace_mib=64)
 ```
+
+Numeric GD files store samples in rows and markers in columns. Bounded marker
+imports therefore rescan the input file for each block; increasing
+`marker_chunk_size` trades more memory for fewer scans. The destination is
+still written incrementally and the complete genotype matrix is never retained
+in memory.
 
 Existing labeled stores can also be converted between backends without loading
 the full genotype matrix:

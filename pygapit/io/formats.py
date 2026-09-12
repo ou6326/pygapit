@@ -13,7 +13,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, overload
+from typing import Any, NotRequired, TypedDict, final, overload
 
 import numpy as np
 import pandas as pd
@@ -34,6 +34,7 @@ from .._typing import (
 )
 from ._genotype_qc import filter_markers_by_maf
 from ._genotype_store import GenotypeStore, GenotypeView, LabeledGenotypeStore
+from ._storage_types import StorageBackend
 
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
@@ -56,6 +57,7 @@ HETEROZYGOUS_2BIT = frozenset({
 })
 MISSING_1BIT = frozenset({"N", "X", "-", "+", "/", "NA", "NAN"})
 MISSING_2BIT = frozenset({"NN", "XX", "--", "++", "//", "00", "N", "NA", "NAN"})
+_IMPUTE_METHODS = frozenset({"middle", "major", "minor", "mean", "none"})
 
 
 @dataclass
@@ -514,6 +516,128 @@ def read_numeric(
     return _numeric_from_frames(gd_df, gm_df, impute_method, "Numeric genotype")
 
 
+@final
+class _NumericFileGenotypeStore:
+    """Read numeric genotype columns on demand for a one-shot store import."""
+
+    def __init__(
+        self,
+        gd_path: str | Path,
+        marker_map: pd.DataFrame,
+        impute_method: str,
+    ) -> None:
+        self._path = Path(gd_path)
+        if not self._path.exists():
+            raise FileNotFoundError(f"Numeric genotype file not found: {self._path}")
+        if impute_method not in _IMPUTE_METHODS:
+            raise ValueError(f"Unknown impute method: {impute_method}")
+
+        header = pd.read_csv(self._path, sep="\t", nrows=0)
+        if header.shape[1] < 2:
+            raise ValueError(
+                "Numeric genotype must contain a taxa column and at least one SNP"
+            )
+        self._taxa_column = header.columns[0]
+        self._marker_columns: StrVector = np.asarray(header.columns[1:], dtype=str)
+        normalized_map = _marker_map_from_frame(marker_map, "Marker map")
+        if self._marker_columns.tolist() != normalized_map["SNP"].tolist():
+            raise ValueError(
+                "Numeric genotype SNP columns must match marker-map rows in order"
+            )
+
+        taxa_frame = pd.read_csv(
+            self._path,
+            sep="\t",
+            usecols=[self._taxa_column],
+            low_memory=False,
+        )
+        if taxa_frame.empty:
+            raise ValueError("Numeric genotype must contain at least one genotype row")
+        self.taxa: StrVector = _taxa_array(taxa_frame.iloc[:, 0], "genotype")
+        self.marker_ids: StrVector = self._marker_columns.copy()
+        self.chromosomes: StrVector = np.asarray(
+            normalized_map["Chromosome"].to_numpy(dtype=str), dtype=str
+        )
+        self.positions: FloatVector = np.asarray(
+            normalized_map["Position"].to_numpy(dtype=np.float64)
+        )
+        self._impute_method = impute_method
+        self._shape = (len(self.taxa), len(self.marker_ids))
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._shape
+
+    def read_markers(
+        self,
+        marker_slice: slice,
+        sample_indices: IntVector | slice | None = None,
+    ) -> FloatMatrix:
+        marker_indices: IntVector = np.arange(self.shape[1], dtype=np.int_)[
+            marker_slice
+        ]
+
+        marker_names: list[str] = self._marker_columns[marker_indices].tolist()
+        values: FloatMatrix
+        if marker_names:
+            frame = pd.read_csv(
+                self._path,
+                sep="\t",
+                usecols=[self._taxa_column, *marker_names],
+                low_memory=False,
+            )
+            taxa = _taxa_array(frame[self._taxa_column], "genotype")
+            if not np.array_equal(taxa, self.taxa):
+                raise ValueError("Numeric genotype taxa changed while importing")
+            try:
+                values = frame.loc[:, marker_names].to_numpy(
+                    dtype=np.float64, copy=True
+                )
+            except (TypeError, ValueError) as exc:
+                raise ValueError("Numeric genotype SNP values must be numeric") from exc
+            if np.isinf(values).any():
+                raise ValueError(
+                    "Numeric genotype SNP values must not contain infinity"
+                )
+            values = _impute_missing_inplace(values, self._impute_method)
+        else:
+            values = np.empty((self.shape[0], 0), dtype=np.float64)
+        if sample_indices is not None:
+            values = values[sample_indices]
+        result = np.asarray(values, dtype=np.float64).view()
+        result.setflags(write=False)
+        return result
+
+
+def import_numeric_genotype_store(
+    store_path: str | Path,
+    gd_path: str | Path,
+    gm_path: str | Path | pd.DataFrame,
+    *,
+    impute_method: str = "middle",
+    backend: StorageBackend = "auto",
+    marker_chunk_size: int = 1024,
+) -> None:
+    """Import numeric GD/GM data without materializing the full genotype matrix."""
+    if isinstance(gm_path, pd.DataFrame):
+        marker_map = gm_path
+    else:
+        marker_path = Path(gm_path)
+        if not marker_path.exists():
+            raise FileNotFoundError(f"Marker map file not found: {marker_path}")
+        marker_map = pd.read_csv(marker_path, sep="\t", header=0)
+
+    source = _NumericFileGenotypeStore(gd_path, marker_map, impute_method)
+    from .storage import write_genotype_store
+
+    write_genotype_store(
+        store_path,
+        source,
+        backend=backend,
+        marker_chunk_size=marker_chunk_size,
+    )
+
+
 def impute_missing(GD: FloatMatrix, method: str = "middle") -> FloatMatrix:
     """
     Impute missing genotype values.
@@ -534,7 +658,7 @@ def _impute_missing_inplace(GD: FloatMatrix, method: str) -> FloatMatrix:
     """Impute a validated, exclusively owned floating-point matrix in place."""
     if method == "none":
         return GD
-    if method not in {"middle", "major", "minor", "mean"}:
+    if method not in _IMPUTE_METHODS:
         raise ValueError(f"Unknown impute method: {method}")
 
     missing = np.isnan(GD)

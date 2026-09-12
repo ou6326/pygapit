@@ -8,14 +8,19 @@ import warnings
 from importlib.util import find_spec
 from pathlib import Path
 from types import ModuleType
-from typing import TYPE_CHECKING, cast
+from typing import TYPE_CHECKING, Protocol, cast
 
 import numpy as np
 import pandas as pd
 import pytest
 
 from pygapit._typing import FloatMatrix, FloatVector, IntVector, StrVector
-from pygapit.io.formats import GenotypeData, maf_filter
+from pygapit.io.formats import (
+    GenotypeData,
+    import_numeric_genotype_store,
+    maf_filter,
+    read_numeric,
+)
 from pygapit.io.storage import (
     ArrayGenotypeStore,
     GenotypeView,
@@ -52,6 +57,18 @@ _STORAGE_BACKENDS = [
         ),
     ),
 ]
+
+
+class _ReadNumericCsv(Protocol):
+    def __call__(
+        self,
+        path: Path,
+        *,
+        sep: str,
+        nrows: int | None = None,
+        usecols: list[str] | None = None,
+        low_memory: bool = False,
+    ) -> pd.DataFrame: ...
 
 
 class _NoMaterializationStore:
@@ -512,6 +529,76 @@ def test_store_to_store_conversion_reads_bounded_marker_blocks(
         )
 
 
+def test_numeric_store_import_reads_only_requested_marker_columns(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    genotype_path = tmp_path / "genotype.tsv"
+    marker_map = pd.DataFrame({
+        "SNP": ["s1", "s2", "s3", "s4", "s5"],
+        "Chromosome": [1, 1, 2, 2, 3],
+        "Position": [10, 20, 30, 40, 50],
+    })
+    pd.DataFrame({
+        "Taxa": ["a", "b", "c", "d"],
+        "s1": [0.0, 1.0, 2.0, np.nan],
+        "s2": [2.0, 1.0, 0.0, 1.0],
+        "s3": [0.0, np.nan, 2.0, 1.0],
+        "s4": [1.0, 2.0, 0.0, 1.0],
+        "s5": [2.0, 2.0, np.nan, 0.0],
+    }).to_csv(genotype_path, sep="\t", index=False)
+    expected = read_numeric(genotype_path, marker_map, impute_method="mean")
+    original_read_csv = cast(_ReadNumericCsv, pd.read_csv)
+    requested_columns: list[list[str] | None] = []
+
+    def bounded_read_csv(
+        path: Path,
+        *,
+        sep: str,
+        nrows: int | None = None,
+        usecols: list[str] | None = None,
+        low_memory: bool = False,
+    ) -> pd.DataFrame:
+        if nrows is None and usecols is None:
+            raise AssertionError("numeric import must not read the complete GD table")
+        requested_columns.append(usecols)
+        return original_read_csv(
+            path,
+            sep=sep,
+            nrows=nrows,
+            usecols=usecols,
+            low_memory=low_memory,
+        )
+
+    monkeypatch.setattr("pygapit.io.formats.pd.read_csv", bounded_read_csv)
+    store_path = tmp_path / "numeric-store"
+
+    import_numeric_genotype_store(
+        store_path,
+        genotype_path,
+        marker_map,
+        impute_method="mean",
+        backend="numpy",
+        marker_chunk_size=2,
+    )
+
+    assert requested_columns == [
+        None,
+        ["Taxa"],
+        ["Taxa", "s1", "s2"],
+        ["Taxa", "s3", "s4"],
+        ["Taxa", "s5"],
+    ]
+    with open_genotype_store(store_path) as store:
+        np.testing.assert_allclose(
+            store.read_markers(slice(None)), expected.GD, rtol=0.0, atol=0.0
+        )
+        np.testing.assert_array_equal(store.taxa, expected.taxa)
+        np.testing.assert_array_equal(
+            store.marker_ids, expected.GM["SNP"].to_numpy(dtype=str)
+        )
+
+
 def test_hdf5_store_supports_sample_batched_tall_pca(tmp_path: Path) -> None:
     pytest.importorskip("h5py")
     base = _genotype_data()
@@ -900,8 +987,6 @@ def test_numpy_rejects_non_object_metadata(tmp_path: Path, metadata: object) -> 
 
 if TYPE_CHECKING:
     from typing import assert_type
-
-    from pygapit._typing import FloatVector, StrVector
 
     def check_storage_types(path: Path) -> None:
         numpy_store = open_genotype_store(path, backend="numpy")

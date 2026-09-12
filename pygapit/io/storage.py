@@ -15,12 +15,12 @@ from ._genotype_store import (
 )
 from ._storage_hdf5 import HDF5GenotypeStore, write_hdf5_genotype
 from ._storage_numpy import NumpyGenotypeStore, write_numpy_genotype
+from ._storage_types import StorageBackend
 from ._storage_zarr import ZarrGenotypeStore, write_zarr_genotype
 
 if t.TYPE_CHECKING:
     from ._storage_source import GenotypeWriteSource
 
-StorageBackend: t.TypeAlias = t.Literal["auto", "numpy", "hdf5", "zarr"]
 _BACKEND_ERROR = "backend must be 'auto', 'numpy', 'hdf5', or 'zarr'"
 
 __all__ = [

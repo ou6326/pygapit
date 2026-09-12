@@ -12,6 +12,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   storage contract as the NumPy and HDF5 backends.
 - Chunked conversion between labeled NumPy, HDF5, and Zarr genotype stores
   without materializing the complete genotype matrix.
+- Direct marker-batched import from numeric GD/GM files into any genotype-store
+  backend.
 
 ### Changed
 
