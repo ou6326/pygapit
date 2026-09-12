@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
+from ._storage_source import as_genotype_write_source
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -19,7 +20,7 @@ if t.TYPE_CHECKING:
     import h5py
     from h5py._hl.dataset import AsStrView
 
-    from .formats import GenotypeData
+    from ._storage_source import GenotypeWriteSource
 
 
 _HDF5_DATASET = "genotype"
@@ -158,13 +159,14 @@ class HDF5GenotypeStore:
 
 def write_hdf5_genotype(
     path: str | Path,
-    genotype: GenotypeData,
+    genotype: GenotypeWriteSource,
     *,
     marker_chunk_size: int = 1024,
 ) -> None:
     """Write validated genotype data to the optional HDF5 backend."""
     if marker_chunk_size <= 0:
         raise ValueError("marker_chunk_size must be positive")
+    source = as_genotype_write_source(genotype)
     try:
         import h5py
     except ModuleNotFoundError as exc:
@@ -172,7 +174,7 @@ def write_hdf5_genotype(
             raise
         _raise_missing_h5py(exc)
 
-    rows, columns = genotype.GD.shape
+    rows, columns = source.shape
     marker_chunk_size = min(marker_chunk_size, columns)
     sample_chunk_size = min(rows, max(1, (8 * 1024**2) // (8 * marker_chunk_size)))
     string_dtype = t.cast(t.Callable[[str], np.dtype[np.object_]], h5py.string_dtype)(
@@ -183,30 +185,33 @@ def write_hdf5_genotype(
         create_dataset = t.cast(_DatasetWriter, handle.create_dataset)
         handle.attrs["schema_version"] = 1
         handle.attrs["complete"] = False
-        create_dataset(
+        matrix = create_dataset(
             _HDF5_DATASET,
-            data=genotype.GD,
+            shape=(rows, columns),
             dtype=np.float64,
             chunks=(sample_chunk_size, marker_chunk_size),
         )
+        for start in range(0, columns, marker_chunk_size):
+            stop = min(start + marker_chunk_size, columns)
+            matrix[:, start:stop] = source.read_markers(slice(start, stop))
         create_dataset(
             "taxa",
-            data=genotype.taxa.astype(object),
+            data=source.taxa.astype(object),
             dtype=string_dtype,
         )
         create_dataset(
             "markers/id",
-            data=genotype.GM["SNP"].astype(str).to_numpy(dtype=object),
+            data=source.marker_ids.astype(object),
             dtype=string_dtype,
         )
         create_dataset(
             "markers/chromosome",
-            data=genotype.GM["Chromosome"].astype(str).to_numpy(dtype=object),
+            data=source.chromosomes.astype(object),
             dtype=string_dtype,
         )
         create_dataset(
             "markers/position",
-            data=genotype.GM["Position"].to_numpy(dtype=np.float64),
+            data=source.positions,
             dtype=np.float64,
         )
         handle.attrs["complete"] = True
@@ -228,8 +233,9 @@ class _DatasetWriter(t.Protocol):
         self,
         name: str,
         *,
-        data: object,
-        dtype: object,
+        data: object | None = None,
+        shape: tuple[int, ...] | None = None,
+        dtype: object = None,
         chunks: tuple[int, int] | None = None,
     ) -> h5py.Dataset: ...
 

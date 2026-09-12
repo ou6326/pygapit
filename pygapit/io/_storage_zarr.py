@@ -12,10 +12,11 @@ import numpy.typing as npt
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
+from ._storage_source import as_genotype_write_source
 from ._zarr_typing import ZarrArray, ZarrGroup, ZarrModule, as_zarr_module
 
 if TYPE_CHECKING:
-    from .formats import GenotypeData
+    from ._storage_source import GenotypeWriteSource
 
 _ZARR_DATASET = "genotype"
 
@@ -136,15 +137,16 @@ class ZarrGenotypeStore:
 
 def write_zarr_genotype(
     path: str | Path,
-    genotype: GenotypeData,
+    genotype: GenotypeWriteSource,
     *,
     marker_chunk_size: int = 1024,
 ) -> None:
     """Write validated genotype data as a Zarr format 2 directory."""
     if marker_chunk_size <= 0:
         raise ValueError("marker_chunk_size must be positive")
+    source = as_genotype_write_source(genotype)
     zarr = _require_zarr()
-    rows, columns = genotype.GD.shape
+    rows, columns = source.shape
     marker_chunk_size = min(marker_chunk_size, columns)
     sample_chunk_size = min(rows, max(1, (8 * 1024**2) // (8 * marker_chunk_size)))
     group = zarr.open_group(str(Path(path)), mode="w-", zarr_format=2)
@@ -159,17 +161,11 @@ def write_zarr_genotype(
     )
     for start in range(0, columns, marker_chunk_size):
         stop = min(start + marker_chunk_size, columns)
-        matrix[:, start:stop] = genotype.GD[:, start:stop]
-    _write_strings(group, "taxa", genotype.taxa)
-    _write_strings(
-        group, "markers/id", genotype.GM["SNP"].astype(str).to_numpy(dtype=str)
-    )
-    _write_strings(
-        group,
-        "markers/chromosome",
-        genotype.GM["Chromosome"].astype(str).to_numpy(dtype=str),
-    )
-    positions = genotype.GM["Position"].to_numpy(dtype=np.float64)
+        matrix[:, start:stop] = source.read_markers(slice(start, stop))
+    _write_strings(group, "taxa", source.taxa)
+    _write_strings(group, "markers/id", source.marker_ids)
+    _write_strings(group, "markers/chromosome", source.chromosomes)
+    positions = source.positions
     position_array = _create_array(
         group,
         "markers/position",

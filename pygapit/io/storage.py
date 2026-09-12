@@ -18,8 +18,7 @@ from ._storage_numpy import NumpyGenotypeStore, write_numpy_genotype
 from ._storage_zarr import ZarrGenotypeStore, write_zarr_genotype
 
 if t.TYPE_CHECKING:
-    from .formats import GenotypeData
-
+    from ._storage_source import GenotypeWriteSource
 
 StorageBackend: t.TypeAlias = t.Literal["auto", "numpy", "hdf5", "zarr"]
 _BACKEND_ERROR = "backend must be 'auto', 'numpy', 'hdf5', or 'zarr'"
@@ -92,7 +91,7 @@ def open_genotype_store(
 
 def write_genotype_store(
     path: str | Path,
-    genotype: GenotypeData,
+    genotype: GenotypeWriteSource,
     *,
     backend: StorageBackend = "auto",
     marker_chunk_size: int = 1024,

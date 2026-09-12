@@ -10,6 +10,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 - An optional Zarr 3 genotype backend with the same labeled, chunk-readable
   storage contract as the NumPy and HDF5 backends.
+- Chunked conversion between labeled NumPy, HDF5, and Zarr genotype stores
+  without materializing the complete genotype matrix.
 
 ### Changed
 

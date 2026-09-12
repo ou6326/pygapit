@@ -14,7 +14,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
-from pygapit._typing import FloatMatrix, IntVector
+from pygapit._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from pygapit.io.formats import GenotypeData, maf_filter
 from pygapit.io.storage import (
     ArrayGenotypeStore,
@@ -80,6 +80,17 @@ class _NoMaterializationStore:
         if sample_indices is not None:
             result = result[sample_indices]
         return result.copy()
+
+
+class _LabeledNoMaterializationStore(_NoMaterializationStore):
+    def __init__(self, genotype: GenotypeData) -> None:
+        super().__init__(genotype.GD)
+        self.taxa: StrVector = genotype.taxa
+        self.marker_ids: StrVector = np.asarray(genotype.GM["SNP"], dtype=str)
+        self.chromosomes: StrVector = np.asarray(genotype.GM["Chromosome"], dtype=str)
+        self.positions: FloatVector = np.asarray(
+            genotype.GM["Position"], dtype=np.float64
+        )
 
 
 class _RecordingParentStore:
@@ -470,6 +481,35 @@ def test_zarr_suffix_selects_zarr_backend(tmp_path: Path) -> None:
 
     with open_genotype_store(path) as store:
         assert isinstance(store, ZarrGenotypeStore)
+
+
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
+def test_store_to_store_conversion_reads_bounded_marker_blocks(
+    tmp_path: Path,
+    backend: StorageBackend,
+) -> None:
+    genotype = _genotype_data()
+    source = _LabeledNoMaterializationStore(genotype)
+    suffix = {"numpy": "", "hdf5": ".h5", "zarr": ".zarr"}[backend]
+    path = tmp_path / f"converted{suffix}"
+
+    write_genotype_store(path, source, backend=backend, marker_chunk_size=2)
+
+    assert source.read_count == 2
+    with open_genotype_store(path, backend=backend) as converted:
+        np.testing.assert_array_equal(converted.read_markers(slice(None)), genotype.GD)
+        np.testing.assert_array_equal(converted.taxa, genotype.taxa)
+        np.testing.assert_array_equal(
+            converted.marker_ids, genotype.GM["SNP"].to_numpy(dtype=str)
+        )
+        np.testing.assert_array_equal(
+            converted.chromosomes,
+            genotype.GM["Chromosome"].to_numpy(dtype=str),
+        )
+        np.testing.assert_array_equal(
+            converted.positions,
+            genotype.GM["Position"].to_numpy(dtype=np.float64),
+        )
 
 
 def test_hdf5_store_supports_sample_batched_tall_pca(tmp_path: Path) -> None:

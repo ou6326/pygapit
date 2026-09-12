@@ -12,9 +12,10 @@ import numpy as np
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
+from ._storage_source import as_genotype_write_source
 
 if t.TYPE_CHECKING:
-    from .formats import GenotypeData
+    from ._storage_source import GenotypeWriteSource
 
 
 _NUMPY_METADATA = "metadata.json"
@@ -125,13 +126,14 @@ class NumpyGenotypeStore:
 
 def write_numpy_genotype(
     path: str | Path,
-    genotype: GenotypeData,
+    genotype: GenotypeWriteSource,
     *,
     marker_chunk_size: int = 1024,
 ):
     """Write a dependency-free, memory-mapped genotype directory."""
     if marker_chunk_size <= 0:
         raise ValueError("marker_chunk_size must be positive")
+    source = as_genotype_write_source(genotype)
     target = Path(path)
     target.mkdir(parents=False, exist_ok=False)
     metadata_path = target / _NUMPY_METADATA
@@ -141,7 +143,7 @@ def write_numpy_genotype(
     )
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
-    rows, columns = genotype.GD.shape
+    rows, columns = source.shape
     matrix = t.cast(
         np.memmap[tuple[int, int], np.dtype[np.float64]],
         np.lib.format.open_memmap(
@@ -150,22 +152,22 @@ def write_numpy_genotype(
     )
     for start in range(0, columns, marker_chunk_size):
         stop = min(start + marker_chunk_size, columns)
-        matrix[:, start:stop] = genotype.GD[:, start:stop]
+        matrix[:, start:stop] = source.read_markers(slice(start, stop))
     matrix.flush()
     del matrix
 
-    np.save(target / "taxa.npy", np.asarray(genotype.taxa, dtype=str))
+    np.save(target / "taxa.npy", np.asarray(source.taxa, dtype=str))
     np.save(
         target / "marker_id.npy",
-        genotype.GM["SNP"].astype(str).to_numpy(dtype=str),
+        source.marker_ids,
     )
     np.save(
         target / "marker_chromosome.npy",
-        genotype.GM["Chromosome"].astype(str).to_numpy(dtype=str),
+        source.chromosomes,
     )
     np.save(
         target / "marker_position.npy",
-        genotype.GM["Position"].to_numpy(dtype=np.float64),
+        source.positions,
     )
     metadata["complete"] = True
     metadata_path.write_text(json.dumps(metadata), encoding="utf-8")

@@ -488,6 +488,14 @@ with open_genotype_store("genotype-store") as store:
     pca = compute_pca(filtered, n_components=3, marker_workspace_mib=64)
 ```
 
+Existing labeled stores can also be converted between backends without loading
+the full genotype matrix:
+
+```python
+with open_genotype_store("genotype-store") as store:
+    write_genotype_store("genotype.zarr", store, marker_chunk_size=2048)
+```
+
 The top-level `GAPIT()` pipeline and the direct `glm_gwas()` and `mlm_gwas()`
 APIs accept an open labeled store and read its source data in bounded marker
 blocks. Top-level stores supply their own taxa and marker metadata, must contain
