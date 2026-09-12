@@ -18,11 +18,13 @@ from .storage import (
     LabeledGenotypeStore,
     MarkerChunkedGenotypeStore,
     NumpyGenotypeStore,
+    ZarrGenotypeStore,
     as_genotype_store,
     open_genotype_store,
     write_genotype_store,
     write_hdf5_genotype,
     write_numpy_genotype,
+    write_zarr_genotype,
 )
 
 __all__ = [
@@ -36,6 +38,7 @@ __all__ = [
     "MarkerChunkedGenotypeStore",
     "NumpyGenotypeStore",
     "PhenotypeData",
+    "ZarrGenotypeStore",
     "align_inputs",
     "align_taxa",
     "as_genotype_store",
@@ -48,4 +51,5 @@ __all__ = [
     "write_genotype_store",
     "write_hdf5_genotype",
     "write_numpy_genotype",
+    "write_zarr_genotype",
 ]

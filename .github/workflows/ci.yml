@@ -60,7 +60,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: default
+          environments: default full311
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
@@ -77,10 +77,13 @@ jobs:
         run: pixi run pyrefly check -p all
 
       - name: Verify bigdata dependencies
-        run: pixi run python -c "import h5py"
+        run: pixi run python -c "import h5py, zarr"
 
       - name: Python tests with bigdata dependencies
         run: pixi run pytest tests -q --ignore=tests/cross_language
+
+      - name: Storage tests on minimum Python
+        run: pixi run -e full311 pytest tests/test_genotype_storage.py -q
 
   windows:
     name: Windows Python ${{ matrix.python-version }} (base dependencies)
@@ -88,7 +91,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7

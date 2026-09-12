@@ -1,4 +1,4 @@
-"""Contracts for chunk-readable in-memory and optional HDF5 genotypes."""
+"""Contracts for chunk-readable in-memory and optional disk-backed genotypes."""
 
 from __future__ import annotations
 
@@ -23,10 +23,12 @@ from pygapit.io.storage import (
     LabeledGenotypeStore,
     NumpyGenotypeStore,
     StorageBackend,
+    ZarrGenotypeStore,
     open_genotype_store,
     write_genotype_store,
     write_hdf5_genotype,
     write_numpy_genotype,
+    write_zarr_genotype,
 )
 from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import compute_pca
@@ -39,6 +41,14 @@ _STORAGE_BACKENDS = [
         marks=pytest.mark.skipif(
             find_spec("h5py") is None,
             reason="h5py is not installed",
+        ),
+    ),
+    pytest.param(
+        "zarr",
+        id="zarr",
+        marks=pytest.mark.skipif(
+            find_spec("zarr") is None,
+            reason="zarr is not installed",
         ),
     ),
 ]
@@ -422,6 +432,46 @@ def test_hdf5_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> No
     assert store.closed
 
 
+def test_zarr_store_round_trip_preserves_data_and_metadata(tmp_path: Path) -> None:
+    pytest.importorskip("zarr")
+    base = _genotype_data()
+    genotype = GenotypeData(
+        base.GD,
+        base.GM,
+        np.asarray(["样本-1", "sample-2", "sample-3", "sample-4"]),
+    )
+    path = tmp_path / "genotype.zarr"
+
+    write_zarr_genotype(path, genotype, marker_chunk_size=2)
+
+    with open_genotype_store(path) as store:
+        assert isinstance(store, ZarrGenotypeStore)
+        assert store.shape == genotype.GD.shape
+        assert store.marker_chunk_size == 2
+        np.testing.assert_array_equal(store.taxa, genotype.taxa)
+        np.testing.assert_array_equal(
+            store.read_markers(slice(1, 4), np.asarray([3, 0, 3], dtype=np.int_)),
+            genotype.GD[[3, 0, 3], 1:4],
+        )
+        np.testing.assert_array_equal(
+            store.read_markers(slice(1, 4), slice(3, 0, -2)),
+            genotype.GD[3:0:-2, 1:4],
+        )
+        assert store.marker_map["SNP"].tolist() == genotype.GM["SNP"].tolist()
+
+    assert store.closed
+
+
+def test_zarr_suffix_selects_zarr_backend(tmp_path: Path) -> None:
+    pytest.importorskip("zarr")
+    path = tmp_path / "genotype.zarr"
+
+    write_genotype_store(path, _genotype_data())
+
+    with open_genotype_store(path) as store:
+        assert isinstance(store, ZarrGenotypeStore)
+
+
 def test_hdf5_store_supports_sample_batched_tall_pca(tmp_path: Path) -> None:
     pytest.importorskip("h5py")
     base = _genotype_data()
@@ -472,7 +522,7 @@ def test_auto_backend_uses_hdf5_when_available(tmp_path: Path) -> None:
         )
 
 
-def test_auto_backend_silently_falls_back_to_numpy_without_h5py(
+def test_auto_backend_uses_zarr_without_h5py(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -490,6 +540,37 @@ def test_auto_backend_silently_falls_back_to_numpy_without_h5py(
         return original_import(name, globals, locals, fromlist, level)
 
     monkeypatch.setattr(builtins, "__import__", import_without_h5py)
+
+    path = tmp_path / "genotype"
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        write_genotype_store(path, _genotype_data())
+        with open_genotype_store(path) as store:
+            assert isinstance(store, ZarrGenotypeStore)
+            np.testing.assert_array_equal(
+                store.read_markers(slice(0, 4)),
+                _genotype_data().GD,
+            )
+
+
+def test_auto_backend_silently_falls_back_to_numpy_without_optional_backends(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original_import = builtins.__import__
+
+    def import_without_optional_backends(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        if name in {"h5py", "zarr"}:
+            raise ModuleNotFoundError(f"No module named '{name}'", name=name)
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_optional_backends)
 
     path = tmp_path / "genotype"
     with warnings.catch_warnings():
@@ -530,6 +611,36 @@ def test_explicit_hdf5_backend_warns_when_dependency_is_missing(
             tmp_path / "genotype",
             _genotype_data(),
             backend="hdf5",
+        )
+
+
+def test_explicit_zarr_backend_warns_when_dependency_is_missing(
+    monkeypatch: pytest.MonkeyPatch,
+    tmp_path: Path,
+) -> None:
+    original_import = builtins.__import__
+
+    def import_without_zarr(
+        name: str,
+        globals: dict[str, object] | None = None,
+        locals: dict[str, object] | None = None,
+        fromlist: tuple[str, ...] = (),
+        level: int = 0,
+    ) -> ModuleType:
+        if name == "zarr":
+            raise ModuleNotFoundError("No module named 'zarr'", name="zarr")
+        return original_import(name, globals, locals, fromlist, level)
+
+    monkeypatch.setattr(builtins, "__import__", import_without_zarr)
+
+    with (
+        pytest.warns(RuntimeWarning, match="backend='numpy'"),
+        pytest.raises(ImportError, match=r"pygapit-ng\[bigdata\]"),
+    ):
+        write_genotype_store(
+            tmp_path / "genotype.zarr",
+            _genotype_data(),
+            backend="zarr",
         )
 
 
@@ -605,12 +716,18 @@ def test_store_rejects_incomplete_or_unsupported_format(
             json.dumps({"complete": complete, "schema_version": schema}),
             encoding="utf-8",
         )
-    else:
+    elif backend == "hdf5":
         import h5py
 
         with h5py.File(path, "r+") as handle:
             handle.attrs["complete"] = complete
             handle.attrs["schema_version"] = schema
+    else:
+        from pygapit.io._storage_zarr import _require_zarr
+
+        group = _require_zarr().open_group(str(path), mode="r+")
+        group.attrs["complete"] = complete
+        group.attrs["schema_version"] = schema
     with pytest.raises(ValueError):
         open_genotype_store(path, backend=backend)
 
@@ -637,11 +754,16 @@ def test_store_rejects_invalid_header_types(
         metadata: dict[str, object] = {"complete": True, "schema_version": 1}
         metadata[field] = value
         (path / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
-    else:
+    elif backend == "hdf5":
         import h5py
 
         with h5py.File(path, "r+") as handle:
             handle.attrs[field] = value
+    else:
+        from pygapit.io._storage_zarr import _require_zarr
+
+        group = _require_zarr().open_group(str(path), mode="r+")
+        group.attrs[field] = value
     with pytest.raises(ValueError):
         open_genotype_store(path, backend=backend)
 
@@ -660,12 +782,24 @@ def test_store_rejects_invalid_genotype_array(
     write_genotype_store(path, _genotype_data(), backend=backend)
     if backend == "numpy":
         np.save(path / "genotype.npy", values)
-    else:
+    elif backend == "hdf5":
         import h5py
 
         with h5py.File(path, "r+") as handle:
             del handle["genotype"]
             handle["genotype"] = values
+    else:
+        from pygapit.io._storage_zarr import _require_zarr
+
+        group = _require_zarr().open_group(str(path), mode="r+")
+        del group["genotype"]
+        array = group.create_array(
+            "genotype",
+            shape=values.shape,
+            dtype=values.dtype,
+            chunks=values.shape,
+        )
+        array[:] = values
     with pytest.raises(ValueError, match="two-dimensional float64"):
         open_genotype_store(path, backend=backend)
 
@@ -682,13 +816,27 @@ def test_store_rejects_misaligned_metadata(
     values = np.asarray(["only-one"])
     if backend == "numpy":
         np.save(path / f"{field}.npy", values)
-    else:
+    elif backend == "hdf5":
         import h5py
 
         name = "taxa" if field == "taxa" else "markers/id"
         with h5py.File(path, "r+") as handle:
             del handle[name]
             handle[name] = values.astype("S")
+    else:
+        from pygapit.io._storage_zarr import _require_zarr
+
+        name = "taxa" if field == "taxa" else "markers/id"
+        encoded = values.astype("S")
+        group = _require_zarr().open_group(str(path), mode="r+")
+        del group[name]
+        array = group.create_array(
+            name,
+            shape=encoded.shape,
+            dtype=encoded.dtype,
+            chunks=encoded.shape,
+        )
+        array[:] = encoded
     with pytest.raises(ValueError, match="must contain"):
         open_genotype_store(path, backend=backend)
 
@@ -718,15 +866,17 @@ if TYPE_CHECKING:
     def check_storage_types(path: Path) -> None:
         numpy_store = open_genotype_store(path, backend="numpy")
         hdf5_store = open_genotype_store(path, backend="hdf5")
+        zarr_store = open_genotype_store(path, backend="zarr")
         assert_type(numpy_store, NumpyGenotypeStore)
         assert_type(hdf5_store, HDF5GenotypeStore)
+        assert_type(zarr_store, ZarrGenotypeStore)
         array_filtered, array_indices = maf_filter(np.empty((2, 3)))
         store_filtered, store_indices = maf_filter(numpy_store)
         assert_type(array_filtered, FloatMatrix)
         assert_type(store_filtered, GenotypeView)
         assert_type(array_indices, IntVector)
         assert_type(store_indices, IntVector)
-        for store in (numpy_store, hdf5_store):
+        for store in (numpy_store, hdf5_store, zarr_store):
             assert_type(store.read_markers(slice(None)), FloatMatrix)
             assert_type(store.taxa, StrVector)
             assert_type(store.marker_ids, StrVector)

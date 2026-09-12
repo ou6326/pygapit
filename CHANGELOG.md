@@ -6,6 +6,16 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+### Added
+
+- An optional Zarr 3 genotype backend with the same labeled, chunk-readable
+  storage contract as the NumPy and HDF5 backends.
+
+### Changed
+
+- Require Python 3.11 or newer and test the complete optional-storage stack on
+  Python 3.11 and 3.14.
+
 ## [1.2.4] - 2026-09-12
 
 ### Added

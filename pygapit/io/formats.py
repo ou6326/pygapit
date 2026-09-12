@@ -13,13 +13,7 @@ from __future__ import annotations
 import warnings
 from dataclasses import dataclass
 from pathlib import Path
-from sys import version_info
-from typing import Any, TypedDict, overload
-
-if version_info >= (3, 11):
-    from typing import NotRequired
-else:
-    from typing_extensions import NotRequired
+from typing import Any, NotRequired, TypedDict, overload
 
 import numpy as np
 import pandas as pd

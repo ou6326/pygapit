@@ -5,13 +5,8 @@ from __future__ import annotations
 import typing as t
 import warnings
 from pathlib import Path
-from sys import version_info
 from types import TracebackType
-
-if version_info >= (3, 11):
-    from typing import Self
-else:
-    from typing_extensions import Self
+from typing import Self
 
 import numpy as np
 import pandas as pd

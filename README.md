@@ -79,14 +79,14 @@ otherwise drops to vectors.
 
 ### Regular use
 
-pyGAPIT requires Python 3.10 or newer. Install the `pygapit-ng` distribution
+pyGAPIT requires Python 3.11 or newer. Install the `pygapit-ng` distribution
 from PyPI; the Python import package and command-line entry point remain
 `pygapit`. R and the GAPIT reference repository are not required.
 
 ```bash
 pip install pygapit-ng
 
-pip install "pygapit-ng[bigdata]"  # include HDF5 for larger datasets
+pip install "pygapit-ng[bigdata]"  # include HDF5 and Zarr for larger datasets
 ```
 
 The default installation supports both in-memory analysis and disk-backed
@@ -503,17 +503,18 @@ physical marker-chunk width, including HDF5 stores written by pyGAPIT, can
 coalesce nearby sparse selections within a chunk while limiting the read span
 to four times the requested unique markers.
 
-The automatic writer uses HDF5 when `h5py` is installed and otherwise silently
-falls back to a dependency-free NumPy memory-mapped store. Both preserve the
-sample-by-marker layout; VanRaden kinship and PCA read both in contiguous marker
-blocks. PCA's exact tall-matrix branch switches to sample batches under memory
-pressure as described above. A `.h5`/`.hdf5` filename or explicit
-`backend="hdf5"` requests HDF5; if `h5py` is unavailable, the resulting warning includes the
-`pygapit-ng[bigdata]` installation command. Explicit `backend="numpy"` is always
-available.
+Without an explicit backend, the writer prefers HDF5, then Zarr, and silently
+falls back to a dependency-free NumPy memory-mapped store. An explicit
+`backend="zarr"` or `.zarr` path selects the optional Zarr 3 backend. All three
+preserve the sample-by-marker layout; VanRaden kinship and PCA read them in
+contiguous marker blocks. PCA's exact tall-matrix branch switches to sample
+batches under memory pressure as described above. A `.h5`/`.hdf5` filename or
+explicit `backend="hdf5"` requests HDF5. If an explicitly selected optional
+backend is unavailable, the warning includes the `pygapit-ng[bigdata]`
+installation command. Explicit `backend="numpy"` is always available.
 
 Disk stores read the layout produced by the corresponding writer and check the
-completion flag and schema version. Reading errors propagate from NumPy/HDF5.
+completion flag and schema version. Reading errors propagate from the backend.
 Returned marker blocks remain usable after the store is closed.
 Use `store.taxa`, `store.marker_ids`, `store.chromosomes`, and `store.positions`
 for typed NumPy metadata arrays; `store.marker_map` provides a pandas table.

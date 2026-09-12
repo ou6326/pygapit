@@ -49,10 +49,12 @@ from .io.storage import (
     LabeledGenotypeStore,
     MarkerChunkedGenotypeStore,
     NumpyGenotypeStore,
+    ZarrGenotypeStore,
     open_genotype_store,
     write_genotype_store,
     write_hdf5_genotype,
     write_numpy_genotype,
+    write_zarr_genotype,
 )
 from .stats.emma import emma_remle, emmax_p3d
 from .stats.kinship import vanraden_kinship, zhang_kinship
@@ -98,6 +100,7 @@ __all__ = [
     "PredictionCVResult",
     "RRBLUPResult",
     "SUPERSelectionResult",
+    "ZarrGenotypeStore",
     "align_inputs",
     "align_taxa",
     "benjamini_hochberg",
@@ -139,5 +142,6 @@ __all__ = [
     "write_genotype_store",
     "write_hdf5_genotype",
     "write_numpy_genotype",
+    "write_zarr_genotype",
     "zhang_kinship",
 ]
