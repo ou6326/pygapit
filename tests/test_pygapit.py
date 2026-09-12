@@ -1076,6 +1076,31 @@ class TestIO:
 
 
 class TestGAPITPipeline:
+    def test_simulation_is_deterministic_without_mutating_global_rng(
+        self,
+        small_dataset: SmallDataset,
+        monkeypatch: pytest.MonkeyPatch,
+    ) -> None:
+        from pygapit.gapit import _simulate_phenotype
+        from pygapit.io.formats import GenotypeData, PhenotypeData
+
+        taxa = small_dataset["taxa"]
+        genotype = GenotypeData(small_dataset["GD"], small_dataset["GM"], taxa)
+        phenotype = PhenotypeData.from_frame(
+            pd.DataFrame({"Taxa": taxa, "Trait": small_dataset["y"]})
+        )
+
+        def reject_global_rng(*args: object, **kwargs: object) -> None:
+            pytest.fail("used the global NumPy RNG")
+
+        for name in ("seed", "choice", "normal"):
+            monkeypatch.setattr(np.random, name, reject_global_rng)
+
+        n_qtn = small_dataset["m"] + 1
+        first = _simulate_phenotype(phenotype, genotype, n_qtn=n_qtn)
+        second = _simulate_phenotype(phenotype, genotype, n_qtn=n_qtn)
+        np.testing.assert_array_equal(first.Y["SimTrait"], second.Y["SimTrait"])
+
     @pytest.mark.parametrize(
         "model",
         ["CMLM", "MLMM", "FarmCPU", "gBLUP", "cBLUP"],

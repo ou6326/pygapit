@@ -82,9 +82,8 @@ def _ridge_components(
     if m <= n:
         effects = _solve_penalized_gram(z.T @ z, z.T @ centered_y, penalty)
     else:
-        if sample_gram is None:
-            sample_gram = z @ z.T
-        dual = _solve_penalized_gram(sample_gram, centered_y, penalty)
+        dual_gram: FloatMatrix = z @ z.T if sample_gram is None else sample_gram
+        dual = _solve_penalized_gram(dual_gram, centered_y, penalty)
         effects = z.T @ dual
     return (
         z @ effects,

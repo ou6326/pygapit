@@ -60,27 +60,27 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: full
+          environments: default
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
 
       - name: Ruff
         run: |
-          pixi run -e full ruff check .
-          pixi run -e full ruff format --check .
+          pixi run ruff check .
+          pixi run ruff format --check .
 
       - name: BasedPyright
-        run: pixi run -e full basedpyright
+        run: pixi run basedpyright
 
       - name: Pyrefly
-        run: pixi run -e full pyrefly check -p all
+        run: pixi run pyrefly check -p all
 
       - name: Verify bigdata dependencies
-        run: pixi run -e full python -c "import dask, h5py, zarr"
+        run: pixi run python -c "import h5py"
 
       - name: Python tests with bigdata dependencies
-        run: pixi run -e full pytest tests -q --ignore=tests/cross_language
+        run: pixi run pytest tests -q --ignore=tests/cross_language
 
   windows:
     name: Windows Python ${{ matrix.python-version }} (base dependencies)
@@ -88,7 +88,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.10", "3.12"]
+        python-version: ["3.10", "3.11", "3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -133,7 +133,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: full
+          environments: default
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
@@ -146,4 +146,4 @@ jobs:
         run: git submodule status GAPIT
 
       - name: Cross-language tests
-        run: pixi run -e full pytest tests/cross_language -q
+        run: pixi run pytest tests/cross_language -q

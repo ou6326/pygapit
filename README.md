@@ -86,7 +86,7 @@ from PyPI; the Python import package and command-line entry point remain
 ```bash
 pip install pygapit-ng
 
-pip install "pygapit-ng[bigdata]"  # include HDF5, Zarr, and Dask for larger datasets
+pip install "pygapit-ng[bigdata]"  # include HDF5 for larger datasets
 ```
 
 The default installation supports both in-memory analysis and disk-backed
@@ -96,8 +96,7 @@ while an explicit HDF5 request emits an actionable warning to install
 `pygapit-ng[bigdata]` or select `backend="numpy"`.
 
 **Runtime dependencies** are installed automatically: `numpy`, `scipy`,
-`pandas`, `matplotlib`, `seaborn`, `plotly`, `joblib`,
-`biopython`, and `jinja2`.
+`pandas`, `matplotlib`, and `plotly`.
 
 ### Development
 
@@ -113,21 +112,22 @@ pip install -e ".[bigdata]"      # editable install with big-data support
 pip install -e ".[dev,bigdata]"  # development tools plus big-data support
 ```
 
-The equivalent Pixi environment is:
+The default Pixi environment uses the highest supported Python version and
+includes development and big-data dependencies:
 
 ```bash
-pixi install -e dev
-pixi shell -e dev
+pixi install
+pixi shell
 ```
 
 Run the ordinary Python checks without the R reference repository:
 
 ```bash
-pixi run -e dev ruff check .
-pixi run -e dev ruff format --check .
-pixi run -e dev pyrefly check -p all
-pixi run -e dev basedpyright
-pixi run -e dev pytest tests/test_pygapit.py
+pixi run ruff check .
+pixi run ruff format --check .
+pixi run pyrefly check -p all
+pixi run basedpyright
+pixi run pytest tests/test_pygapit.py
 ```
 
 ### GAPIT 3.5 alignment validation
@@ -141,16 +141,8 @@ installed pyGAPIT package at runtime.
 # Fetch the pinned GAPIT 3.5 reference only when running alignment tests
 git submodule update --init --recursive
 
-pixi install -e dev
-pixi run -e dev pytest tests/cross_language -q
-```
-
-For one environment containing development and big-data dependencies, use
-`full`:
-
-```bash
-pixi install -e full
-pixi shell -e full
+pixi install
+pixi run pytest tests/cross_language -q
 ```
 
 If Pixi is unavailable, development and validation require an existing R
@@ -168,7 +160,7 @@ A deterministic manual benchmark covers PCA, VanRaden kinship, GLM, MLM,
 FarmCPU, and BLINK without adding machine-dependent timing thresholds to CI:
 
 ```bash
-pixi run -e full python benchmarks/run_baseline.py --output benchmarks/results/baseline.json
+pixi run python benchmarks/run_baseline.py --output benchmarks/results/baseline.json
 ```
 
 See [`benchmarks/README.md`](benchmarks/README.md) for workload and memory

@@ -66,8 +66,8 @@ Initialize the pinned R source and use the Pixi development environment, which i
 
 ```bash
 git submodule update --init --recursive
-pixi install -e dev
-pixi run -e dev pytest tests/cross_language -q
+pixi install
+pixi run pytest tests/cross_language -q
 ```
 
 The tests use fixed genotypes, phenotypes, covariates, and p-values from shared

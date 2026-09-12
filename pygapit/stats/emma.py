@@ -720,9 +720,10 @@ def emmax_p3d(
         except np.linalg.LinAlgError:
             lambda_L, U_L = _eigen_L_wo_Z(K)
             lambda_L = np.maximum(lambda_L, 0)
-            transformed_basis = U_L * (1.0 / np.sqrt(lambda_L + delta))
-            Uty: FloatVector = transformed_basis.T @ y
-            UtX0: FloatMatrix = transformed_basis.T @ X0
+            spectral_basis: FloatMatrix = U_L * (1.0 / np.sqrt(lambda_L + delta))
+            transformed_basis = spectral_basis
+            Uty: FloatVector = spectral_basis.T @ y
+            UtX0: FloatMatrix = spectral_basis.T @ X0
         else:
             Uty = solve_triangular(
                 covariance_factor,
@@ -743,9 +744,10 @@ def emmax_p3d(
             1.0 / np.sqrt(lambda_L + delta),
             np.full(n - incidence.shape[1], 1.0 / np.sqrt(delta)),
         ])
-        transformed_basis = U_L * scale
-        Uty = transformed_basis.T @ y
-        UtX0 = transformed_basis.T @ X0
+        spectral_basis = U_L * scale
+        transformed_basis = spectral_basis
+        Uty = spectral_basis.T @ y
+        UtX0 = spectral_basis.T @ X0
 
     # ── Step 3: Test each SNP ─────────────────────────────────────────────
     q1 = q0 + 1

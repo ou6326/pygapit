@@ -4,7 +4,7 @@ build-backend = "hatchling.build"
 
 [project]
 name        = "pygapit-ng"
-version     = "1.2.3"
+version     = "1.2.4"
 description = "Python implementation of GAPIT: Genome Association and Prediction Integrated Tool (GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP, cBLUP, sBLUP)"
 readme      = "README.md"
 license     = "GPL-3.0-or-later"
@@ -41,6 +41,8 @@ classifiers = [
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
+    "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
 ]
 
 dependencies = [
@@ -48,11 +50,7 @@ dependencies = [
     "scipy>=1.15.3,<2",
     "pandas>=2.3.3,<4",
     "matplotlib>=3.10.9,<4",
-    "seaborn>=0.13.2,<0.14",
-    "joblib>=1.6.0,<2",
     "plotly>=7.0.0,<8",
-    "jinja2>=3.1.6,<4",
-    "biopython>=1.88,<2",
     "typing-extensions>=4.12,<5; python_version < '3.11'",
 ]
 
@@ -60,6 +58,7 @@ dependencies = [
 dev = [
     "pytest>=9.1.1,<10",
     "pytest-cov>=7.1.0,<8",
+    "typing-extensions>=4.12,<5",
     "rpy2>=3.6.7,<4",
     "black>=26.5.1,<27",
     "ruff>=0.16.6,<0.17",
@@ -68,7 +67,7 @@ dev = [
     "pyrefly>=1.2.0,<2",
     "basedpyright>=1.39.10,<2",
 ]
-bigdata = ["h5py>=3.16.0,<4", "zarr>=2.18.3,<4", "dask[array]>=2026.8.0,<2027"]
+bigdata = ["h5py>=3.16.0,<4"]
 
 [project.urls]
 Homepage = "https://github.com/ou6326/pygapit"
@@ -108,7 +107,7 @@ filterwarnings = ["ignore::UserWarning"]
 
 [tool.black]
 line-length    = 100
-target-version = ["py310", "py311", "py312"]
+target-version = ["py310", "py311", "py312", "py313", "py314"]
 
 [tool.ruff.format]
 preview = true
@@ -125,20 +124,16 @@ pygapit-ng = { path = ".", editable = true }
 [tool.pixi.feature.py310.dependencies]
 python = "3.10.*"
 
-[tool.pixi.feature.py312.dependencies]
-python = "3.12.*"
+[tool.pixi.feature.py314.dependencies]
+python = "3.14.*"
 
 [tool.pixi.environments]
-default = { features = ["py312"], solve-group = "py312" }
-dev = { features = ["py312", "dev"], solve-group = "py312" }
-bigdata = { features = ["py312", "bigdata"], solve-group = "py312" }
-full = { features = ["py312", "dev", "bigdata"], solve-group = "py312" }
-
+default = { features = ["py314", "dev", "bigdata"], solve-group = "py314" }
 full310 = { features = ["py310", "dev", "bigdata"], solve-group = "py310" }
 
 [tool.pyrefly]
 project-includes = ["pygapit/**/*.py", "tests/**/*.py", "examples/**/*.py"]
-python-version = "3.12"
+python-version = "3.14"
 
 [tool.pyrefly.errors]
 # NumPy, pandas, matplotlib, and argparse expose intentionally dynamic APIs.
@@ -155,7 +150,7 @@ unannotated-return = false
 
 [tool.basedpyright]
 include = ["pygapit", "tests", "examples"]
-pythonVersion = "3.12"
+pythonVersion = "3.14"
 reportUnknownMemberType = true
 reportUnknownArgumentType = true
 reportUnknownVariableType = true

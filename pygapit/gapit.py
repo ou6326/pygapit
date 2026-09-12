@@ -722,18 +722,19 @@ def _simulate_phenotype(
     Simulate phenotype from genotype with given heritability.
     Translates GAPIT.Phenotype.Simulation.R
     """
-    np.random.seed(198521)  # GAPIT's default seed
+    rng = np.random.default_rng(198521)  # GAPIT's default seed
     n, m = geno.GD.shape
 
     # Random QTN indices
-    qtn_idx = np.random.choice(m, size=min(n_qtn, m), replace=False)
+    qtn_count = min(n_qtn, m)
+    qtn_idx = rng.choice(m, size=qtn_count, replace=False)
     GD_qtn = geno.GD[:, qtn_idx]
 
     # Standardize QTN genotypes
     GD_std = (GD_qtn - GD_qtn.mean(axis=0)) / (GD_qtn.std(axis=0) + 1e-8)
 
     # Random effects
-    effects = np.random.normal(0, 1, size=n_qtn)
+    effects = rng.normal(0, 1, size=qtn_count)
     g = GD_std @ effects
     g_var = np.var(g)
 
@@ -742,7 +743,7 @@ def _simulate_phenotype(
     else:
         e_var = 1.0
 
-    e = np.random.normal(0, np.sqrt(e_var), size=n)
+    e = rng.normal(0, np.sqrt(e_var), size=n)
     y_sim = g + e
 
     # Build new Y DataFrame using the genotype taxa (n individuals with geno data)

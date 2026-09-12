@@ -5,10 +5,10 @@ workflows without making performance claims or enforcing timing thresholds in
 CI. It covers PCA, VanRaden kinship, GLM, MLM, MLMM, SUPER selection, FarmCPU,
 and BLINK on one deterministic synthetic dataset.
 
-Run the standard workload in the full pixi environment:
+Run the standard workload in the default Pixi environment:
 
 ```powershell
-pixi run -e full python benchmarks/run_baseline.py --output benchmarks/results/baseline.json
+pixi run python benchmarks/run_baseline.py --output benchmarks/results/baseline.json
 ```
 
 The default workload uses 200 individuals, 5,000 markers, one warm-up, and
@@ -16,7 +16,7 @@ three timed repetitions. Record the generated JSON together with the commit,
 CPU, and thread configuration when comparing changes. For quick validation:
 
 ```powershell
-pixi run -e full python benchmarks/run_baseline.py --individuals 60 --markers 200 --warmups 0 --repeats 1
+pixi run python benchmarks/run_baseline.py --individuals 60 --markers 200 --warmups 0 --repeats 1
 ```
 
 Elapsed times are measured without memory tracing. Peak memory is measured in
@@ -49,13 +49,13 @@ reference after production PCA gained its adaptive path.
 Run the default workload and retain its JSON report:
 
 ```powershell
-pixi run -e full python benchmarks/benchmark_pca_crossover.py --output benchmarks/results/pca-crossover.json
+pixi run python benchmarks/benchmark_pca_crossover.py --output benchmarks/results/pca-crossover.json
 ```
 
 For a quick validation run:
 
 ```powershell
-pixi run -e full python benchmarks/benchmark_pca_crossover.py --individuals 120 --marker-ratios 0.25 0.75 1 2 --warmups 0 --repeats 1
+pixi run python benchmarks/benchmark_pca_crossover.py --individuals 120 --marker-ratios 0.25 0.75 1 2 --warmups 0 --repeats 1
 ```
 
 The sample-batched candidate makes a second pass to compute scores and can
@@ -69,7 +69,7 @@ layouts on NumPy mmap and, when installed, HDF5 while recording parent read
 calls and cells transferred:
 
 ```powershell
-pixi run -e full python benchmarks/benchmark_pca_store_io.py --output benchmarks/results/pca-store-io.json
+pixi run python benchmarks/benchmark_pca_store_io.py --output benchmarks/results/pca-store-io.json
 ```
 
 Use this report to verify the storage-chunk-aware read planner against new
@@ -90,8 +90,8 @@ After recording a baseline, use deterministic profiler scenarios to separate
 marker-heavy iterative work from sample-heavy mixed-model work:
 
 ```powershell
-pixi run -e full python benchmarks/profile_hotspots.py --scenario marker-heavy --models farmcpu blink
-pixi run -e full python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm mlmm cblup super
+pixi run python benchmarks/profile_hotspots.py --scenario marker-heavy --models farmcpu blink
+pixi run python benchmarks/profile_hotspots.py --scenario sample-heavy --models mlm mlmm cblup super
 ```
 
 Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`
@@ -110,13 +110,13 @@ the observation-space fallback is required.
 Run the default multi-scale workload and retain its JSON report:
 
 ```powershell
-pixi run -e full python benchmarks/benchmark_cblup_eigensolvers.py --output benchmarks/results/cblup-eigensolver-crossover.json
+pixi run python benchmarks/benchmark_cblup_eigensolvers.py --output benchmarks/results/cblup-eigensolver-crossover.json
 ```
 
 For a quick validation run:
 
 ```powershell
-pixi run -e full python benchmarks/benchmark_cblup_eigensolvers.py --individuals 120 --group-ratios 0.25 0.5 --kinship-rank-fractions 1.0 0.5 --warmups 0 --repeats 1
+pixi run python benchmarks/benchmark_cblup_eigensolvers.py --individuals 120 --group-ratios 0.25 0.5 --kinship-rank-fractions 1.0 0.5 --warmups 0 --repeats 1
 ```
 
 An `observation_over_group` value above one favors group space. Use results
@@ -130,7 +130,7 @@ the two paths are effectively tied there.
 ## RR-BLUP dimension-adaptive solve
 
 ```powershell
-pixi run -e full python -m benchmarks.benchmark_rrblup --output benchmarks/results/rrblup.json
+pixi run python -m benchmarks.benchmark_rrblup --output benchmarks/results/rrblup.json
 ```
 
 The benchmark checks numerical equivalence before comparing a centered,

@@ -406,10 +406,10 @@ print(f"  Saved: {OUT}/demo_gs_scatter.pdf")
 print("\n-- Section 7: Simulation (h^2=0.7, 20 QTNs) ----------------")
 print("Simulating phenotype from genotype data...")
 
-np.random.seed(198521)  # same seed as GAPIT's demo
+rng = np.random.default_rng(198521)  # same seed as GAPIT's demo
 m_total = GD_arr.shape[1]
-qtn_idx = np.random.choice(m_total, size=20, replace=False)
-alpha_q = np.random.normal(0, 1, 20)
+qtn_idx = rng.choice(m_total, size=20, replace=False)
+alpha_q = rng.normal(0, 1, 20)
 
 GD_std = (GD_arr[:, qtn_idx] - GD_arr[:, qtn_idx].mean(0)) / (
     GD_arr[:, qtn_idx].std(0) + 1e-8
@@ -417,7 +417,7 @@ GD_std = (GD_arr[:, qtn_idx] - GD_arr[:, qtn_idx].mean(0)) / (
 g = GD_std @ alpha_q
 g_var = g.var()
 e_var = g_var * (1 - 0.7) / 0.7
-y_sim = g + np.random.normal(0, np.sqrt(e_var), len(y))
+y_sim = g + rng.normal(0, np.sqrt(e_var), len(y))
 
 print("  True QTN positions (chr:pos): ", end="")
 for idx in qtn_idx[:5]:

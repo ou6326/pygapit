@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [1.2.4] - 2026-09-12
+
 ### Added
 
 - A chunk-readable `GenotypeStore` contract with in-memory, NumPy memory-mapped,
@@ -22,6 +24,19 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Top-level `GAPIT()` GLM and MLM workflows accept labeled genotype stores and
   perform taxa alignment, trait filtering, MAF filtering, PCA, kinship, and
   marker scans through bounded source reads.
+
+### Changed
+
+- Extend tested Python support through Python 3.14 while retaining Python 3.10
+  as the minimum supported version. The default Pixi environment now uses
+  Python 3.14 with development and HDF5 dependencies; `full310` verifies the
+  lower bound.
+- Stop declaring Biopython, Dask, Jinja2, Joblib, Seaborn, and Zarr as direct
+  project dependencies ahead of integrations that use them. Most remain
+  planned for later features; in 1.2.4 the optional `bigdata` feature adds only
+  the implemented HDF5 support.
+- Phenotype simulation and its example use local NumPy generators without
+  mutating process-wide random state.
 
 ## [1.2.3] - 2026-09-06
 
@@ -134,7 +149,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.3...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.4...main
+[1.2.4]: https://github.com/ou6326/pygapit/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/ou6326/pygapit/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/ou6326/pygapit/compare/v1.2.1...v1.2.2
 [1.2.1]: https://github.com/ou6326/pygapit/compare/v1.2.0...v1.2.1

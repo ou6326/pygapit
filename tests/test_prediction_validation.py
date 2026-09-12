@@ -279,11 +279,17 @@ def test_missing_phenotypes_and_invalid_kinship_are_rejected() -> None:
         cross_validate_gblup(np.arange(12.0), k)
 
 
-def test_seeded_folds_ignore_global_rng_and_singleton_scores_are_nan() -> None:
+def test_seeded_folds_ignore_global_rng_and_singleton_scores_are_nan(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
     rng = np.random.default_rng(20)
     y, z = rng.normal(size=9), rng.normal(size=(9, 4))
     first = cross_validate_rrblup(y, z, n_folds=9, seed=77, lambda_=1)
-    np.random.seed(200)
+
+    def reject_global_rng(*args: object, **kwargs: object) -> None:
+        pytest.fail("used the global NumPy RNG")
+
+    monkeypatch.setattr(np.random, "permutation", reject_global_rng)
     second = cross_validate_rrblup(y, z, n_folds=9, seed=77, lambda_=1)
     np.testing.assert_array_equal(first.fold_ids, second.fold_ids)
     np.testing.assert_array_equal(first.predictions, second.predictions)

@@ -4,7 +4,7 @@ Translates GAPIT.Manhattan.R, GAPIT.QQ.R, GAPIT.PCA.R,
 GAPIT.GS.Visualization.R, GAPIT.Phenotype.View.R
 
 All plots are publication-ready and match GAPIT's visual style.
-Static plots use matplotlib/seaborn.
+Static plots use matplotlib.
 Interactive plots use plotly (same package as GAPIT's plotly R).
 """
 
@@ -18,8 +18,6 @@ import matplotlib
 import numpy as np
 
 matplotlib.use("Agg")
-
-from importlib.util import find_spec
 
 import matplotlib.pyplot as plt
 from matplotlib.figure import Figure
@@ -86,8 +84,6 @@ def _axes(value: object) -> _Axes:
 def _savefig(figure: Figure, *args: Any, **kwargs: Any) -> None:
     cast(_FigureWriter, figure).savefig(*args, **kwargs)
 
-
-HAS_SEABORN = find_spec("seaborn") is not None
 
 try:
     import plotly.graph_objects as go

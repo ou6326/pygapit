@@ -711,7 +711,7 @@ def test_numpy_rejects_non_object_metadata(tmp_path: Path, metadata: object) -> 
 
 
 if TYPE_CHECKING:
-    from typing_extensions import assert_type
+    from typing import assert_type
 
     from pygapit._typing import FloatVector, StrVector
 
