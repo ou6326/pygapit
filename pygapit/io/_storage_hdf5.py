@@ -191,10 +191,10 @@ def write_hdf5_genotype(
             dtype=np.float64,
             chunks=(sample_chunk_size, marker_chunk_size),
         )
-        for marker_slice, block in iter_genotype_write_blocks(
+        for sample_slice, marker_slice, block in iter_genotype_write_blocks(
             source, marker_chunk_size
         ):
-            matrix[:, marker_slice] = block
+            matrix[sample_slice, marker_slice] = block
         create_dataset(
             "taxa",
             data=source.taxa.astype(object),

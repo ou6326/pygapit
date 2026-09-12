@@ -8,6 +8,7 @@ import pytest
 from pygapit._resources import (
     iter_marker_slices,
     marker_batch_size,
+    sample_batch_size,
     validate_marker_workspace_mib,
 )
 from pygapit.gwas.glm import glm_gwas
@@ -33,6 +34,12 @@ def test_marker_batch_size_respects_budget_and_cap() -> None:
     assert marker_batch_size(100, 1.0) == 1_310
     assert marker_batch_size(10, 32.0) == 4_096
     assert marker_batch_size(1_000_000, 1.0) == 1
+
+
+def test_sample_batch_size_respects_budget_and_cap() -> None:
+    assert sample_batch_size(100, 1.0) == 1_310
+    assert sample_batch_size(10, 32.0) == 4_096
+    assert sample_batch_size(1_000_000, 1.0) == 1
 
 
 def test_marker_slices_cover_each_marker_with_shared_batch_sizing() -> None:

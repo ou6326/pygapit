@@ -12,7 +12,7 @@ from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from ._genotype_store import LabeledGenotypeStore
 
 if TYPE_CHECKING:
-    from .._typing import ContiguousSlice
+    from .._typing import Slice
 
 
 class _InMemoryGenotypeData(Protocol):
@@ -42,10 +42,36 @@ class MarkerBlockWriteSource(Protocol):
 
     def iter_marker_blocks(
         self, marker_chunk_size: int
-    ) -> Iterator[tuple[ContiguousSlice, FloatMatrix]]: ...
+    ) -> Iterator[tuple[Slice, FloatMatrix]]: ...
 
 
-PreparedGenotypeWriteSource: TypeAlias = LabeledGenotypeStore | MarkerBlockWriteSource
+@runtime_checkable
+class SampleBlockWriteSource(Protocol):
+    """A labeled one-pass source yielding consecutive sample blocks."""
+
+    @property
+    def shape(self) -> tuple[int, int]: ...
+
+    @property
+    def taxa(self) -> StrVector: ...
+
+    @property
+    def marker_ids(self) -> StrVector: ...
+
+    @property
+    def chromosomes(self) -> StrVector: ...
+
+    @property
+    def positions(self) -> FloatVector: ...
+
+    def iter_sample_blocks(
+        self,
+    ) -> Iterator[tuple[Slice, FloatMatrix]]: ...
+
+
+PreparedGenotypeWriteSource: TypeAlias = (
+    LabeledGenotypeStore | MarkerBlockWriteSource | SampleBlockWriteSource
+)
 GenotypeWriteSource: TypeAlias = _InMemoryGenotypeData | PreparedGenotypeWriteSource
 
 
@@ -105,7 +131,10 @@ def as_genotype_write_source(
     genotype: GenotypeWriteSource,
 ) -> PreparedGenotypeWriteSource:
     """Adapt in-memory genotype data without changing its public runtime role."""
-    if isinstance(genotype, (LabeledGenotypeStore, MarkerBlockWriteSource)):
+    if isinstance(
+        genotype,
+        (LabeledGenotypeStore, MarkerBlockWriteSource, SampleBlockWriteSource),
+    ):
         return genotype
     return _GenotypeDataSource(genotype)
 
@@ -113,9 +142,30 @@ def as_genotype_write_source(
 def iter_genotype_write_blocks(
     source: PreparedGenotypeWriteSource,
     marker_chunk_size: int,
-) -> Iterator[tuple[ContiguousSlice, FloatMatrix]]:
+) -> Iterator[tuple[Slice, Slice, FloatMatrix]]:
     """Yield a complete sequence of validated sample-by-marker blocks."""
     rows, columns = source.shape
+    if isinstance(source, SampleBlockWriteSource):
+        expected_start = 0
+        for sample_slice, block in source.iter_sample_blocks():
+            start, stop, step = sample_slice.indices(rows)
+            values = np.asarray(block, dtype=np.float64)
+            if step != 1 or start != expected_start or stop <= start:
+                raise ValueError("sample blocks must be consecutive non-empty slices")
+            if values.shape != (stop - start, columns):
+                raise ValueError(
+                    "sample block shape does not match its source slice; "
+                    f"expected {(stop - start, columns)}, got {values.shape}"
+                )
+            yield slice(start, stop), slice(0, columns), values
+            expected_start = stop
+        if expected_start != rows:
+            raise ValueError(
+                "sample blocks did not cover the complete source; "
+                f"expected {rows}, got {expected_start}"
+            )
+        return
+
     if isinstance(source, MarkerBlockWriteSource):
         expected_start = 0
         for marker_slice, block in source.iter_marker_blocks(marker_chunk_size):
@@ -128,7 +178,7 @@ def iter_genotype_write_blocks(
                     "marker block shape does not match its source slice; "
                     f"expected {(rows, stop - start)}, got {values.shape}"
                 )
-            yield slice(start, stop), values
+            yield slice(0, rows), slice(start, stop), values
             expected_start = stop
         if expected_start != columns:
             raise ValueError(
@@ -139,4 +189,8 @@ def iter_genotype_write_blocks(
 
     for start in range(0, columns, marker_chunk_size):
         stop = min(start + marker_chunk_size, columns)
-        yield slice(start, stop), source.read_markers(slice(start, stop))
+        yield (
+            slice(0, rows),
+            slice(start, stop),
+            source.read_markers(slice(start, stop)),
+        )

@@ -21,6 +21,7 @@ import pandas as pd
 
 from .._resources import (
     DEFAULT_MARKER_WORKSPACE_MIB,
+    sample_batch_size,
 )
 from .._typing import (
     FloatMatrix,
@@ -38,7 +39,7 @@ from ._genotype_store import GenotypeStore, GenotypeView, LabeledGenotypeStore
 from ._storage_types import StorageBackend
 
 if TYPE_CHECKING:
-    from .._typing import ContiguousSlice
+    from .._typing import Slice
 
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
@@ -534,7 +535,7 @@ class _HapMapFileWriteSource:
 
     def iter_marker_blocks(
         self, marker_chunk_size: int
-    ) -> Iterator[tuple[ContiguousSlice, FloatMatrix]]:
+    ) -> Iterator[tuple[Slice, FloatMatrix]]:
         chunks = pd.read_csv(
             self._path,
             sep="\t",
@@ -623,14 +624,15 @@ def read_numeric(
 
 
 @final
-class _NumericFileGenotypeStore:
-    """Read numeric genotype columns on demand for a one-shot store import."""
+class _NumericFileWriteSource:
+    """Stream numeric genotype sample rows for a one-shot store import."""
 
     def __init__(
         self,
         gd_path: str | Path,
         marker_map: pd.DataFrame,
         impute_method: str,
+        marker_workspace_mib: float,
     ) -> None:
         self._path = Path(gd_path)
         if not self._path.exists():
@@ -669,34 +671,34 @@ class _NumericFileGenotypeStore:
         )
         self._impute_method = impute_method
         self._shape = (len(self.taxa), len(self.marker_ids))
+        self._sample_chunk_size = sample_batch_size(
+            len(self.marker_ids), marker_workspace_mib
+        )
 
     @property
     def shape(self) -> tuple[int, int]:
         return self._shape
 
-    def read_markers(
+    def _iter_unimputed_blocks(
         self,
-        marker_slice: slice,
-        sample_indices: IntVector | slice | None = None,
-    ) -> FloatMatrix:
-        marker_indices: IntVector = np.arange(self.shape[1], dtype=np.int_)[
-            marker_slice
-        ]
-
-        marker_names: list[str] = self._marker_columns[marker_indices].tolist()
-        values: FloatMatrix
-        if marker_names:
-            frame = pd.read_csv(
-                self._path,
-                sep="\t",
-                usecols=[self._taxa_column, *marker_names],
-                low_memory=False,
-            )
-            taxa = _taxa_array(frame[self._taxa_column], "genotype")
-            if not np.array_equal(taxa, self.taxa):
+    ) -> Iterator[tuple[Slice, FloatMatrix]]:
+        chunks = pd.read_csv(
+            self._path,
+            sep="\t",
+            chunksize=self._sample_chunk_size,
+            low_memory=False,
+        )
+        expected_columns = [self._taxa_column, *self._marker_columns.tolist()]
+        start = 0
+        for frame in chunks:
+            if frame.columns.tolist() != expected_columns:
+                raise ValueError("Numeric genotype columns changed while importing")
+            stop = start + len(frame)
+            taxa = _taxa_array(frame.iloc[:, 0], "genotype")
+            if not np.array_equal(taxa, self.taxa[start:stop]):
                 raise ValueError("Numeric genotype taxa changed while importing")
             try:
-                values = frame.loc[:, marker_names].to_numpy(
+                values: FloatMatrix = frame.iloc[:, 1:].to_numpy(
                     dtype=np.float64, copy=True
                 )
             except (TypeError, ValueError) as exc:
@@ -705,14 +707,53 @@ class _NumericFileGenotypeStore:
                 raise ValueError(
                     "Numeric genotype SNP values must not contain infinity"
                 )
-            values = _impute_missing_inplace(values, self._impute_method)
-        else:
-            values = np.empty((self.shape[0], 0), dtype=np.float64)
-        if sample_indices is not None:
-            values = values[sample_indices]
-        result = np.asarray(values, dtype=np.float64).view()
-        result.setflags(write=False)
-        return result
+            yield slice(start, stop), values
+            start = stop
+        if start != self.shape[0]:
+            raise ValueError(
+                "Numeric genotype rows changed while importing; "
+                f"expected {self.shape[0]}, got {start}"
+            )
+
+    def _mean_imputation_values(self) -> FloatVector:
+        column_sums = np.zeros(self.shape[1], dtype=np.float64)
+        observed_counts = np.zeros(self.shape[1], dtype=np.int_)
+        for _, values in self._iter_unimputed_blocks():
+            missing = np.isnan(values)
+            observed_counts += np.asarray(
+                np.sum(~missing, axis=0),
+                dtype=np.int_,
+            )
+            values[missing] = 0.0
+            column_sums += np.asarray(
+                np.sum(values, axis=0),
+                dtype=np.float64,
+            )
+        column_means = np.ones(self.shape[1], dtype=np.float64)
+        np.divide(
+            column_sums,
+            observed_counts,
+            out=column_means,
+            where=observed_counts > 0,
+        )
+        return column_means
+
+    def iter_sample_blocks(
+        self,
+    ) -> Iterator[tuple[Slice, FloatMatrix]]:
+        column_means = (
+            self._mean_imputation_values() if self._impute_method == "mean" else None
+        )
+        for sample_slice, values in self._iter_unimputed_blocks():
+            if column_means is None:
+                values = _impute_missing_inplace(values, self._impute_method)
+            else:
+                np.copyto(
+                    values,
+                    column_means[np.newaxis, :],
+                    where=np.isnan(values),
+                )
+            yield sample_slice, values
 
 
 def import_numeric_genotype_store(
@@ -723,8 +764,9 @@ def import_numeric_genotype_store(
     impute_method: str = "middle",
     backend: StorageBackend = "auto",
     marker_chunk_size: int = 1024,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> None:
-    """Import numeric GD/GM data without materializing the full genotype matrix."""
+    """Import numeric GD/GM data in bounded sample-row blocks."""
     if isinstance(gm_path, pd.DataFrame):
         marker_map = gm_path
     else:
@@ -733,7 +775,12 @@ def import_numeric_genotype_store(
             raise FileNotFoundError(f"Marker map file not found: {marker_path}")
         marker_map = pd.read_csv(marker_path, sep="\t", header=0)
 
-    source = _NumericFileGenotypeStore(gd_path, marker_map, impute_method)
+    source = _NumericFileWriteSource(
+        gd_path,
+        marker_map,
+        impute_method,
+        marker_workspace_mib,
+    )
     from .storage import write_genotype_store
 
     write_genotype_store(

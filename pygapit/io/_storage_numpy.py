@@ -150,8 +150,10 @@ def write_numpy_genotype(
             target / _NUMPY_GENOTYPE, mode="w+", dtype=np.float64, shape=(rows, columns)
         ),
     )
-    for marker_slice, block in iter_genotype_write_blocks(source, marker_chunk_size):
-        matrix[:, marker_slice] = block
+    for sample_slice, marker_slice, block in iter_genotype_write_blocks(
+        source, marker_chunk_size
+    ):
+        matrix[sample_slice, marker_slice] = block
     matrix.flush()
     del matrix
 

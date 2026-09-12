@@ -484,12 +484,14 @@ from pygapit import (
 )
 
 # Convert numeric GD/GM files directly into a disk-backed store. The input GD
-# matrix is read in marker blocks instead of being retained in full.
+# matrix is read once in bounded sample-row blocks instead of being retained in
+# full. The same workspace budget controls each parsed float64 block.
 import_numeric_genotype_store(
     "genotype.zarr",
     "genotype.txt",
     "marker-map.txt",
     marker_chunk_size=2048,
+    marker_workspace_mib=64,
 )
 
 # HapMap stores markers in rows, so its genotype calls are converted in one
@@ -507,11 +509,12 @@ with open_genotype_store("genotype-store") as store:
     pca = compute_pca(filtered, n_components=3, marker_workspace_mib=64)
 ```
 
-Numeric GD files store samples in rows and markers in columns. Bounded marker
-imports therefore rescan the input file for each block; increasing
-`marker_chunk_size` trades more memory for fewer scans. The destination is
-still written incrementally and the complete genotype matrix is never retained
-in memory.
+Numeric GD files store samples in rows and markers in columns. Their importer
+therefore streams consecutive sample rows across all markers. Ordinary
+imputation needs one genotype pass; mean imputation uses a statistics pass and
+a writing pass so that missing values receive whole-dataset marker means.
+`marker_workspace_mib` selects the sample-row batch size, while
+`marker_chunk_size` controls the destination store's physical marker chunks.
 
 HapMap files already store markers in rows. Their bounded importer reads marker
 rows sequentially, numericalizes and imputes each block, then writes its

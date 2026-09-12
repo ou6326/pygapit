@@ -5,6 +5,7 @@ from __future__ import annotations
 import builtins
 import json
 import warnings
+from collections.abc import Iterator
 from importlib.util import find_spec
 from pathlib import Path
 from types import ModuleType
@@ -69,8 +70,9 @@ class _ReadNumericCsv(Protocol):
         sep: str,
         nrows: int | None = None,
         usecols: list[str] | None = None,
+        chunksize: int | None = None,
         low_memory: bool = False,
-    ) -> pd.DataFrame: ...
+    ) -> pd.DataFrame | Iterator[pd.DataFrame]: ...
 
 
 class _NoMaterializationStore:
@@ -568,9 +570,13 @@ def test_store_to_store_conversion_reads_bounded_marker_blocks(
         )
 
 
-def test_numeric_store_import_reads_only_requested_marker_columns(
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
+@pytest.mark.parametrize("impute_method", ["middle", "mean"])
+def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
+    backend: StorageBackend,
+    impute_method: str,
 ) -> None:
     genotype_path = tmp_path / "genotype.tsv"
     marker_map = pd.DataFrame({
@@ -586,9 +592,9 @@ def test_numeric_store_import_reads_only_requested_marker_columns(
         "s4": [1.0, 2.0, 0.0, 1.0],
         "s5": [2.0, 2.0, np.nan, 0.0],
     }).to_csv(genotype_path, sep="\t", index=False)
-    expected = read_numeric(genotype_path, marker_map, impute_method="mean")
+    expected = read_numeric(genotype_path, marker_map, impute_method=impute_method)
     original_read_csv = cast(_ReadNumericCsv, pd.read_csv)
-    requested_columns: list[list[str] | None] = []
+    requests: list[tuple[int | None, list[str] | None, int | None]] = []
 
     def bounded_read_csv(
         path: Path,
@@ -596,39 +602,42 @@ def test_numeric_store_import_reads_only_requested_marker_columns(
         sep: str,
         nrows: int | None = None,
         usecols: list[str] | None = None,
+        chunksize: int | None = None,
         low_memory: bool = False,
-    ) -> pd.DataFrame:
-        if nrows is None and usecols is None:
+    ) -> pd.DataFrame | Iterator[pd.DataFrame]:
+        if nrows is None and usecols is None and chunksize is None:
             raise AssertionError("numeric import must not read the complete GD table")
-        requested_columns.append(usecols)
+        requests.append((nrows, usecols, chunksize))
         return original_read_csv(
             path,
             sep=sep,
             nrows=nrows,
             usecols=usecols,
+            chunksize=chunksize,
             low_memory=low_memory,
         )
 
     monkeypatch.setattr("pygapit.io.formats.pd.read_csv", bounded_read_csv)
-    store_path = tmp_path / "numeric-store"
+    suffix = {"numpy": "", "hdf5": ".h5", "zarr": ".zarr"}[backend]
+    store_path = tmp_path / f"numeric-store{suffix}"
 
     import_numeric_genotype_store(
         store_path,
         genotype_path,
         marker_map,
-        impute_method="mean",
-        backend="numpy",
+        impute_method=impute_method,
+        backend=backend,
         marker_chunk_size=2,
+        marker_workspace_mib=0.00008,
     )
 
-    assert requested_columns == [
-        None,
-        ["Taxa"],
-        ["Taxa", "s1", "s2"],
-        ["Taxa", "s3", "s4"],
-        ["Taxa", "s5"],
+    expected_requests: list[tuple[int | None, list[str] | None, int | None]] = [
+        (0, None, None),
+        (None, ["Taxa"], None),
     ]
-    with open_genotype_store(store_path) as store:
+    expected_requests.extend([(None, None, 2)] * (2 if impute_method == "mean" else 1))
+    assert requests == expected_requests
+    with open_genotype_store(store_path, backend=backend) as store:
         np.testing.assert_allclose(
             store.read_markers(slice(None)), expected.GD, rtol=0.0, atol=0.0
         )

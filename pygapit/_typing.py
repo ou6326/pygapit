@@ -23,7 +23,7 @@ LabelVector: t.TypeAlias = StrVector | NumericVector
 ArrayT = t.TypeVar("ArrayT", bound=Array)
 
 if t.TYPE_CHECKING:
-    ContiguousSlice: t.TypeAlias = slice[int, int, None]
+    Slice: t.TypeAlias = slice[int, int, None]
 
 
 def readonly_copy(values: ArrayT) -> ArrayT:
