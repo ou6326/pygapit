@@ -12,7 +12,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
-from ._storage_source import as_genotype_write_source
+from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
 from ._zarr_typing import ZarrArray, ZarrGroup, ZarrModule, as_zarr_module
 
 if TYPE_CHECKING:
@@ -159,9 +159,8 @@ def write_zarr_genotype(
         dtype=np.dtype(np.float64),
         chunks=(sample_chunk_size, marker_chunk_size),
     )
-    for start in range(0, columns, marker_chunk_size):
-        stop = min(start + marker_chunk_size, columns)
-        matrix[:, start:stop] = source.read_markers(slice(start, stop))
+    for marker_slice, block in iter_genotype_write_blocks(source, marker_chunk_size):
+        matrix[:, marker_slice] = block
     _write_strings(group, "taxa", source.taxa)
     _write_strings(group, "markers/id", source.marker_ids)
     _write_strings(group, "markers/chromosome", source.chromosomes)

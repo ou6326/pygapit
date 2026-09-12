@@ -22,6 +22,9 @@ StrVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.str_]]
 LabelVector: t.TypeAlias = StrVector | NumericVector
 ArrayT = t.TypeVar("ArrayT", bound=Array)
 
+if t.TYPE_CHECKING:
+    ContiguousSlice: t.TypeAlias = slice[int, int, None]
+
 
 def readonly_copy(values: ArrayT) -> ArrayT:
     """Return an independent NumPy array whose contents cannot be mutated."""

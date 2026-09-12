@@ -12,7 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
-from ._storage_source import as_genotype_write_source
+from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
 
 if t.TYPE_CHECKING:
     from ._storage_source import GenotypeWriteSource
@@ -150,9 +150,8 @@ def write_numpy_genotype(
             target / _NUMPY_GENOTYPE, mode="w+", dtype=np.float64, shape=(rows, columns)
         ),
     )
-    for start in range(0, columns, marker_chunk_size):
-        stop = min(start + marker_chunk_size, columns)
-        matrix[:, start:stop] = source.read_markers(slice(start, stop))
+    for marker_slice, block in iter_genotype_write_blocks(source, marker_chunk_size):
+        matrix[:, marker_slice] = block
     matrix.flush()
     del matrix
 

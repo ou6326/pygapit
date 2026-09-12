@@ -2,13 +2,17 @@
 
 from __future__ import annotations
 
-from typing import Protocol, TypeAlias, cast, final
+from collections.abc import Iterator
+from typing import TYPE_CHECKING, Protocol, TypeAlias, cast, final, runtime_checkable
 
 import numpy as np
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from ._genotype_store import LabeledGenotypeStore
+
+if TYPE_CHECKING:
+    from .._typing import ContiguousSlice
 
 
 class _InMemoryGenotypeData(Protocol):
@@ -17,7 +21,32 @@ class _InMemoryGenotypeData(Protocol):
     taxa: StrVector
 
 
-GenotypeWriteSource: TypeAlias = _InMemoryGenotypeData | LabeledGenotypeStore
+@runtime_checkable
+class MarkerBlockWriteSource(Protocol):
+    """A labeled one-pass source yielding consecutive marker blocks."""
+
+    @property
+    def shape(self) -> tuple[int, int]: ...
+
+    @property
+    def taxa(self) -> StrVector: ...
+
+    @property
+    def marker_ids(self) -> StrVector: ...
+
+    @property
+    def chromosomes(self) -> StrVector: ...
+
+    @property
+    def positions(self) -> FloatVector: ...
+
+    def iter_marker_blocks(
+        self, marker_chunk_size: int
+    ) -> Iterator[tuple[ContiguousSlice, FloatMatrix]]: ...
+
+
+PreparedGenotypeWriteSource: TypeAlias = LabeledGenotypeStore | MarkerBlockWriteSource
+GenotypeWriteSource: TypeAlias = _InMemoryGenotypeData | PreparedGenotypeWriteSource
 
 
 @final
@@ -74,8 +103,40 @@ class _GenotypeDataSource:
 
 def as_genotype_write_source(
     genotype: GenotypeWriteSource,
-) -> LabeledGenotypeStore:
+) -> PreparedGenotypeWriteSource:
     """Adapt in-memory genotype data without changing its public runtime role."""
-    if isinstance(genotype, LabeledGenotypeStore):
+    if isinstance(genotype, (LabeledGenotypeStore, MarkerBlockWriteSource)):
         return genotype
     return _GenotypeDataSource(genotype)
+
+
+def iter_genotype_write_blocks(
+    source: PreparedGenotypeWriteSource,
+    marker_chunk_size: int,
+) -> Iterator[tuple[ContiguousSlice, FloatMatrix]]:
+    """Yield a complete sequence of validated sample-by-marker blocks."""
+    rows, columns = source.shape
+    if isinstance(source, MarkerBlockWriteSource):
+        expected_start = 0
+        for marker_slice, block in source.iter_marker_blocks(marker_chunk_size):
+            start, stop, step = marker_slice.indices(columns)
+            values = np.asarray(block, dtype=np.float64)
+            if step != 1 or start != expected_start or stop <= start:
+                raise ValueError("marker blocks must be consecutive non-empty slices")
+            if values.shape != (rows, stop - start):
+                raise ValueError(
+                    "marker block shape does not match its source slice; "
+                    f"expected {(rows, stop - start)}, got {values.shape}"
+                )
+            yield slice(start, stop), values
+            expected_start = stop
+        if expected_start != columns:
+            raise ValueError(
+                "marker blocks did not cover the complete source; "
+                f"expected {columns}, got {expected_start}"
+            )
+        return
+
+    for start in range(0, columns, marker_chunk_size):
+        stop = min(start + marker_chunk_size, columns)
+        yield slice(start, stop), source.read_markers(slice(start, stop))

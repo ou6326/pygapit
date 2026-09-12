@@ -11,9 +11,10 @@ Supports:
 from __future__ import annotations
 
 import warnings
+from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, NotRequired, TypedDict, final, overload
+from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, final, overload
 
 import numpy as np
 import pandas as pd
@@ -35,6 +36,9 @@ from .._typing import (
 from ._genotype_qc import filter_markers_by_maf
 from ._genotype_store import GenotypeStore, GenotypeView, LabeledGenotypeStore
 from ._storage_types import StorageBackend
+
+if TYPE_CHECKING:
+    from .._typing import ContiguousSlice
 
 # ── IUPAC single-bit and double-bit genotype codes ────────────────────────
 # 0 = homozygous reference, 1 = heterozygous, 2 = homozygous alternate
@@ -396,6 +400,24 @@ def _numericalize_snp(
     return result
 
 
+def _numericalize_hapmap_block(
+    genotype_calls: Matrix,
+    major_allele_zero: bool,
+    impute_method: str,
+) -> FloatMatrix:
+    """Convert marker-by-sample HapMap calls to a sample-by-marker block."""
+    calls = np.char.upper(np.asarray(genotype_calls, dtype=str))
+    marker_count, sample_count = calls.shape
+    transposed = np.full((marker_count, sample_count), np.nan, dtype=np.float64)
+    for row in range(marker_count):
+        transposed[row, :] = _numericalize_snp(
+            calls[row, :],
+            major_allele_zero,
+            already_uppercase=True,
+        )
+    return _impute_missing_inplace(transposed.T, impute_method)
+
+
 def read_hapmap(
     filepath: str | Path | pd.DataFrame,
     major_allele_zero: bool = False,
@@ -449,29 +471,113 @@ def read_hapmap(
     # Extract SNP info: rs (col 0), chrom (col 2), pos (col 3)
     snp_info = _marker_map_from_frame(raw.iloc[:, [0, 2, 3]], "HapMap marker data")
 
-    # Genotype block: rows = SNPs, cols = individuals
-    geno_block = np.char.upper(
-        np.asarray(raw.iloc[:, n_meta:].values, dtype=str)
-    )  # (n_snps, n_individuals)
-
-    n_snps, n_indiv = geno_block.shape
-
-    # Convert each SNP row to numeric
-    GD_T = np.full((n_snps, n_indiv), np.nan, dtype=np.float64)
-    for i in range(n_snps):
-        GD_T[i, :] = _numericalize_snp(
-            geno_block[i, :],
-            major_allele_zero,
-            already_uppercase=True,
-        )
-
-    # Transpose: GD should be (n_individuals, n_snps)
-    GD = GD_T.T
-
-    # Impute missing values
-    GD = impute_missing(GD, method=impute_method)
+    GD = _numericalize_hapmap_block(
+        raw.iloc[:, n_meta:].values,
+        major_allele_zero,
+        impute_method,
+    )
 
     return GenotypeData(GD=GD, GM=snp_info, taxa=taxa)
+
+
+@final
+class _HapMapFileWriteSource:
+    """Stream HapMap marker rows for a one-shot genotype-store import."""
+
+    def __init__(
+        self,
+        filepath: str | Path,
+        major_allele_zero: bool,
+        impute_method: str,
+    ) -> None:
+        self._path = Path(filepath)
+        if not self._path.exists():
+            raise FileNotFoundError(f"HapMap file not found: {self._path}")
+        if impute_method not in _IMPUTE_METHODS:
+            raise ValueError(f"Unknown impute method: {impute_method}")
+
+        header = pd.read_csv(
+            self._path,
+            sep="\t",
+            header=None,
+            nrows=1,
+            dtype=str,
+            keep_default_na=False,
+        )
+        if header.shape[1] <= 11:
+            raise ValueError("HapMap data must contain 11 metadata columns and taxa")
+        self.taxa: StrVector = _taxa_array(header.iloc[0, 11:], "HapMap")
+
+        marker_frame = pd.read_csv(
+            self._path,
+            sep="\t",
+            usecols=[0, 2, 3],
+            low_memory=False,
+        )
+        marker_map = _marker_map_from_frame(marker_frame, "HapMap marker data")
+        self.marker_ids: StrVector = np.asarray(
+            marker_map["SNP"].to_numpy(dtype=str), dtype=str
+        )
+        self.chromosomes: StrVector = np.asarray(
+            marker_map["Chromosome"].to_numpy(dtype=str), dtype=str
+        )
+        self.positions: FloatVector = np.asarray(
+            marker_map["Position"].to_numpy(dtype=np.float64)
+        )
+        self._shape = (len(self.taxa), len(marker_map))
+        self._major_allele_zero = major_allele_zero
+        self._impute_method = impute_method
+
+    @property
+    def shape(self) -> tuple[int, int]:
+        return self._shape
+
+    def iter_marker_blocks(
+        self, marker_chunk_size: int
+    ) -> Iterator[tuple[ContiguousSlice, FloatMatrix]]:
+        chunks = pd.read_csv(
+            self._path,
+            sep="\t",
+            chunksize=marker_chunk_size,
+            low_memory=False,
+        )
+        start = 0
+        for raw in chunks:
+            if raw.shape[1] != 11 + self.shape[0]:
+                raise ValueError(
+                    "HapMap data columns changed while importing; "
+                    f"expected {11 + self.shape[0]}, got {raw.shape[1]}"
+                )
+            marker_count = len(raw)
+            block = _numericalize_hapmap_block(
+                raw.iloc[:, 11:].values,
+                self._major_allele_zero,
+                self._impute_method,
+            )
+            stop = start + marker_count
+            yield slice(start, stop), block
+            start = stop
+
+
+def import_hapmap_genotype_store(
+    store_path: str | Path,
+    filepath: str | Path,
+    *,
+    major_allele_zero: bool = False,
+    impute_method: str = "middle",
+    backend: StorageBackend = "auto",
+    marker_chunk_size: int = 1024,
+) -> None:
+    """Import HapMap data in marker-row blocks without retaining the full matrix."""
+    source = _HapMapFileWriteSource(filepath, major_allele_zero, impute_method)
+    from .storage import write_genotype_store
+
+    write_genotype_store(
+        store_path,
+        source,
+        backend=backend,
+        marker_chunk_size=marker_chunk_size,
+    )
 
 
 def read_numeric(

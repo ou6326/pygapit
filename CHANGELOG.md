@@ -14,6 +14,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   without materializing the complete genotype matrix.
 - Direct marker-batched import from numeric GD/GM files into any genotype-store
   backend.
+- Single-pass marker-block import from HapMap files into any genotype-store
+  backend.
 
 ### Changed
 

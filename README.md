@@ -475,6 +475,7 @@ Disk-backed genotypes use the same chunk-readable interface as in-memory arrays:
 ```python
 from pygapit import (
     compute_pca,
+    import_hapmap_genotype_store,
     import_numeric_genotype_store,
     maf_filter,
     open_genotype_store,
@@ -491,6 +492,14 @@ import_numeric_genotype_store(
     marker_chunk_size=2048,
 )
 
+# HapMap stores markers in rows, so its genotype calls are converted in one
+# sequential marker-block pass.
+import_hapmap_genotype_store(
+    "hapmap-store.zarr",
+    "genotype.hmp.txt",
+    marker_chunk_size=2048,
+)
+
 write_genotype_store("genotype-store", genotype)
 with open_genotype_store("genotype-store") as store:
     filtered, kept = maf_filter(store, marker_workspace_mib=64)
@@ -503,6 +512,11 @@ imports therefore rescan the input file for each block; increasing
 `marker_chunk_size` trades more memory for fewer scans. The destination is
 still written incrementally and the complete genotype matrix is never retained
 in memory.
+
+HapMap files already store markers in rows. Their bounded importer reads marker
+rows sequentially, numericalizes and imputes each block, then writes its
+sample-by-marker transpose directly to the destination store. Marker metadata
+is read separately without loading the complete genotype-call matrix.
 
 Existing labeled stores can also be converted between backends without loading
 the full genotype matrix:

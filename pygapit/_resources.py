@@ -2,10 +2,14 @@
 
 from __future__ import annotations
 
+import typing as t
 from collections.abc import Iterator
 from numbers import Real
 
 import numpy as np
+
+if t.TYPE_CHECKING:
+    from ._typing import ContiguousSlice
 
 DEFAULT_MARKER_WORKSPACE_MIB = 32.0
 MAX_MARKERS_PER_BATCH = 4096
@@ -49,7 +53,7 @@ def iter_marker_slices(
     marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
     *,
     max_markers: int = MAX_MARKERS_PER_BATCH,
-) -> Iterator[slice]:
+) -> Iterator[ContiguousSlice]:
     """Yield contiguous marker slices sized for one float64 workspace."""
     if isinstance(n_markers, bool) or n_markers < 0:
         raise ValueError("n_markers must be non-negative")

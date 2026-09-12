@@ -17,8 +17,10 @@ import pytest
 from pygapit._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from pygapit.io.formats import (
     GenotypeData,
+    import_hapmap_genotype_store,
     import_numeric_genotype_store,
     maf_filter,
+    read_hapmap,
     read_numeric,
 )
 from pygapit.io.storage import (
@@ -167,6 +169,43 @@ def _genotype_data() -> GenotypeData:
         "Position": [10.0, 20.0, 30.0, 40.0],
     })
     return GenotypeData(values, marker_map, np.asarray(["a", "b", "c", "d"]))
+
+
+def _hapmap_data() -> pd.DataFrame:
+    metadata = [
+        "rs",
+        "alleles",
+        "chrom",
+        "pos",
+        "strand",
+        "assembly",
+        "center",
+        "protLSID",
+        "assayLSID",
+        "panelLSID",
+        "QCcode",
+    ]
+    rows = [
+        ["s1", "A/T", 1, 10, "+", "NA", "NA", "NA", "NA", "NA", "NA"],
+        ["s2", "C/G", 1, 20, "+", "NA", "NA", "NA", "NA", "NA", "NA"],
+        ["s3", "A/G", 2, 30, "+", "NA", "NA", "NA", "NA", "NA", "NA"],
+        ["s4", "C/T", 2, 40, "+", "NA", "NA", "NA", "NA", "NA", "NA"],
+        ["s5", "A/C", 3, 50, "+", "NA", "NA", "NA", "NA", "NA", "NA"],
+    ]
+    calls = [
+        ["A", "A", "T", "N"],
+        ["C", "S", "G", "C"],
+        ["G", "A", "R", "N"],
+        ["T", "C", "Y", "T"],
+        ["A", "C", "M", "A"],
+    ]
+    return pd.DataFrame(
+        [
+            metadata_row + marker_calls
+            for metadata_row, marker_calls in zip(rows, calls)
+        ],
+        columns=[*metadata, "a", "b", "c", "d"],
+    )
 
 
 def test_array_store_returns_readonly_ordered_blocks() -> None:
@@ -596,6 +635,50 @@ def test_numeric_store_import_reads_only_requested_marker_columns(
         np.testing.assert_array_equal(store.taxa, expected.taxa)
         np.testing.assert_array_equal(
             store.marker_ids, expected.GM["SNP"].to_numpy(dtype=str)
+        )
+
+
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
+@pytest.mark.parametrize("major_allele_zero", [False, True])
+def test_hapmap_store_import_matches_in_memory_reader(
+    tmp_path: Path,
+    backend: StorageBackend,
+    major_allele_zero: bool,
+) -> None:
+    hapmap_path = tmp_path / "genotype.hmp.txt"
+    _hapmap_data().to_csv(hapmap_path, sep="\t", index=False)
+    expected = read_hapmap(
+        hapmap_path,
+        major_allele_zero=major_allele_zero,
+        impute_method="mean",
+    )
+    suffix = {"numpy": "", "hdf5": ".h5", "zarr": ".zarr"}[backend]
+    store_path = tmp_path / f"hapmap-store{suffix}"
+
+    import_hapmap_genotype_store(
+        store_path,
+        hapmap_path,
+        major_allele_zero=major_allele_zero,
+        impute_method="mean",
+        backend=backend,
+        marker_chunk_size=2,
+    )
+
+    with open_genotype_store(store_path, backend=backend) as store:
+        np.testing.assert_allclose(
+            store.read_markers(slice(None)), expected.GD, rtol=0.0, atol=0.0
+        )
+        np.testing.assert_array_equal(store.taxa, expected.taxa)
+        np.testing.assert_array_equal(
+            store.marker_ids, expected.GM["SNP"].to_numpy(dtype=str)
+        )
+        np.testing.assert_array_equal(
+            store.chromosomes,
+            expected.GM["Chromosome"].to_numpy(dtype=str),
+        )
+        np.testing.assert_array_equal(
+            store.positions,
+            expected.GM["Position"].to_numpy(dtype=np.float64),
         )
 
 
