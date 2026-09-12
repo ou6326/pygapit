@@ -653,6 +653,7 @@ def test_auto_backend_uses_zarr_without_h5py(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
+    pytest.importorskip("zarr")
     original_import = builtins.__import__
 
     def import_without_h5py(
