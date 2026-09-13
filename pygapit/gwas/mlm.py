@@ -190,11 +190,13 @@ def _fit_reml_for_groups(
 def cmlm_gwas(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     group_from: int = 1,
     group_to: int | None = None,
     ngrids: int = 100,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> MLMResult:
     """
     CMLM genome-wide association.
@@ -214,6 +216,8 @@ def cmlm_gwas(
     switches models; pyGAPIT instead excludes invalid search candidates and
     rejects a range containing no valid CMLM fit.
     """
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
+    genotype = as_genotype_store(GD)
     n = len(y)
     if group_to is None:
         group_to = n
@@ -263,7 +267,15 @@ def cmlm_gwas(
         raise RuntimeError("CMLM failed to fit every requested compression level")
 
     # Run EMMAX-P3D with optimal compressed kinship
-    result = emmax_p3d(y, X0, GD, best_K_c, ngrids=ngrids, Z=best_Z)
+    result = emmax_p3d(
+        y,
+        X0,
+        genotype,
+        best_K_c,
+        ngrids=ngrids,
+        Z=best_Z,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     return MLMResult(
         p_values=result.p_values,
         effects=result.effects,

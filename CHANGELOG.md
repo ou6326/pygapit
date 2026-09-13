@@ -24,6 +24,7 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Extend disk-backed top-level workflows through SUPER selection and sBLUP
   prediction while materializing and reusing only the bounded pseudo-QTN
   candidate pool.
+- Support bounded disk-backed marker scans in direct and top-level CMLM.
 
 ## [1.2.4] - 2026-09-12
 

@@ -529,15 +529,15 @@ with open_genotype_store("genotype-store") as store:
     write_genotype_store("genotype.zarr", store, marker_chunk_size=2048)
 ```
 
-The top-level `GAPIT()` pipeline supports GLM, MLM, gBLUP, and sBLUP with an
-open labeled store. The direct `glm_gwas()`, `mlm_gwas()`,
+The top-level `GAPIT()` pipeline supports GLM, MLM, CMLM, gBLUP, and sBLUP with
+an open labeled store. The direct `glm_gwas()`, `mlm_gwas()`, `cmlm_gwas()`,
 `select_super_qtns()`, and `sblup()` APIs accept the same chunk-readable input;
 `gblup()` consumes the already constructed kinship matrix. Top-level stores
 supply their own taxa and marker metadata, must contain finite pre-imputed
 values, omit `GM`, and currently use VanRaden kinship. SUPER/sBLUP materializes
 only the largest requested pseudo-QTN candidate pool and reuses its prefixes.
-Iterative CMLM, MLMM, FarmCPU, BLINK, and cBLUP still require an in-memory
-genotype matrix.
+Iterative MLMM, FarmCPU, BLINK, and cBLUP still require an in-memory genotype
+matrix.
 
 `maf_filter()` returns a `GenotypeView` when its input is a store, so filtering
 does not copy the complete genotype matrix. `GenotypeView` also supports sample

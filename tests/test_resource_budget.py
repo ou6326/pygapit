@@ -12,7 +12,7 @@ from pygapit._resources import (
     validate_marker_workspace_mib,
 )
 from pygapit.gwas.glm import glm_gwas
-from pygapit.gwas.mlm import mlm_gwas
+from pygapit.gwas.mlm import cmlm_gwas, mlm_gwas
 from pygapit.stats.emma import emmax_p3d
 from pygapit.stats.kinship import vanraden_kinship
 from pygapit.stats.pca import compute_pca
@@ -67,6 +67,14 @@ def test_direct_scan_boundaries_always_validate_workspace(value: object) -> None
         )
     with pytest.raises(error, match="marker_workspace_mib"):
         mlm_gwas(
+            phenotype,
+            design,
+            genotype,
+            kinship,
+            marker_workspace_mib=invalid,
+        )
+    with pytest.raises(error, match="marker_workspace_mib"):
+        cmlm_gwas(
             phenotype,
             design,
             genotype,
