@@ -27,6 +27,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, validate_marker_workspace_mib
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -35,6 +36,7 @@ from .._typing import (
     NumericVector,
     readonly_copy,
 )
+from ..io.storage import GenotypeStore, GenotypeView, as_genotype_store
 from ..stats.emma import emma_remle
 from ..stats.kinship import vanraden_kinship
 from .glm import glm_scan_with_cofactors, reward_substitute_cofactor_statistics
@@ -121,8 +123,10 @@ def _bin_select_qtns(
 
 
 def _build_pseudo_kinship(
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     qtn_indices: IntVector | None,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> FloatMatrix | None:
     """
     Build kinship from pseudo-QTN genotypes only.
@@ -135,8 +139,12 @@ def _build_pseudo_kinship(
     if qtn_indices is None or len(qtn_indices) == 0:
         return None
 
-    GK = GD[:, qtn_indices]
-    K = vanraden_kinship(GK)
+    genotype = as_genotype_store(GD)
+    selected = GenotypeView(genotype, marker_indices=qtn_indices)
+    K = vanraden_kinship(
+        selected,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     # Add small diagonal for numerical stability
     K += np.eye(len(K)) * 1e-6
     return K
@@ -145,8 +153,10 @@ def _build_pseudo_kinship(
 def _rem_select_qtns(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     candidate_qtns: IntVector,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> tuple[IntVector, float, float]:
     """
     Random Effect Model: select pseudo-QTNs by REML.
@@ -160,7 +170,11 @@ def _rem_select_qtns(
     if len(candidate_qtns) == 0:
         return np.array([], dtype=int), 0.0, 0.0
 
-    K = _build_pseudo_kinship(GD, candidate_qtns)
+    K = _build_pseudo_kinship(
+        GD,
+        candidate_qtns,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     if K is None:
         return candidate_qtns, 0.0, 0.0
 
@@ -174,13 +188,15 @@ def _rem_select_qtns(
 def farmcpu_gwas(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     chromosomes: LabelVector,
     positions: NumericVector,
     max_iterations: int = 10,
     bin_size: int = 5_000_000,
     p_threshold: float | None = None,
     converge_threshold: float = 1.0,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> FarmCPUResult:
     """
     FarmCPU genome-wide association scan.
@@ -202,7 +218,9 @@ def farmcpu_gwas(
     -------
     FarmCPUResult
     """
-    n, m = GD.shape
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
+    genotype = as_genotype_store(GD)
+    n, m = genotype.shape
 
     if p_threshold is None:
         p_threshold = 1.0 / m
@@ -211,7 +229,13 @@ def farmcpu_gwas(
     max_qtns = max(1, round(np.sqrt(n) / np.sqrt(max(1, np.log10(n)))))
 
     # ── Initial FEM scan: no cofactors ─────────────────────────────────
-    glm_result = glm_scan_with_cofactors(y, X0, GD, None)
+    glm_result = glm_scan_with_cofactors(
+        y,
+        X0,
+        genotype,
+        None,
+        marker_workspace_mib=marker_workspace_mib,
+    )
     p_values = glm_result.p_values.copy()
 
     current_qtns = np.array([], dtype=int)
@@ -241,18 +265,31 @@ def farmcpu_gwas(
             break
 
         # ── REM: Estimate variance components with pseudo-kinship ──────
-        selected_qtns, vg, ve = _rem_select_qtns(y, X0, GD, candidate_qtns)
+        selected_qtns, vg, ve = _rem_select_qtns(
+            y,
+            X0,
+            genotype,
+            candidate_qtns,
+            marker_workspace_mib=marker_workspace_mib,
+        )
         current_qtns = selected_qtns
         current_vg = vg
         current_ve = ve
 
         # ── FEM: Test all markers with pseudo-QTN cofactors ────────────
         glm_result = reward_substitute_cofactor_statistics(
-            glm_scan_with_cofactors(y, X0, GD, current_qtns),
+            glm_scan_with_cofactors(
+                y,
+                X0,
+                genotype,
+                current_qtns,
+                marker_workspace_mib=marker_workspace_mib,
+            ),
             y,
             X0,
-            GD,
+            genotype,
             current_qtns,
+            marker_workspace_mib=marker_workspace_mib,
         )
         p_values = glm_result.p_values.copy()
 
@@ -271,11 +308,18 @@ def farmcpu_gwas(
 
     # Final FEM pass with converged QTN set
     final_result = reward_substitute_cofactor_statistics(
-        glm_scan_with_cofactors(y, X0, GD, current_qtns),
+        glm_scan_with_cofactors(
+            y,
+            X0,
+            genotype,
+            current_qtns,
+            marker_workspace_mib=marker_workspace_mib,
+        ),
         y,
         X0,
-        GD,
+        genotype,
         current_qtns,
+        marker_workspace_mib=marker_workspace_mib,
     )
     h2 = (
         current_vg / (current_vg + current_ve) if (current_vg + current_ve) > 0 else 0.0

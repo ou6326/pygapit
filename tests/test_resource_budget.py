@@ -11,6 +11,7 @@ from pygapit._resources import (
     sample_batch_size,
     validate_marker_workspace_mib,
 )
+from pygapit.gwas.farmcpu import farmcpu_gwas
 from pygapit.gwas.glm import glm_gwas
 from pygapit.gwas.mlm import cmlm_gwas, mlm_gwas
 from pygapit.gwas.mlmm import mlmm_gwas
@@ -88,6 +89,15 @@ def test_direct_scan_boundaries_always_validate_workspace(value: object) -> None
             design,
             genotype,
             kinship,
+            marker_workspace_mib=invalid,
+        )
+    with pytest.raises(error, match="marker_workspace_mib"):
+        farmcpu_gwas(
+            phenotype,
+            design,
+            genotype,
+            np.ones(3, dtype=np.int64),
+            np.arange(3, dtype=np.float64),
             marker_workspace_mib=invalid,
         )
     with pytest.raises(error, match="marker_workspace_mib"):

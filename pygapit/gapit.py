@@ -370,12 +370,20 @@ def GAPIT(
     pheno, geno = _load_data(Y, G, GD, GM, SNP_impute)
 
     if isinstance(geno, LabeledGenotypeStore):
-        supported = {"GLM", "MLM", "CMLM", "MLMM", "GBLUP", "SBLUP"}
+        supported = {
+            "GLM",
+            "MLM",
+            "CMLM",
+            "MLMM",
+            "FARMCPU",
+            "GBLUP",
+            "SBLUP",
+        }
         unsupported = [name for name in models if name not in supported]
         if unsupported:
             raise ValueError(
                 "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
-                "gBLUP, and sBLUP; "
+                "FarmCPU, gBLUP, and sBLUP; "
                 f"unsupported model(s): {', '.join(unsupported)}"
             )
         if normalized_kinship_algorithm != "VanRaden":
@@ -1202,13 +1210,28 @@ def _run_model(
             return ModelRunResult(
                 r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
             )
+        case "FARMCPU":
+            r = farmcpu_gwas(
+                y,
+                X0,
+                GD,
+                chromosomes=chromosomes,
+                positions=positions,
+                max_iterations=maxLoop,
+                bin_size=bin_size,
+                p_threshold=p_thresh,
+                marker_workspace_mib=marker_workspace_mib,
+            )
+            return ModelRunResult(
+                r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
+            )
         case _:
             pass
 
     if isinstance(GD, GenotypeStore):
         raise TypeError(
             "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
-            "gBLUP, and sBLUP; "
+            "FarmCPU, gBLUP, and sBLUP; "
             f"unsupported model: {model_name}"
         )
 
@@ -1225,20 +1248,6 @@ def _run_model(
             )
             return ModelRunResult(
                 r.p_values, r.effects, r.se, selected_qtns=r.selected_qtns
-            )
-        case "FARMCPU":
-            r = farmcpu_gwas(
-                y,
-                X0,
-                GD,
-                chromosomes=chromosomes,
-                positions=positions,
-                max_iterations=maxLoop,
-                bin_size=bin_size,
-                p_threshold=p_thresh,
-            )
-            return ModelRunResult(
-                r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
             )
         case "CBLUP":
             r = cblup(y, X0, GD, group_to=group_to)

@@ -27,6 +27,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Support bounded disk-backed marker scans in direct and top-level CMLM.
 - Extend direct and top-level MLMM to disk-backed marker batches while reading
   only its selected cofactors into each fixed-effect design.
+- Support disk-backed FarmCPU iterations through the shared bounded GLM scan,
+  reward substitution, and pseudo-QTN kinship paths.
 
 ## [1.2.4] - 2026-09-12
 

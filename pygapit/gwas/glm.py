@@ -30,7 +30,7 @@ from .._typing import (
     readonly_copy,
     require_row_count,
 )
-from ..io.storage import GenotypeStore, as_genotype_store
+from ..io.storage import GenotypeStore, GenotypeView, as_genotype_store
 
 _MARKER_BATCH_SIZE = 4096
 _REWARD_MAX_BASE_CONDITION = np.finfo(np.float64).eps ** -0.25
@@ -194,8 +194,10 @@ def glm_gwas(
 def glm_scan_with_cofactors(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     cofactor_indices: IntVector | None,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GLMResult:
     """
     GLM scan including pseudo-QTN cofactors as additional fixed effects.
@@ -203,32 +205,53 @@ def glm_scan_with_cofactors(
 
     Builds X_extended = [X0 | GD[:, cofactor_indices]] and runs GLM.
     """
+    genotype = as_genotype_store(GD)
     X_ext: FloatMatrix
     if cofactor_indices is not None and len(cofactor_indices) > 0:
-        cofactors = GD[:, cofactor_indices]
+        cofactors = GenotypeView(
+            genotype,
+            marker_indices=cofactor_indices,
+        ).read_markers(slice(None))
         X_ext = np.column_stack([X0, cofactors])
     else:
         X_ext = X0
 
-    return glm_gwas(y, X_ext, GD)
+    return glm_gwas(
+        y,
+        X_ext,
+        genotype,
+        marker_workspace_mib=marker_workspace_mib,
+    )
 
 
 def reward_substitute_cofactor_statistics(
     result: GLMResult,
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     qtns: IntVector,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GLMResult:
     """Restore pseudo-QTN statistics using GAPIT 3.5's SUB reward rule."""
     if len(qtns) == 0:
         return result
 
-    base_design: FloatMatrix = np.column_stack([X0, GD[:, qtns]])
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
+    genotype = as_genotype_store(GD)
+    cofactor_values = GenotypeView(
+        genotype,
+        marker_indices=qtns,
+    ).read_markers(slice(None))
+    base_design: FloatMatrix = np.column_stack([X0, cofactor_values])
     base_design_pinv = np.linalg.pinv(base_design)
     n = len(y)
     cofactor_count = len(qtns)
-    cofactor_p = np.full((GD.shape[1], cofactor_count), np.nan, dtype=np.float64)
+    cofactor_p = np.full(
+        (genotype.shape[1], cofactor_count),
+        np.nan,
+        dtype=np.float64,
+    )
     start = X0.shape[1]
     beta = base_design_pinv @ y
     residual = y - base_design @ beta
@@ -239,27 +262,32 @@ def reward_substitute_cofactor_statistics(
         # Rank-deficient augmented designs do not obey the full-rank block
         # inverse update below, while ill-conditioned ones amplify its rounding
         # error. Preserve their Moore-Penrose solution exactly.
-        for marker in range(GD.shape[1]):
-            marker_values = GD[:, marker]
-            residualized = marker_values - base_design @ (
-                base_design_pinv @ marker_values
-            )
-            if residualized @ residualized < 1e-8:
-                continue
-            design: FloatMatrix = np.column_stack([base_design, marker_values])
-            degrees_of_freedom = n - design.shape[1]
-            design_pinv = np.linalg.pinv(design)
-            marker_beta = design_pinv @ y
-            marker_residual = y - design @ marker_beta
-            mse = (marker_residual @ marker_residual) / degrees_of_freedom
-            marker_covariance = design_pinv @ design_pinv.T * mse
-            standard_errors = np.sqrt(np.maximum(np.diag(marker_covariance), 0.0))
-            statistics = marker_beta / standard_errors
-            p_values = np.asarray(
-                2.0 * stdtr(degrees_of_freedom, -np.abs(statistics)),
-                dtype=np.float64,
-            )
-            cofactor_p[marker] = p_values[start : start + cofactor_count]
+        batch_size = _marker_batch_size(n, marker_workspace_mib)
+        for batch_start in range(0, genotype.shape[1], batch_size):
+            batch_stop = min(batch_start + batch_size, genotype.shape[1])
+            marker_batch = genotype.read_markers(slice(batch_start, batch_stop))
+            for batch_offset in range(marker_batch.shape[1]):
+                marker_values = marker_batch[:, batch_offset]
+                residualized = marker_values - base_design @ (
+                    base_design_pinv @ marker_values
+                )
+                if residualized @ residualized < 1e-8:
+                    continue
+                design: FloatMatrix = np.column_stack([base_design, marker_values])
+                degrees_of_freedom = n - design.shape[1]
+                design_pinv = np.linalg.pinv(design)
+                marker_beta = design_pinv @ y
+                marker_residual = y - design @ marker_beta
+                mse = (marker_residual @ marker_residual) / degrees_of_freedom
+                marker_covariance = design_pinv @ design_pinv.T * mse
+                standard_errors = np.sqrt(np.maximum(np.diag(marker_covariance), 0.0))
+                statistics = marker_beta / standard_errors
+                p_values = np.asarray(
+                    2.0 * stdtr(degrees_of_freedom, -np.abs(statistics)),
+                    dtype=np.float64,
+                )
+                marker = batch_start + batch_offset
+                cofactor_p[marker] = p_values[start : start + cofactor_count]
     else:
         # Frisch-Waugh-Lovell plus the block inverse of [B | g]'[B | g]
         # gives every substitute-marker fit from one pseudoinverse of B.
@@ -268,11 +296,11 @@ def reward_substitute_cofactor_statistics(
         degrees_of_freedom = n - base_design.shape[1] - 1
         cofactor_beta = beta[start : start + cofactor_count]
         cofactor_variance = np.diag(covariance_factor)[start : start + cofactor_count]
-        batch_size = _marker_batch_size(n)
+        batch_size = _marker_batch_size(n, marker_workspace_mib)
         base_residual_ss = residual @ residual
-        for batch_start in range(0, GD.shape[1], batch_size):
-            batch_stop = min(batch_start + batch_size, GD.shape[1])
-            marker_values = GD[:, batch_start:batch_stop]
+        for batch_start in range(0, genotype.shape[1], batch_size):
+            batch_stop = min(batch_start + batch_size, genotype.shape[1])
+            marker_values = genotype.read_markers(slice(batch_start, batch_stop))
             projection_coefficients = base_design_pinv @ marker_values
             residualized = marker_values - base_design @ projection_coefficients
             residualized_ss: FloatVector = np.einsum(
