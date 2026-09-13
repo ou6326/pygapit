@@ -15,6 +15,7 @@ from pygapit.gapit import (
     GAPITResult,
     ModelRunResult,
     _align_multiple_gwas,
+    _build_gwas_table,
     _normalize_models,
     _select_traits,
 )
@@ -846,3 +847,46 @@ def test_multiple_analysis_aligns_models_by_marker_coordinates() -> None:
     assert np.isnan(aligned[0][1][2])
     assert np.isnan(aligned[1][1][0])
     np.testing.assert_allclose(aligned[1][1][1:], [0.2, 0.03])
+
+
+def test_multiple_analysis_avoids_merge_for_matching_marker_order() -> None:
+    marker_columns = {
+        "SNP": ["s1", "s2", "s3"],
+        "Chr": ["1", "1", "2"],
+        "Pos": [10.0, 20.0, 5.0],
+    }
+    first = GAPITResult(
+        GWAS=pd.DataFrame({**marker_columns, "P.value": [0.01, 0.02, 0.03]}),
+        model="GLM",
+    )
+    second = GAPITResult(
+        GWAS=pd.DataFrame({**marker_columns, "P.value": [0.2, 0.1, 0.05]}),
+        model="MLM",
+    )
+
+    with patch("pygapit.gapit.pd.concat", side_effect=AssertionError):
+        markers, aligned = _align_multiple_gwas([first, second])
+
+    assert markers.to_dict(orient="list") == marker_columns
+    np.testing.assert_allclose(aligned[0][1], [0.01, 0.02, 0.03])
+    np.testing.assert_allclose(aligned[1][1], [0.2, 0.1, 0.05])
+
+
+def test_gwas_table_uses_precomputed_order_without_dataframe_sort() -> None:
+    order = np.asarray([1, 2, 0], dtype=np.int_)
+    with patch.object(pd.DataFrame, "sort_values", side_effect=AssertionError):
+        table = _build_gwas_table(
+            snp_names=np.asarray(["s3", "s1", "s2"]),
+            chromosomes=np.asarray(["2", "1", "1"]),
+            positions=np.asarray([5.0, 10.0, 20.0]),
+            p_values=np.asarray([0.3, 0.1, 0.2]),
+            effects=np.asarray([3.0, 1.0, 2.0]),
+            se=np.asarray([0.3, 0.1, 0.2]),
+            maf=np.asarray([0.3, 0.1, 0.2]),
+            n_obs=12,
+            adj_pvalues=np.asarray([0.3, 0.3, 0.3]),
+            order=order,
+        )
+
+    assert table["SNP"].tolist() == ["s1", "s2", "s3"]
+    np.testing.assert_allclose(table["P.value"], [0.1, 0.2, 0.3])

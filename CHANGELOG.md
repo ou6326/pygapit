@@ -8,6 +8,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Added
 
+- Backend-independent Manhattan data and genomic-axis preparation shared by
+  static and interactive renderers.
 - An optional Zarr 3 genotype backend with the same labeled, chunk-readable
   storage contract as the NumPy and HDF5 backends.
 - Chunked conversion between labeled NumPy, HDF5, and Zarr genotype stores
@@ -19,6 +21,9 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Changed
 
+- Reuse precomputed genomic ordering when building GWAS tables and bypass
+  DataFrame sorting and merging when multi-model results already share marker
+  order.
 - Require Python 3.11 or newer and test the complete optional-storage stack on
   Python 3.11 and 3.14.
 - Extend disk-backed top-level workflows through SUPER selection and sBLUP

@@ -138,6 +138,7 @@ class PreparedGenotype:
     chromosomes: LabelVector
     positions: FloatVector
     maf: FloatVector
+    gwas_order: IntVector
 
     def __post_init__(self) -> None:
         if isinstance(self.genotypes, np.ndarray):
@@ -150,6 +151,7 @@ class PreparedGenotype:
             "chromosomes",
             "positions",
             "maf",
+            "gwas_order",
         ):
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
@@ -200,6 +202,10 @@ class PreparedTrait:
     @property
     def maf(self) -> FloatVector:
         return self.shared.maf
+
+    @property
+    def gwas_order(self) -> IntVector:
+        return self.shared.gwas_order
 
     @property
     def n_obs(self) -> int:
@@ -976,16 +982,21 @@ def _prepare_trait(
     )
     design = build_covariate_matrix(pca_result, pca_total, extra_covariates)
 
+    snp_names = np.asarray(marker_map["SNP"], dtype=str)
+    chromosomes = np.asarray(marker_map["Chromosome"], dtype=str)
+    positions = np.asarray(marker_map["Position"], dtype=np.float64)
+    gwas_order = np.lexsort((np.arange(marker_count), positions, chromosomes))
     shared = PreparedGenotype(
         genotypes=filtered_genotypes,
         kinship=kinship,
         design=design,
         taxa=taxa,
         pca=pca_result,
-        snp_names=np.asarray(marker_map["SNP"], dtype=str),
-        chromosomes=np.asarray(marker_map["Chromosome"], dtype=str),
-        positions=np.asarray(marker_map["Position"], dtype=np.float64),
+        snp_names=snp_names,
+        chromosomes=chromosomes,
+        positions=positions,
         maf=retained_maf,
+        gwas_order=gwas_order,
     )
     if cache is not None:
         cache[cache_key] = shared
@@ -1017,13 +1028,14 @@ def _assemble_result(
         maf=prepared.maf,
         n_obs=prepared.n_obs,
         adj_pvalues=benjamini_hochberg(model_result.p_values),
+        order=prepared.gwas_order,
     )
     threshold = (
         cut_off if cut_off is not None else bonferroni_threshold(prepared.marker_count)
     )
     lambda_gc = genomic_inflation_factor(model_result.p_values)
     significant_mask = gwas["P.value"] <= threshold
-    significant = gwas[significant_mask].copy()
+    significant = gwas[significant_mask]
     significant_count = significant_mask.sum()
     print(
         f"[pyGAPIT] lambda={lambda_gc:.3f} | {significant_count} significant SNPs "
@@ -1302,24 +1314,22 @@ def _build_gwas_table(
     maf: FloatVector,
     n_obs: int,
     adj_pvalues: FloatVector,
+    order: IntVector | None = None,
 ) -> pd.DataFrame:
-    """Build standardized GWAS result DataFrame matching GAPIT's CSV output."""
-    return (
-        pd
-        .DataFrame({
-            "SNP": snp_names,
-            "Chr": chromosomes,
-            "Pos": positions.astype(int),
-            "P.value": p_values,
-            "maf": np.round(maf, 4),
-            "nobs": n_obs,
-            "effect": np.round(effects, 6),
-            "se": np.round(se, 6),
-            "FDR.Adjusted.P.values": np.round(adj_pvalues, 6),
-        })
-        .sort_values(["Chr", "Pos"])
-        .reset_index(drop=True)
-    )
+    """Build one sorted GWAS table without sorting an intermediate DataFrame."""
+    if order is None:
+        order = np.lexsort((np.arange(len(positions)), positions, chromosomes))
+    return pd.DataFrame({
+        "SNP": snp_names[order],
+        "Chr": chromosomes[order],
+        "Pos": positions[order].astype(int),
+        "P.value": p_values[order],
+        "maf": np.round(maf[order], 4),
+        "nobs": n_obs,
+        "effect": np.round(effects[order], 6),
+        "se": np.round(se[order], 6),
+        "FDR.Adjusted.P.values": np.round(adj_pvalues[order], 6),
+    })
 
 
 def _run_gs_and_build_pred(
@@ -1396,15 +1406,56 @@ def _align_multiple_gwas(
 ) -> tuple[pd.DataFrame, list[tuple[str, FloatVector]]]:
     """Align model p-values by marker identity and genomic coordinates."""
     keys = ["SNP", "Chr", "Pos"]
-    marker_frames: list[pd.DataFrame] = []
-    for result in results:
-        if result.GWAS is None:
+    available = [result for result in results if result.GWAS is not None]
+    if not available:
+        raise ValueError("at least one GWAS table is required")
+    for result in available:
+        gwas = result.GWAS
+        if gwas is None:  # narrowed by ``available``
             continue
-        missing = {*keys, "P.value"} - set(result.GWAS.columns)
+        missing = {*keys, "P.value"} - set(gwas.columns)
         if missing:
             raise ValueError(
                 f"{result.model} GWAS table is missing columns: {sorted(missing)}"
             )
+
+    first = available[0].GWAS
+    if first is None:  # narrowed by ``available``
+        raise ValueError("at least one GWAS table is required")
+    first_key_values = tuple(first[key].to_numpy(copy=False) for key in keys)
+    same_marker_order = all(
+        len(gwas) == len(first)
+        and all(
+            np.array_equal(gwas[key].to_numpy(copy=False), reference_values)
+            for key, reference_values in zip(keys, first_key_values, strict=True)
+        )
+        for result in available[1:]
+        if (gwas := result.GWAS) is not None
+    )
+    if same_marker_order:
+        reference = pd.DataFrame({
+            "SNP": first["SNP"].astype(str),
+            "Chr": first["Chr"].astype(str),
+            "Pos": pd.to_numeric(first["Pos"], errors="raise"),
+        })
+        if reference.duplicated(keys).any():
+            raise ValueError(
+                f"{available[0].model} GWAS table contains duplicate markers"
+            )
+        aligned = [
+            (
+                result.model,
+                np.asarray(result.GWAS["P.value"], dtype=np.float64),
+            )
+            for result in available
+            if result.GWAS is not None
+        ]
+        return reference, aligned
+
+    marker_frames: list[pd.DataFrame] = []
+    for result in available:
+        if result.GWAS is None:  # narrowed by ``available``
+            continue
         frame = result.GWAS.loc[:, [*keys, "P.value"]].copy()
         if frame.duplicated(keys).any():
             raise ValueError(f"{result.model} GWAS table contains duplicate markers")
@@ -1412,9 +1463,6 @@ def _align_multiple_gwas(
         frame["Chr"] = frame["Chr"].astype(str)
         frame["Pos"] = pd.to_numeric(frame["Pos"], errors="raise")
         marker_frames.append(frame)
-
-    if not marker_frames:
-        raise ValueError("at least one GWAS table is required")
 
     all_markers = pd.concat(
         [frame.loc[:, keys] for frame in marker_frames], ignore_index=True
@@ -1442,7 +1490,7 @@ def _align_multiple_gwas(
 
     aligned: list[tuple[str, FloatVector]] = []
     for result, frame in zip(
-        (result for result in results if result.GWAS is not None),
+        available,
         marker_frames,
         strict=True,
     ):
