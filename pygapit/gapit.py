@@ -370,19 +370,20 @@ def GAPIT(
     pheno, geno = _load_data(Y, G, GD, GM, SNP_impute)
 
     if isinstance(geno, LabeledGenotypeStore):
-        unsupported = [name for name in models if name not in {"GLM", "MLM"}]
+        supported = {"GLM", "MLM", "GBLUP", "SBLUP"}
+        unsupported = [name for name in models if name not in supported]
         if unsupported:
             raise ValueError(
-                "Disk-backed GAPIT currently supports only GLM and MLM; "
+                "Disk-backed GAPIT currently supports GLM, MLM, gBLUP, and sBLUP; "
                 f"unsupported model(s): {', '.join(unsupported)}"
             )
         if normalized_kinship_algorithm != "VanRaden":
             raise ValueError(
                 "Disk-backed GAPIT currently requires kinship_algorithm='VanRaden'"
             )
-        if buspred or normalized_prediction_model is not None:
+        if normalized_prediction_model == "CBLUP":
             raise ValueError(
-                "Disk-backed GAPIT does not yet support genomic prediction output"
+                "Disk-backed GAPIT does not yet support cBLUP prediction output"
             )
 
     # ── Simulation mode ──────────────────────────────────────────────────
@@ -497,6 +498,7 @@ def GAPIT(
                 file_output=file_output,
                 output_dir=output_dir,
                 started_at=t_start,
+                marker_workspace_mib=marker_workspace_mib,
             )
 
     if Multiple_analysis and file_output:
@@ -996,6 +998,7 @@ def _assemble_result(
     file_output: bool,
     output_dir: str | Path,
     started_at: float,
+    marker_workspace_mib: float,
 ) -> GAPITResult:
     """Build tables, optional predictions/files, and the public result object."""
     gwas = _build_gwas_table(
@@ -1032,9 +1035,11 @@ def _assemble_result(
             "SBLUP",
         )
     ):
-        if isinstance(prepared.genotypes, GenotypeStore):
+        if isinstance(prepared.genotypes, GenotypeStore) and (
+            model_name == "CBLUP" or prediction_model == "CBLUP"
+        ):
             raise ValueError(
-                "Disk-backed GAPIT does not yet support genomic prediction output"
+                "Disk-backed GAPIT does not yet support cBLUP prediction output"
             )
         prediction = _run_gs_and_build_pred(
             y=prepared.y,
@@ -1051,6 +1056,7 @@ def _assemble_result(
                 if prediction_model is None or prediction_model == model_name
                 else None
             ),
+            marker_workspace_mib=marker_workspace_mib,
         )
 
     output_files = None
@@ -1111,131 +1117,133 @@ def _run_model(
     m = GD.shape[1]
     p_thresh = p_threshold or (1.0 / m)
 
-    if model_name == "GLM":
-        r = glm_gwas(y, X0, GD, marker_workspace_mib=marker_workspace_mib)
-        return ModelRunResult(r.p_values, r.effects, r.se)
-
-    elif model_name == "MLM":
-        return mlm_scan or _run_mlm_scan(
-            y,
-            X0,
-            GD,
-            K,
-            mlm_spectrum,
-            marker_workspace_mib,
-        )
+    match model_name:
+        case "GLM":
+            r = glm_gwas(y, X0, GD, marker_workspace_mib=marker_workspace_mib)
+            return ModelRunResult(r.p_values, r.effects, r.se)
+        case "MLM":
+            return mlm_scan or _run_mlm_scan(
+                y,
+                X0,
+                GD,
+                K,
+                mlm_spectrum,
+                marker_workspace_mib,
+            )
+        case "GBLUP":
+            r = gblup(y, X0, K)
+            p_vals = np.ones(m)
+            return ModelRunResult(
+                p_vals,
+                np.zeros(m),
+                np.ones(m),
+                r.h2,
+                r.vg,
+                r.ve,
+                prediction=r,
+            )
+        case "SBLUP":
+            scan = mlm_scan or _run_mlm_scan(
+                y,
+                X0,
+                GD,
+                K,
+                mlm_spectrum,
+                marker_workspace_mib,
+            )
+            selection = select_super_qtns(
+                y,
+                X0,
+                GD,
+                chromosomes,
+                positions,
+                scan.p_values,
+                bin_size=super_bin_size,
+                candidate_counts=super_qtn_counts,
+            )
+            r = sblup(
+                y,
+                X0,
+                GD,
+                selection.qtn_indices,
+                marker_workspace_mib=marker_workspace_mib,
+            )
+            return ModelRunResult(
+                scan.p_values,
+                scan.effects,
+                scan.se,
+                r.h2,
+                r.vg,
+                r.ve,
+                selection.qtn_indices,
+                prediction=r,
+            )
+        case _:
+            pass
 
     if isinstance(GD, GenotypeStore):
         raise TypeError(
-            "Disk-backed GAPIT currently supports only GLM and MLM; "
+            "Disk-backed GAPIT currently supports GLM, MLM, gBLUP, and sBLUP; "
             f"unsupported model: {model_name}"
         )
 
-    if model_name == "CMLM":
-        n = len(y)
-        r = cmlm_gwas(
-            y, X0, GD, K, group_from=group_from, group_to=min(group_to or n, n)
-        )
-        return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
-
-    elif model_name == "MLMM":
-        r = mlmm_gwas(y, X0, GD, K)
-        return ModelRunResult(
-            r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
-        )
-
-    elif model_name == "BLINK":
-        r = blink_gwas(
-            y,
-            X0,
-            GD,
-            max_iterations=maxLoop,
-            ld_threshold=LD_threshold,
-            p_threshold=None if fdr_cut and p_threshold is None else p_thresh,
-            fdr_alpha=fdr_alpha if fdr_cut and p_threshold is None else None,
-        )
-        return ModelRunResult(
-            r.p_values, r.effects, r.se, selected_qtns=r.selected_qtns
-        )
-
-    elif model_name == "FARMCPU":
-        r = farmcpu_gwas(
-            y,
-            X0,
-            GD,
-            chromosomes=chromosomes,
-            positions=positions,
-            max_iterations=maxLoop,
-            bin_size=bin_size,
-            p_threshold=p_thresh,
-        )
-        return ModelRunResult(
-            r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
-        )
-
-    elif model_name == "GBLUP":
-        r = gblup(y, X0, K)
-        p_vals = np.ones(GD.shape[1])
-        return ModelRunResult(
-            p_vals,
-            np.zeros(GD.shape[1]),
-            np.ones(GD.shape[1]),
-            r.h2,
-            r.vg,
-            r.ve,
-            prediction=r,
-        )
-
-    elif model_name == "CBLUP":
-        r = cblup(y, X0, GD, group_to=group_to)
-        p_vals = np.ones(GD.shape[1])
-        return ModelRunResult(
-            p_vals,
-            np.zeros(GD.shape[1]),
-            np.ones(GD.shape[1]),
-            r.h2,
-            r.vg,
-            r.ve,
-            prediction=r,
-        )
-
-    elif model_name == "SBLUP":
-        scan = mlm_scan or _run_mlm_scan(
-            y,
-            X0,
-            GD,
-            K,
-            mlm_spectrum,
-            marker_workspace_mib,
-        )
-        selection = select_super_qtns(
-            y,
-            X0,
-            GD,
-            chromosomes,
-            positions,
-            scan.p_values,
-            bin_size=super_bin_size,
-            candidate_counts=super_qtn_counts,
-        )
-        r = sblup(y, X0, GD, selection.qtn_indices)
-        return ModelRunResult(
-            scan.p_values,
-            scan.effects,
-            scan.se,
-            r.h2,
-            r.vg,
-            r.ve,
-            selection.qtn_indices,
-            prediction=r,
-        )
-
-    else:
-        raise ValueError(
-            f"Unknown model: {model_name}. "
-            "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, "
-            "gBLUP, cBLUP, sBLUP."
-        )
+    match model_name:
+        case "CMLM":
+            n = len(y)
+            r = cmlm_gwas(
+                y, X0, GD, K, group_from=group_from, group_to=min(group_to or n, n)
+            )
+            return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
+        case "MLMM":
+            r = mlmm_gwas(y, X0, GD, K)
+            return ModelRunResult(
+                r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
+            )
+        case "BLINK":
+            r = blink_gwas(
+                y,
+                X0,
+                GD,
+                max_iterations=maxLoop,
+                ld_threshold=LD_threshold,
+                p_threshold=None if fdr_cut and p_threshold is None else p_thresh,
+                fdr_alpha=fdr_alpha if fdr_cut and p_threshold is None else None,
+            )
+            return ModelRunResult(
+                r.p_values, r.effects, r.se, selected_qtns=r.selected_qtns
+            )
+        case "FARMCPU":
+            r = farmcpu_gwas(
+                y,
+                X0,
+                GD,
+                chromosomes=chromosomes,
+                positions=positions,
+                max_iterations=maxLoop,
+                bin_size=bin_size,
+                p_threshold=p_thresh,
+            )
+            return ModelRunResult(
+                r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
+            )
+        case "CBLUP":
+            r = cblup(y, X0, GD, group_to=group_to)
+            p_vals = np.ones(GD.shape[1])
+            return ModelRunResult(
+                p_vals,
+                np.zeros(GD.shape[1]),
+                np.ones(GD.shape[1]),
+                r.h2,
+                r.vg,
+                r.ve,
+                prediction=r,
+            )
+        case _:
+            raise ValueError(
+                f"Unknown model: {model_name}. "
+                "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, "
+                "gBLUP, cBLUP, sBLUP."
+            )
 
 
 def _run_mlm_scan(
@@ -1298,7 +1306,7 @@ def _build_gwas_table(
 def _run_gs_and_build_pred(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     taxa: StrVector,
     model_name: str,
@@ -1306,18 +1314,20 @@ def _run_gs_and_build_pred(
     prediction_model: str | None = None,
     group_to: int | None = None,
     fitted_result: GBLUPResult | None = None,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> pd.DataFrame | None:
     """Run genomic prediction and build prediction DataFrame."""
     selected_model = prediction_model
     if selected_model is None:
-        if model_name == "CBLUP":
-            selected_model = "CBLUP"
-        elif model_name == "SBLUP" or (
-            qtn_indices is not None and len(qtn_indices) > 0 and model_name == "FARMCPU"
-        ):
-            selected_model = "SBLUP"
-        else:
-            selected_model = "GBLUP"
+        match model_name:
+            case "CBLUP":
+                selected_model = "CBLUP"
+            case "SBLUP":
+                selected_model = "SBLUP"
+            case "FARMCPU" if qtn_indices is not None and len(qtn_indices) > 0:
+                selected_model = "SBLUP"
+            case _:
+                selected_model = "GBLUP"
     if selected_model == "SBLUP" and (qtn_indices is None or len(qtn_indices) == 0):
         raise ValueError(
             "prediction_model='sBLUP' requires selected QTNs from the GWAS model"
@@ -1326,18 +1336,32 @@ def _run_gs_and_build_pred(
     try:
         if fitted_result is not None:
             gs_result = fitted_result
-        elif selected_model == "SBLUP" and qtn_indices is not None:
-            gs_result = sblup(y, X0, GD, qtn_indices=qtn_indices, taxa=taxa)
-        elif selected_model == "CBLUP":
-            gs_result = cblup(
-                y,
-                X0,
-                GD,
-                taxa=taxa,
-                group_to=group_to,
-            )
         else:
-            gs_result = gblup(y, X0, K, taxa=taxa)
+            match selected_model, qtn_indices:
+                case "SBLUP", selected_qtns if selected_qtns is not None:
+                    gs_result = sblup(
+                        y,
+                        X0,
+                        GD,
+                        qtn_indices=selected_qtns,
+                        taxa=taxa,
+                        marker_workspace_mib=marker_workspace_mib,
+                    )
+                case "CBLUP", _:
+                    if isinstance(GD, GenotypeStore):
+                        raise TypeError(
+                            "Disk-backed GAPIT does not yet support cBLUP prediction "
+                            "output"
+                        )
+                    gs_result = cblup(
+                        y,
+                        X0,
+                        GD,
+                        taxa=taxa,
+                        group_to=group_to,
+                    )
+                case _:
+                    gs_result = gblup(y, X0, K, taxa=taxa)
 
         return pd.DataFrame({
             "Taxa": taxa,

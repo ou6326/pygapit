@@ -24,6 +24,7 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -38,6 +39,7 @@ from .._typing import (
     require_row_count,
     require_square,
 )
+from ..io.storage import GenotypeStore, GenotypeView, as_genotype_store
 from ..stats.emma import (
     EMMAResult,
     emma_remle,
@@ -408,7 +410,7 @@ def cblup(
 def select_super_qtns(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     chromosomes: Vector,
     positions: FloatVector,
     p_values: FloatVector,
@@ -420,14 +422,15 @@ def select_super_qtns(
     """Select a pseudo-QTN kinship by binning markers and maximizing REML."""
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
-    GD = as_float_matrix(GD, name="genotype matrix")
+    genotype = as_genotype_store(GD)
     chromosomes = as_str_vector(chromosomes, name="marker chromosomes")
     positions = as_float_vector(positions, name="marker positions")
     p_values = as_float_vector(p_values, name="marker p-values")
     n = len(y)
-    marker_count = GD.shape[1]
+    marker_count = genotype.shape[1]
     require_row_count(X0, n, name="covariate matrix")
-    require_row_count(GD, n, name="genotype matrix")
+    if genotype.shape[0] != n:
+        raise ValueError(f"genotype matrix must have {n} rows; got {genotype.shape[0]}")
     for values, name in (
         (chromosomes, "marker chromosomes"),
         (positions, "marker positions"),
@@ -474,14 +477,20 @@ def select_super_qtns(
     fitted_reml: list[float] = []
     fitted_qtns: list[IntVector] = []
     fixed_basis = prepare_emma_fixed_basis(X0)
+    candidate_pool = GenotypeView(
+        genotype,
+        marker_indices=ranked[: counts[-1]],
+    ).read_markers(slice(None))
     for count in counts:
         qtns = ranked[:count]
-        varying = np.var(GD[:, qtns], axis=0) > 0.0
+        candidate_genotypes = candidate_pool[:, :count]
+        varying = np.var(candidate_genotypes, axis=0) > 0.0
         qtns = qtns[varying]
         if len(qtns) == 0:
             continue
+        candidate_genotypes = candidate_genotypes[:, varying]
         try:
-            kinship_factor = vanraden_factor(GD[:, qtns])
+            kinship_factor = vanraden_factor(candidate_genotypes)
             pseudo_kinship = kinship_factor @ kinship_factor.T
             spectrum = prepare_emma_factor_spectrum(
                 kinship_factor,
@@ -514,10 +523,12 @@ def select_super_qtns(
 def sblup(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     qtn_indices: Vector,
     taxa: StrVector | None = None,
     ngrids: int = 100,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GBLUPResult:
     """
     SUPER BLUP (sBLUP).
@@ -531,10 +542,11 @@ def sblup(
     """
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
-    GD = as_float_matrix(GD, name="genotype matrix")
+    genotype = as_genotype_store(GD)
     n = len(y)
     require_row_count(X0, n, name="covariate matrix")
-    require_row_count(GD, n, name="genotype matrix")
+    if genotype.shape[0] != n:
+        raise ValueError(f"genotype matrix must have {n} rows; got {genotype.shape[0]}")
 
     indices = np.asarray(qtn_indices)
     if indices.ndim != 1 or len(indices) == 0:
@@ -542,11 +554,15 @@ def sblup(
     if not np.issubdtype(indices.dtype, np.integer):
         raise ValueError("sBLUP pseudo-QTN indices must be integers")
     integer_indices = indices.astype(np.intp, copy=False)
-    if np.any(integer_indices < 0) or np.any(integer_indices >= GD.shape[1]):
+    if np.any(integer_indices < 0) or np.any(integer_indices >= genotype.shape[1]):
         raise ValueError("sBLUP pseudo-QTN index is outside the genotype matrix")
 
     unique_indices = np.unique(integer_indices)
-    K_pseudo = vanraden_kinship(GD[:, unique_indices])
+    selected = GenotypeView(genotype, marker_indices=unique_indices)
+    K_pseudo = vanraden_kinship(
+        selected,
+        marker_workspace_mib=marker_workspace_mib,
+    )
 
     result = gblup(y, X0, K_pseudo, taxa=taxa, ngrids=ngrids)
     return replace(result, method="sBLUP")

@@ -18,7 +18,7 @@ from pygapit.gapit import (
     _normalize_models,
     _select_traits,
 )
-from pygapit.gs.blup import cblup, gblup, sblup
+from pygapit.gs.blup import cblup, gblup, sblup, select_super_qtns
 from pygapit.gwas.blink import _candidate_mask
 from pygapit.gwas.mlm import mlm_gwas
 from pygapit.io.formats import GenotypeData, PhenotypeData, align_inputs
@@ -186,7 +186,7 @@ def test_multiple_traits_and_models_return_named_results() -> None:
     assert set(result) == {"height_GLM", "height_MLM", "yield_GLM", "yield_MLM"}
 
 
-@pytest.mark.parametrize("model", ["GLM", "MLM"])
+@pytest.mark.parametrize("model", ["GLM", "MLM", "gBLUP", "sBLUP"])
 def test_gapit_disk_store_matches_aligned_in_memory_pipeline(
     tmp_path: Path,
     model: str,
@@ -230,6 +230,11 @@ def test_gapit_disk_store_matches_aligned_in_memory_pipeline(
     pd.testing.assert_frame_equal(actual.GWAS, expected.GWAS)
     np.testing.assert_allclose(actual.kinship, expected.kinship, rtol=1e-12, atol=1e-12)
     np.testing.assert_array_equal(actual.taxa, expected.taxa)
+    if expected.Pred is None:
+        assert actual.Pred is None
+    else:
+        assert actual.Pred is not None
+        pd.testing.assert_frame_equal(actual.Pred, expected.Pred)
 
 
 def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() -> None:
@@ -263,6 +268,28 @@ def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() ->
     assert all(request is not None for request in store.sample_requests)
 
 
+def test_super_store_reuses_one_bounded_candidate_pool() -> None:
+    phenotype, genotype, marker_map = _inputs()
+    genotype_data = GenotypeData.from_numeric_frame(genotype, marker_map)
+    store = _RecordingLabeledStore(genotype_data)
+    y = phenotype["height"].to_numpy(dtype=np.float64)
+    design = np.ones((len(y), 1), dtype=np.float64)
+
+    selection = select_super_qtns(
+        y,
+        design,
+        store,
+        store.chromosomes,
+        store.positions,
+        np.asarray([0.01, 0.02, 0.03, 0.04], dtype=np.float64),
+        bin_size=10,
+        candidate_counts=[1, 2, 4],
+    )
+
+    assert selection.qtn_indices.size > 0
+    assert store.marker_slices == [slice(0, 4)]
+
+
 def test_align_inputs_validates_custom_store_metadata_lengths() -> None:
     phenotype, genotype, marker_map = _inputs()
     store = _RecordingLabeledStore(
@@ -291,7 +318,7 @@ def test_gapit_disk_store_rejects_unsupported_paths(tmp_path: Path) -> None:
     write_numpy_genotype(store_path, genotype_data)
 
     with open_genotype_store(store_path, backend="numpy") as store:
-        with pytest.raises(ValueError, match="only GLM and MLM"):
+        with pytest.raises(ValueError, match="supports GLM, MLM, gBLUP, and sBLUP"):
             GAPIT(Y=phenotype, GD=store, model="BLINK", file_output=False)
         with pytest.raises(ValueError, match="requires kinship_algorithm"):
             GAPIT(
@@ -301,12 +328,22 @@ def test_gapit_disk_store_rejects_unsupported_paths(tmp_path: Path) -> None:
                 kinship_algorithm="Zhang",
                 file_output=False,
             )
-        with pytest.raises(ValueError, match="prediction output"):
+        prediction = GAPIT(
+            Y=phenotype,
+            GD=store,
+            model="GLM",
+            buspred=True,
+            trait="height",
+            file_output=False,
+        )
+        assert isinstance(prediction, GAPITResult)
+        assert prediction.Pred is not None
+        with pytest.raises(ValueError, match="cBLUP prediction"):
             GAPIT(
                 Y=phenotype,
                 GD=store,
                 model="GLM",
-                buspred=True,
+                prediction_model="cBLUP",
                 file_output=False,
             )
         with pytest.raises(ValueError, match="GM must not be provided"):

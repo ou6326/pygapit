@@ -21,6 +21,9 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 - Require Python 3.11 or newer and test the complete optional-storage stack on
   Python 3.11 and 3.14.
+- Extend disk-backed top-level workflows through SUPER selection and sBLUP
+  prediction while materializing and reusing only the bounded pseudo-QTN
+  candidate pool.
 
 ## [1.2.4] - 2026-09-12
 
