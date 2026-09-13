@@ -29,7 +29,9 @@ from scipy.special import gammaln
 from scipy.stats import f as f_dist
 from scipy.stats import t as t_dist
 
+from .._resources import DEFAULT_MARKER_WORKSPACE_MIB, validate_marker_workspace_mib
 from .._typing import FloatMatrix, FloatVector, IntVector, readonly_copy
+from ..io.storage import GenotypeStore, GenotypeView, as_genotype_store
 from ..stats.emma import GWASResult, emma_remle
 from .glm import _marker_batch_size
 
@@ -142,7 +144,7 @@ def _ext_bic(
 def _restore_cofactor_statistics(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: GenotypeStore,
     K: FloatMatrix,
     cofactors: list[int],
     result: GWASResult,
@@ -152,7 +154,7 @@ def _restore_cofactor_statistics(
     """Replace collinear scan placeholders with joint GLS cofactor statistics."""
     if not cofactors:
         return result
-    design: FloatMatrix = np.column_stack([X0] + [GD[:, index] for index in cofactors])
+    design = _cofactor_design(X0, GD, cofactors)
     if variance_fit is None:
         remle = emma_remle(y, design, K, ngrids=ngrids)
         delta = remle.delta
@@ -198,14 +200,14 @@ def _restore_cofactor_statistics(
 def _least_significant_cofactor(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: GenotypeStore,
     K: FloatMatrix,
     cofactors: list[int],
     ngrids: int,
     variance_fit: GWASResult | None = None,
 ) -> int:
     """Return the marker with GAPIT's smallest absolute joint GLS t statistic."""
-    design: FloatMatrix = np.column_stack([X0] + [GD[:, index] for index in cofactors])
+    design = _cofactor_design(X0, GD, cofactors)
     if variance_fit is None:
         remle = emma_remle(y, design, K, ngrids=ngrids)
         delta = remle.delta
@@ -227,17 +229,15 @@ def _least_significant_cofactor(
 def _conditioned_marker_scan(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     cofactors: list[int],
     ngrids: int,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GWASResult:
     """Run the RSS/F marker scan used by GAPIT's MLMM implementation."""
-    design: FloatMatrix = (
-        np.column_stack([X0] + [GD[:, index] for index in cofactors])
-        if cofactors
-        else X0
-    )
+    genotype = as_genotype_store(GD)
+    design = _cofactor_design(X0, genotype, cofactors)
     remle = emma_remle(y, design, K, ngrids=ngrids)
     covariance = remle.vg * K + remle.ve * np.eye(len(y))
     cholesky = np.linalg.cholesky(covariance)
@@ -259,18 +259,18 @@ def _conditioned_marker_scan(
     null_rss = np.sum(residual**2)
     degrees_of_freedom = len(y) - design.shape[1] - 1
 
-    p_values = np.ones(GD.shape[1])
-    effects = np.full(GD.shape[1], np.nan)
-    standard_errors = np.full(GD.shape[1], np.nan)
-    statistics = np.full(GD.shape[1], np.nan)
-    cofactor_mask = np.zeros(GD.shape[1], dtype=bool)
+    p_values = np.ones(genotype.shape[1])
+    effects = np.full(genotype.shape[1], np.nan)
+    standard_errors = np.full(genotype.shape[1], np.nan)
+    statistics = np.full(genotype.shape[1], np.nan)
+    cofactor_mask = np.zeros(genotype.shape[1], dtype=bool)
     cofactor_mask[cofactors] = True
-    batch_size = _marker_batch_size(len(y))
-    for batch_start in range(0, GD.shape[1], batch_size):
-        batch_stop = min(batch_start + batch_size, GD.shape[1])
+    batch_size = _marker_batch_size(len(y), marker_workspace_mib)
+    for batch_start in range(0, genotype.shape[1], batch_size):
+        batch_stop = min(batch_start + batch_size, genotype.shape[1])
         transformed_genotypes = solve_triangular(
             cholesky,
-            GD[:, batch_start:batch_stop],
+            genotype.read_markers(slice(batch_start, batch_stop)),
             lower=True,
             check_finite=False,
         )
@@ -325,13 +325,32 @@ def _conditioned_marker_scan(
     )
 
 
+def _cofactor_design(
+    X0: FloatMatrix,
+    genotype: GenotypeStore,
+    cofactors: list[int],
+) -> FloatMatrix:
+    """Append only the selected marker columns to the fixed-effect design."""
+    if not cofactors:
+        return X0
+    marker_indices: IntVector = np.asarray(cofactors, dtype=np.intp)
+    cofactor_values = GenotypeView(
+        genotype,
+        marker_indices=marker_indices,
+    ).read_markers(slice(None))
+    design: FloatMatrix = np.column_stack([X0, cofactor_values])
+    return design
+
+
 def mlmm_gwas(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     K: FloatMatrix,
     max_steps: int = 10,
     ngrids: int = 100,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> MLMMResult:
     """
     MLMM genome-wide association.
@@ -349,17 +368,15 @@ def mlmm_gwas(
     -------
     MLMMResult with final p-values and selected QTN indices
     """
-    n, m = GD.shape
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
+    genotype = as_genotype_store(GD)
+    n, m = genotype.shape
     K = _normalize_kinship(K)
     eigenvalues, eigenvectors = np.linalg.eigh(K)
     model_candidates: list[tuple[np.float64, list[int]]] = []
 
     def record_model(selected: list[int]) -> None:
-        design: FloatMatrix = (
-            np.column_stack([X0] + [GD[:, index] for index in selected])
-            if selected
-            else X0
-        )
+        design: FloatMatrix = _cofactor_design(X0, genotype, selected)
         log_likelihood = _profile_ml_log_likelihood(
             y, design, eigenvalues, eigenvectors
         )
@@ -378,7 +395,15 @@ def mlmm_gwas(
     record_model(cofactors)
 
     # ── Initial scan without cofactors ───────────────────────────────────
-    result = _conditioned_marker_scan(y, X0, GD, K, cofactors, ngrids)
+    result = _conditioned_marker_scan(
+        y,
+        X0,
+        genotype,
+        K,
+        cofactors,
+        ngrids,
+        marker_workspace_mib,
+    )
 
     # GAPIT's maxsteps counts the null model.
     for _step in range(max(max_steps - 1, 0)):
@@ -388,7 +413,15 @@ def mlmm_gwas(
             break
         cofactors.append(int(np.nanargmin(p_values)))
         try:
-            result = _conditioned_marker_scan(y, X0, GD, K, cofactors, ngrids)
+            result = _conditioned_marker_scan(
+                y,
+                X0,
+                genotype,
+                K,
+                cofactors,
+                ngrids,
+                marker_workspace_mib,
+            )
             record_model(cofactors)
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             cofactors.pop()
@@ -404,7 +437,7 @@ def mlmm_gwas(
         dropped = _least_significant_cofactor(
             y,
             X0,
-            GD,
+            genotype,
             K,
             backward_cofactors,
             ngrids,
@@ -420,11 +453,19 @@ def mlmm_gwas(
     _, best_cofactors = min(model_candidates, key=criterion)
 
     # ── Final scan with best cofactor set ────────────────────────────────
-    final_result = _conditioned_marker_scan(y, X0, GD, K, best_cofactors, ngrids)
+    final_result = _conditioned_marker_scan(
+        y,
+        X0,
+        genotype,
+        K,
+        best_cofactors,
+        ngrids,
+        marker_workspace_mib,
+    )
     final_result = _restore_cofactor_statistics(
         y,
         X0,
-        GD,
+        genotype,
         K,
         best_cofactors,
         final_result,

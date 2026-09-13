@@ -370,12 +370,12 @@ def GAPIT(
     pheno, geno = _load_data(Y, G, GD, GM, SNP_impute)
 
     if isinstance(geno, LabeledGenotypeStore):
-        supported = {"GLM", "MLM", "CMLM", "GBLUP", "SBLUP"}
+        supported = {"GLM", "MLM", "CMLM", "MLMM", "GBLUP", "SBLUP"}
         unsupported = [name for name in models if name not in supported]
         if unsupported:
             raise ValueError(
-                "Disk-backed GAPIT currently supports GLM, MLM, CMLM, gBLUP, "
-                "and sBLUP; "
+                "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
+                "gBLUP, and sBLUP; "
                 f"unsupported model(s): {', '.join(unsupported)}"
             )
         if normalized_kinship_algorithm != "VanRaden":
@@ -1191,22 +1191,28 @@ def _run_model(
                 marker_workspace_mib=marker_workspace_mib,
             )
             return ModelRunResult(r.p_values, r.effects, r.se, r.h2, r.vg, r.ve)
+        case "MLMM":
+            r = mlmm_gwas(
+                y,
+                X0,
+                GD,
+                K,
+                marker_workspace_mib=marker_workspace_mib,
+            )
+            return ModelRunResult(
+                r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
+            )
         case _:
             pass
 
     if isinstance(GD, GenotypeStore):
         raise TypeError(
-            "Disk-backed GAPIT currently supports GLM, MLM, CMLM, gBLUP, "
-            "and sBLUP; "
+            "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
+            "gBLUP, and sBLUP; "
             f"unsupported model: {model_name}"
         )
 
     match model_name:
-        case "MLMM":
-            r = mlmm_gwas(y, X0, GD, K)
-            return ModelRunResult(
-                r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
-            )
         case "BLINK":
             r = blink_gwas(
                 y,

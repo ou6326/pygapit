@@ -25,6 +25,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   prediction while materializing and reusing only the bounded pseudo-QTN
   candidate pool.
 - Support bounded disk-backed marker scans in direct and top-level CMLM.
+- Extend direct and top-level MLMM to disk-backed marker batches while reading
+  only its selected cofactors into each fixed-effect design.
 
 ## [1.2.4] - 2026-09-12
 
