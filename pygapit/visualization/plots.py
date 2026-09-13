@@ -31,6 +31,7 @@ from .._typing import (
     StrVector,
     Vector,
 )
+from .data import prepare_genomic_axis, prepare_manhattan_data
 
 
 class _Spine(Protocol):
@@ -122,35 +123,7 @@ SIG_COLOR = "#E41A1C"  # red for significant hits
 SUGGEST_COLOR = "#FF7F00"  # orange for suggestive
 
 
-def _genomic_axis(
-    chromosomes: LabelVector,
-    positions: NumericVector,
-    chromosome_gap: float = 5_000_000.0,
-) -> tuple[FloatVector, tuple[str, ...], FloatVector]:
-    """Map chromosome-local positions onto one cumulative genomic axis."""
-    chroms = np.asarray(chromosomes, dtype=str)
-    pos = np.asarray(positions, dtype=np.float64)
-    if chroms.ndim != 1 or pos.ndim != 1 or len(chroms) != len(pos):
-        raise ValueError("chromosomes and positions must be equal-length vectors")
-    if len(pos) == 0:
-        raise ValueError("chromosomes and positions must not be empty")
-    if not np.all(np.isfinite(pos)):
-        raise ValueError("positions must contain only finite values")
-
-    unique_chroms = tuple(dict.fromkeys(str(chrom) for chrom in chroms))
-    x_values = np.empty(len(pos), dtype=np.float64)
-    centers = np.empty(len(unique_chroms), dtype=np.float64)
-    cumulative = 0.0
-    for index, chrom in enumerate(unique_chroms):
-        mask = chroms == chrom
-        chrom_positions = pos[mask]
-        minimum = np.min(chrom_positions)
-        maximum = np.max(chrom_positions)
-        span = maximum - minimum
-        x_values[mask] = cumulative + chrom_positions - minimum
-        centers[index] = cumulative + span / 2.0
-        cumulative += span + chromosome_gap
-    return x_values, unique_chroms, centers
+_genomic_axis = prepare_genomic_axis
 
 
 def manhattan_plot(
@@ -182,35 +155,28 @@ def manhattan_plot(
     save_path            : if provided, save to this path
     """
     # ── Data prep ────────────────────────────────────────────────────────
-    positions = np.asarray(positions, dtype=np.float64)
-    p_values = np.asarray(p_values, dtype=np.float64)
-    valid = ~np.isnan(p_values) & (p_values > 0) & (p_values <= 1)
-    p_vals = np.where(valid, p_values, 1.0)
-    log_p = -np.log10(np.where(p_vals > 0, p_vals, 1e-300))
-
-    m = len(p_values)
-    if significance_threshold is None:
-        significance_threshold = 0.05 / m
-    if suggestive_threshold is None:
-        suggestive_threshold = 1.0 / m
-
-    sig_line = -np.log10(significance_threshold)
-    sug_line = -np.log10(suggestive_threshold)
-
-    chroms = np.asarray(chromosomes, dtype=str)
-    x_vals, unique_chroms, chrom_centers = _genomic_axis(chroms, positions)
+    data = prepare_manhattan_data(
+        snp_names,
+        chromosomes,
+        positions,
+        p_values,
+        significance_threshold=significance_threshold,
+        suggestive_threshold=suggestive_threshold,
+    )
+    sig_line = -np.log10(data.significance_threshold)
+    sug_line = -np.log10(data.suggestive_threshold)
 
     # ── Plot ─────────────────────────────────────────────────────────────
     fig, raw_ax = plt.subplots(figsize=figsize)
     ax = _axes(raw_ax)
     ax.set_facecolor("white")
 
-    for ci, chrom in enumerate(unique_chroms):
-        mask = chroms == chrom
+    for ci, chrom in enumerate(data.chromosome_labels):
+        mask = data.chromosomes == chrom
         color = CHR_COLORS[ci % len(CHR_COLORS)]
         ax.scatter(
-            x_vals[mask],
-            log_p[mask],
+            data.x_values[mask],
+            data.log_p_values[mask],
             c=color,
             s=point_size,
             linewidths=0,
@@ -221,8 +187,8 @@ def manhattan_plot(
     # Highlight significant SNPs
     if highlight_snps is not None and len(highlight_snps) > 0:
         ax.scatter(
-            x_vals[highlight_snps],
-            log_p[highlight_snps],
+            data.x_values[highlight_snps],
+            data.log_p_values[highlight_snps],
             c=SIG_COLOR,
             s=point_size * 4,
             linewidths=0,
@@ -236,10 +202,10 @@ def manhattan_plot(
     )
 
     # Axis formatting
-    ax.set_xlim(0, max(x_vals.max() * 1.01, 1.0))
-    ax.set_ylim(0, max(log_p.max() * 1.1, sig_line * 1.2))
-    ax.set_xticks(chrom_centers)
-    ax.set_xticklabels(unique_chroms, fontsize=7)
+    ax.set_xlim(0, max(data.x_values.max() * 1.01, 1.0))
+    ax.set_ylim(0, max(data.log_p_values.max() * 1.1, sig_line * 1.2))
+    ax.set_xticks(data.chromosome_centers)
+    ax.set_xticklabels(data.chromosome_labels, fontsize=7)
     ax.set_xlabel("Chromosome", fontsize=10)
     ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=10)
     ax.set_title(title, fontsize=11, fontweight="bold")
@@ -518,24 +484,16 @@ def manhattan_interactive(
         return None
     plotly = cast(_PlotlyModule, cast(Any, go))
 
-    snp_names = np.asarray(snp_names, dtype=str)
-    chromosomes = np.asarray(chromosomes, dtype=str)
-    positions = np.asarray(positions, dtype=np.float64)
-    p_values = np.asarray(p_values, dtype=np.float64)
-    valid = ~np.isnan(p_values) & (p_values > 0)
-    m = len(p_values)
-
-    chroms = chromosomes
-    x_vals, unique_chroms, _ = _genomic_axis(chroms, positions)
-    log_p = -np.log10(np.where(valid, np.maximum(p_values, 1e-300), 1.0))
+    data = prepare_manhattan_data(snp_names, chromosomes, positions, p_values)
+    marker_count = len(data.p_values)
 
     # Build hover text
     hover: list[str] = []
-    for i in range(m):
+    for i in range(marker_count):
         txt = (
-            f"<b>{snp_names[i]}</b><br>"
-            f"Chr: {chromosomes[i]}, Pos: {int(positions[i]):,}<br>"
-            f"P-value: {p_values[i]:.2e}<br>"
+            f"<b>{data.snp_names[i]}</b><br>"
+            f"Chr: {data.chromosomes[i]}, Pos: {int(data.positions[i]):,}<br>"
+            f"P-value: {data.p_values[i]:.2e}<br>"
         )
         if effects is not None:
             txt += f"Effect: {effects[i]:.4f}<br>"
@@ -543,17 +501,16 @@ def manhattan_interactive(
             txt += f"MAF: {maf[i]:.3f}"
         hover.append(txt)
 
-    sig_threshold = 0.05 / m
-    sig_line = -np.log10(sig_threshold)
+    sig_line = -np.log10(data.significance_threshold)
 
     fig = plotly.Figure()
-    for ci, chrom in enumerate(unique_chroms):
-        mask = chroms == chrom
+    for ci, chrom in enumerate(data.chromosome_labels):
+        mask = data.chromosomes == chrom
         color = CHR_COLORS[ci % len(CHR_COLORS)]
         fig.add_trace(
             plotly.Scatter(
-                x=x_vals[mask],
-                y=log_p[mask],
+                x=data.x_values[mask],
+                y=data.log_p_values[mask],
                 mode="markers",
                 marker={"size": 3, "color": color, "opacity": 0.7},
                 text=np.array(hover)[mask],
