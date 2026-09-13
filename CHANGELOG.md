@@ -31,6 +31,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   reward substitution, and pseudo-QTN kinship paths.
 - Add disk-backed BLINK with bounded GLM and LD-pruning reads, plus reuse of its
   truncated BIC candidate pool.
+- Support disk-backed cBLUP prediction by streaming VanRaden marker blocks;
+  compression still operates on the complete in-memory kinship matrix.
 
 ## [1.2.4] - 2026-09-12
 

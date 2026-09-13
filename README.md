@@ -530,10 +530,13 @@ with open_genotype_store("genotype-store") as store:
 ```
 
 The top-level `GAPIT()` pipeline supports GLM, MLM, CMLM, MLMM, FarmCPU, BLINK,
-gBLUP, and sBLUP with an open labeled store. The direct `glm_gwas()`,
+gBLUP, cBLUP, and sBLUP with an open labeled store. The direct `glm_gwas()`,
 `mlm_gwas()`, `cmlm_gwas()`, `mlmm_gwas()`, `farmcpu_gwas()`, `blink_gwas()`,
-`select_super_qtns()`, and `sblup()` APIs accept the same chunk-readable input;
-`gblup()` consumes the already constructed kinship matrix. Top-level stores
+`cblup()`, `select_super_qtns()`, and `sblup()` APIs accept the same
+chunk-readable input; `gblup()` consumes the already constructed kinship
+matrix. cBLUP streams marker blocks while constructing VanRaden kinship, but
+its complete sample-by-sample kinship matrix remains resident in memory during
+compression selection. Top-level stores
 supply their own taxa and marker metadata, must contain finite pre-imputed
 values, omit `GM`, and currently use VanRaden kinship. SUPER/sBLUP materializes
 only the largest requested pseudo-QTN candidate pool and reuses its prefixes;

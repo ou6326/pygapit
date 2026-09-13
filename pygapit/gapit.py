@@ -378,24 +378,20 @@ def GAPIT(
             "FARMCPU",
             "BLINK",
             "GBLUP",
+            "CBLUP",
             "SBLUP",
         }
         unsupported = [name for name in models if name not in supported]
         if unsupported:
             raise ValueError(
                 "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
-                "FarmCPU, BLINK, gBLUP, and sBLUP; "
+                "FarmCPU, BLINK, gBLUP, cBLUP, and sBLUP; "
                 f"unsupported model(s): {', '.join(unsupported)}"
             )
         if normalized_kinship_algorithm != "VanRaden":
             raise ValueError(
                 "Disk-backed GAPIT currently requires kinship_algorithm='VanRaden'"
             )
-        if normalized_prediction_model == "CBLUP":
-            raise ValueError(
-                "Disk-backed GAPIT does not yet support cBLUP prediction output"
-            )
-
     # ── Simulation mode ──────────────────────────────────────────────────
     if h2 is not None and NQTN is not None:
         if isinstance(geno, LabeledGenotypeStore):
@@ -1045,12 +1041,6 @@ def _assemble_result(
             "SBLUP",
         )
     ):
-        if isinstance(prepared.genotypes, GenotypeStore) and (
-            model_name == "CBLUP" or prediction_model == "CBLUP"
-        ):
-            raise ValueError(
-                "Disk-backed GAPIT does not yet support cBLUP prediction output"
-            )
         prediction = _run_gs_and_build_pred(
             y=prepared.y,
             X0=prepared.design,
@@ -1188,6 +1178,24 @@ def _run_model(
                 selection.qtn_indices,
                 prediction=r,
             )
+        case "CBLUP":
+            r = cblup(
+                y,
+                X0,
+                GD,
+                group_to=group_to,
+                marker_workspace_mib=marker_workspace_mib,
+            )
+            p_vals = np.ones(m)
+            return ModelRunResult(
+                p_vals,
+                np.zeros(m),
+                np.ones(m),
+                r.h2,
+                r.vg,
+                r.ve,
+                prediction=r,
+            )
         case "CMLM":
             n = len(y)
             r = cmlm_gwas(
@@ -1246,29 +1254,15 @@ def _run_model(
     if isinstance(GD, GenotypeStore):
         raise TypeError(
             "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
-            "FarmCPU, BLINK, gBLUP, and sBLUP; "
+            "FarmCPU, BLINK, gBLUP, cBLUP, and sBLUP; "
             f"unsupported model: {model_name}"
         )
 
-    match model_name:
-        case "CBLUP":
-            r = cblup(y, X0, GD, group_to=group_to)
-            p_vals = np.ones(GD.shape[1])
-            return ModelRunResult(
-                p_vals,
-                np.zeros(GD.shape[1]),
-                np.ones(GD.shape[1]),
-                r.h2,
-                r.vg,
-                r.ve,
-                prediction=r,
-            )
-        case _:
-            raise ValueError(
-                f"Unknown model: {model_name}. "
-                "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, "
-                "gBLUP, cBLUP, sBLUP."
-            )
+    raise ValueError(
+        f"Unknown model: {model_name}. "
+        "Choose from: GLM, MLM, CMLM, MLMM, BLINK, FarmCPU, "
+        "gBLUP, cBLUP, sBLUP."
+    )
 
 
 def _run_mlm_scan(
@@ -1373,17 +1367,13 @@ def _run_gs_and_build_pred(
                         marker_workspace_mib=marker_workspace_mib,
                     )
                 case "CBLUP", _:
-                    if isinstance(GD, GenotypeStore):
-                        raise TypeError(
-                            "Disk-backed GAPIT does not yet support cBLUP prediction "
-                            "output"
-                        )
                     gs_result = cblup(
                         y,
                         X0,
                         GD,
                         taxa=taxa,
                         group_to=group_to,
+                        marker_workspace_mib=marker_workspace_mib,
                     )
                 case _:
                     gs_result = gblup(y, X0, K, taxa=taxa)

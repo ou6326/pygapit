@@ -24,7 +24,10 @@ from dataclasses import dataclass, replace
 import numpy as np
 from scipy.linalg import cho_factor, cho_solve
 
-from .._resources import DEFAULT_MARKER_WORKSPACE_MIB
+from .._resources import (
+    DEFAULT_MARKER_WORKSPACE_MIB,
+    validate_marker_workspace_mib,
+)
 from .._typing import (
     FloatMatrix,
     FloatVector,
@@ -299,10 +302,12 @@ def predict_new(
 def cblup(
     y: FloatVector,
     X0: FloatMatrix,
-    GD: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
     taxa: StrVector | None = None,
     group_to: int | None = None,
     ngrids: int = 100,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
 ) -> GBLUPResult:
     """
     Compressed BLUP (cBLUP).
@@ -319,11 +324,16 @@ def cblup(
 
     y = as_float_vector(y, name="phenotype")
     X0 = as_float_matrix(X0, name="covariate matrix")
-    GD = as_float_matrix(GD, name="genotype matrix")
+    genotype = as_genotype_store(GD)
+    marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     n = len(y)
     require_row_count(X0, n, name="covariate matrix")
-    require_row_count(GD, n, name="genotype matrix")
-    K_full = vanraden_kinship(GD)
+    if genotype.shape[0] != n:
+        raise ValueError(f"genotype matrix must have {n} rows; got {genotype.shape[0]}")
+    K_full = vanraden_kinship(
+        genotype,
+        marker_workspace_mib=marker_workspace_mib,
+    )
 
     if group_to is None:
         group_to = n

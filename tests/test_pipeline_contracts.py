@@ -188,7 +188,17 @@ def test_multiple_traits_and_models_return_named_results() -> None:
 
 @pytest.mark.parametrize(
     "model",
-    ["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "BLINK", "gBLUP", "sBLUP"],
+    [
+        "GLM",
+        "MLM",
+        "CMLM",
+        "MLMM",
+        "FarmCPU",
+        "BLINK",
+        "gBLUP",
+        "cBLUP",
+        "sBLUP",
+    ],
 )
 def test_gapit_disk_store_matches_aligned_in_memory_pipeline(
     tmp_path: Path,
@@ -251,7 +261,7 @@ def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() ->
     result = GAPIT(
         Y=phenotype,
         GD=store,
-        model=["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "BLINK"],
+        model=["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "BLINK", "cBLUP"],
         trait="height",
         PCA_total=1,
         maf_threshold=0.2,
@@ -267,6 +277,7 @@ def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() ->
         "height_MLMM",
         "height_FARMCPU",
         "height_BLINK",
+        "height_CBLUP",
     }
     assert len(store.marker_slices) > 2
     assert all(
@@ -328,11 +339,6 @@ def test_gapit_disk_store_rejects_unsupported_paths(tmp_path: Path) -> None:
     write_numpy_genotype(store_path, genotype_data)
 
     with open_genotype_store(store_path, backend="numpy") as store:
-        with pytest.raises(
-            ValueError,
-            match=("supports GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP, and sBLUP"),
-        ):
-            GAPIT(Y=phenotype, GD=store, model="cBLUP", file_output=False)
         with pytest.raises(ValueError, match="requires kinship_algorithm"):
             GAPIT(
                 Y=phenotype,
@@ -351,14 +357,16 @@ def test_gapit_disk_store_rejects_unsupported_paths(tmp_path: Path) -> None:
         )
         assert isinstance(prediction, GAPITResult)
         assert prediction.Pred is not None
-        with pytest.raises(ValueError, match="cBLUP prediction"):
-            GAPIT(
-                Y=phenotype,
-                GD=store,
-                model="GLM",
-                prediction_model="cBLUP",
-                file_output=False,
-            )
+        cblup_prediction = GAPIT(
+            Y=phenotype,
+            GD=store,
+            model="GLM",
+            prediction_model="cBLUP",
+            trait="height",
+            file_output=False,
+        )
+        assert isinstance(cblup_prediction, GAPITResult)
+        assert cblup_prediction.Pred is not None
         with pytest.raises(ValueError, match="GM must not be provided"):
             GAPIT(
                 Y=phenotype,
