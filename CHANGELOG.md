@@ -29,6 +29,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   only its selected cofactors into each fixed-effect design.
 - Support disk-backed FarmCPU iterations through the shared bounded GLM scan,
   reward substitution, and pseudo-QTN kinship paths.
+- Add disk-backed BLINK with bounded GLM and LD-pruning reads, plus reuse of its
+  truncated BIC candidate pool.
 
 ## [1.2.4] - 2026-09-12
 

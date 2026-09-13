@@ -376,6 +376,7 @@ def GAPIT(
             "CMLM",
             "MLMM",
             "FARMCPU",
+            "BLINK",
             "GBLUP",
             "SBLUP",
         }
@@ -383,7 +384,7 @@ def GAPIT(
         if unsupported:
             raise ValueError(
                 "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
-                "FarmCPU, gBLUP, and sBLUP; "
+                "FarmCPU, BLINK, gBLUP, and sBLUP; "
                 f"unsupported model(s): {', '.join(unsupported)}"
             )
         if normalized_kinship_algorithm != "VanRaden":
@@ -1225,17 +1226,6 @@ def _run_model(
             return ModelRunResult(
                 r.p_values, r.effects, r.se, r.h2, r.vg, r.ve, r.selected_qtns
             )
-        case _:
-            pass
-
-    if isinstance(GD, GenotypeStore):
-        raise TypeError(
-            "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
-            "FarmCPU, gBLUP, and sBLUP; "
-            f"unsupported model: {model_name}"
-        )
-
-    match model_name:
         case "BLINK":
             r = blink_gwas(
                 y,
@@ -1245,10 +1235,22 @@ def _run_model(
                 ld_threshold=LD_threshold,
                 p_threshold=None if fdr_cut and p_threshold is None else p_thresh,
                 fdr_alpha=fdr_alpha if fdr_cut and p_threshold is None else None,
+                marker_workspace_mib=marker_workspace_mib,
             )
             return ModelRunResult(
                 r.p_values, r.effects, r.se, selected_qtns=r.selected_qtns
             )
+        case _:
+            pass
+
+    if isinstance(GD, GenotypeStore):
+        raise TypeError(
+            "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
+            "FarmCPU, BLINK, gBLUP, and sBLUP; "
+            f"unsupported model: {model_name}"
+        )
+
+    match model_name:
         case "CBLUP":
             r = cblup(y, X0, GD, group_to=group_to)
             p_vals = np.ones(GD.shape[1])

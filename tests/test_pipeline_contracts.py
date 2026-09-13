@@ -188,7 +188,7 @@ def test_multiple_traits_and_models_return_named_results() -> None:
 
 @pytest.mark.parametrize(
     "model",
-    ["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "gBLUP", "sBLUP"],
+    ["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "BLINK", "gBLUP", "sBLUP"],
 )
 def test_gapit_disk_store_matches_aligned_in_memory_pipeline(
     tmp_path: Path,
@@ -251,7 +251,7 @@ def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() ->
     result = GAPIT(
         Y=phenotype,
         GD=store,
-        model=["GLM", "MLM", "CMLM", "MLMM", "FarmCPU"],
+        model=["GLM", "MLM", "CMLM", "MLMM", "FarmCPU", "BLINK"],
         trait="height",
         PCA_total=1,
         maf_threshold=0.2,
@@ -266,6 +266,7 @@ def test_gapit_combined_store_pipeline_never_materializes_complete_genotype() ->
         "height_CMLM",
         "height_MLMM",
         "height_FARMCPU",
+        "height_BLINK",
     }
     assert len(store.marker_slices) > 2
     assert all(
@@ -329,9 +330,9 @@ def test_gapit_disk_store_rejects_unsupported_paths(tmp_path: Path) -> None:
     with open_genotype_store(store_path, backend="numpy") as store:
         with pytest.raises(
             ValueError,
-            match="supports GLM, MLM, CMLM, MLMM, FarmCPU, gBLUP, and sBLUP",
+            match=("supports GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, gBLUP, and sBLUP"),
         ):
-            GAPIT(Y=phenotype, GD=store, model="BLINK", file_output=False)
+            GAPIT(Y=phenotype, GD=store, model="cBLUP", file_output=False)
         with pytest.raises(ValueError, match="requires kinship_algorithm"):
             GAPIT(
                 Y=phenotype,

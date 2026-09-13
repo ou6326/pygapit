@@ -208,10 +208,11 @@ def glm_scan_with_cofactors(
     genotype = as_genotype_store(GD)
     X_ext: FloatMatrix
     if cofactor_indices is not None and len(cofactor_indices) > 0:
-        cofactors = GenotypeView(
+        cofactors = _read_selected_markers(
             genotype,
-            marker_indices=cofactor_indices,
-        ).read_markers(slice(None))
+            cofactor_indices,
+            marker_workspace_mib,
+        )
         X_ext = np.column_stack([X0, cofactors])
     else:
         X_ext = X0
@@ -239,10 +240,11 @@ def reward_substitute_cofactor_statistics(
 
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     genotype = as_genotype_store(GD)
-    cofactor_values = GenotypeView(
+    cofactor_values = _read_selected_markers(
         genotype,
-        marker_indices=qtns,
-    ).read_markers(slice(None))
+        qtns,
+        marker_workspace_mib,
+    )
     base_design: FloatMatrix = np.column_stack([X0, cofactor_values])
     base_design_pinv = np.linalg.pinv(base_design)
     n = len(y)
@@ -363,3 +365,24 @@ def reward_substitute_cofactor_statistics(
     se[qtns] = standard_errors[start : start + cofactor_count]
     t_stats[qtns] = statistics[start : start + cofactor_count]
     return GLMResult(p_values, effects, se, t_stats, result.r2_full)
+
+
+def _read_selected_markers(
+    genotype: GenotypeStore,
+    marker_indices: IntVector,
+    marker_workspace_mib: float,
+) -> FloatMatrix:
+    """Read an arbitrary marker selection through bounded logical batches."""
+    selected = np.empty(
+        (genotype.shape[0], len(marker_indices)),
+        dtype=np.float64,
+    )
+    batch_size = _marker_batch_size(genotype.shape[0], marker_workspace_mib)
+    for start in range(0, len(marker_indices), batch_size):
+        stop = min(start + batch_size, len(marker_indices))
+        view = GenotypeView(
+            genotype,
+            marker_indices=marker_indices[start:stop],
+        )
+        selected[:, start:stop] = view.read_markers(slice(None))
+    return selected
