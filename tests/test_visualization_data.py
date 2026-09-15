@@ -24,6 +24,8 @@ from pygapit.visualization.plots import (
     gs_scatter,
     kinship_heatmap,
     manhattan,
+    multiple_manhattan,
+    multiple_qq,
     pca_plot_2d,
     pca_plot_3d,
     phenotype_distribution,
@@ -352,6 +354,46 @@ def test_static_holoviews_diagnostics_cover_specialized_layers() -> None:
     assert phenotype.axes[0].get_legend() is not None
     for figure in (qq, kinship, pca, gs, phenotype):
         plt.close(figure)
+
+
+def test_two_dimensional_diagnostics_render_with_interactive_backends() -> None:
+    model_p_values = [
+        ("GLM", np.asarray([0.5, 0.1, 0.01])),
+        ("MLM", np.asarray([0.4, 0.08, 0.005])),
+    ]
+    plots = (
+        qq_plot(np.asarray([0.5, 0.1, 0.01])),
+        kinship_heatmap(
+            np.asarray([[1.0, 0.2], [0.2, 1.0]]),
+            taxa=np.asarray(["sample-a", "sample-b"]),
+        ),
+        pca_plot_2d(
+            np.asarray([[1.0, 2.0], [3.0, 4.0]]),
+            np.asarray([0.6, 0.3]),
+            taxa=np.asarray(["sample-a", "sample-b"]),
+            groups=np.asarray(["group-1", "group-2"]),
+        ),
+        gs_scatter(
+            np.asarray([1.0, 2.0, 3.0]),
+            np.asarray([1.1, 1.9, 3.2]),
+        ),
+        phenotype_distribution(
+            np.asarray([1.0, 1.5, 2.0, 2.5]),
+            significant_snp_geno=np.asarray([0, 1, 2, 2]),
+        ),
+        multiple_manhattan(
+            np.asarray(["1", "1", "2"]),
+            np.asarray([10.0, 20.0, 5.0]),
+            model_p_values,
+        ),
+        multiple_qq(model_p_values),
+    )
+
+    bokeh_figures = [holoviews.render(plot, backend="bokeh") for plot in plots]
+    plotly_figures = [holoviews.render(plot, backend="plotly") for plot in plots]
+
+    assert all(isinstance(figure, BokehFigure) for figure in bokeh_figures)
+    assert all(isinstance(figure, dict) for figure in plotly_figures)
 
 
 def test_visualization_contracts_reject_ambiguous_shapes() -> None:
