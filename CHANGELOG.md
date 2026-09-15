@@ -14,7 +14,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, and phenotype plots, with rendering and saving delegated to
   HoloViews' Matplotlib, Bokeh, and Plotly backends.
 - A reproducible benchmark for genomic-axis and complete Manhattan data
-  preparation at configurable marker counts.
+  preparation, HoloViews object construction, and opt-in Matplotlib, Bokeh, or
+  Plotly rendering at configurable marker counts.
 - An optional Zarr 3 genotype backend with the same labeled, chunk-readable
   storage contract as the NumPy and HDF5 backends.
 - Chunked conversion between labeled NumPy, HDF5, and Zarr genotype stores
@@ -36,6 +37,9 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   output now happen at the output boundary.
 - Use a linear, low-allocation genomic-axis path when chromosome blocks are
   contiguous while preserving arbitrary-order input compatibility.
+- Reuse zero-copy chromosome slices while constructing exact Manhattan points
+  and combine alternating chromosome colors in one categorical Datashader
+  raster.
 - Require Python 3.11 or newer and test the complete optional-storage stack on
   Python 3.11 and 3.14.
 - Extend disk-backed top-level workflows through SUPER selection and sBLUP

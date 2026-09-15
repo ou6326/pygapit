@@ -98,11 +98,12 @@ Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`
 files for `python -m pstats` or another compatible viewer. Compare profiles
 only on the same machine and thread configuration used for the baseline.
 
-## Manhattan plot preparation
+## Manhattan plot pipeline
 
-`benchmark_plot_preparation.py` measures genomic-axis construction separately
-from complete backend-independent Manhattan data preparation. Inputs are
-allocated before memory tracing so the report isolates preparation workspace.
+`benchmark_plot_preparation.py` separates genomic-axis construction, complete
+Manhattan data preparation, exact-point HoloViews construction, and Datashader
+HoloViews construction. Inputs are allocated before memory tracing so the
+report isolates each stage's additional workspace.
 
 Run marker scales separately to avoid retaining multiple large input sets:
 
@@ -112,9 +113,21 @@ pixi run python benchmarks/benchmark_plot_preparation.py --markers 1000000
 pixi run python benchmarks/benchmark_plot_preparation.py --markers 10000000
 ```
 
+Renderer execution is deliberately opt-in because rendering 1M or 10M exact
+points can be expensive. Repeat `--render-backend` to compare the same
+HoloViews specification across renderers:
+
+```powershell
+pixi run python benchmarks/benchmark_plot_preparation.py --markers 100000 --render-backend matplotlib --render-backend bokeh --render-backend plotly
+```
+
+Renderer measurements clone a pre-built template before every render so a
+populated DynamicMap/Datashader cache is not reused across repetitions.
+
 The benchmark uses chromosome-contiguous data, matching GWAS tables emitted by
 the top-level pipeline. Timings and traced peaks are diagnostic observations,
-not CI thresholds or renderer performance claims.
+not CI thresholds; renderer results should be compared only on the same
+machine.
 
 ## cBLUP eigensolver crossover
 

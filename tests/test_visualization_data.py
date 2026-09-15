@@ -12,7 +12,7 @@ import holoviews as hv
 import matplotlib.pyplot as plt
 import numpy as np
 import pytest
-from bokeh.models import Image as BokehImage
+from bokeh.models import ImageRGBA as BokehImageRGBA
 from bokeh.plotting import figure as BokehFigure
 from holoviews.core import Dimensioned
 from matplotlib.figure import Figure
@@ -20,6 +20,7 @@ from matplotlib.figure import Figure
 from pygapit.visualization import prepare_genomic_axis, prepare_manhattan_data
 from pygapit.visualization.output import StaticStyle, save_plot
 from pygapit.visualization.plots import (
+    _iter_chromosome_selections,
     gs_scatter,
     kinship_heatmap,
     manhattan,
@@ -125,6 +126,31 @@ def test_prepare_genomic_axis_preserves_interleaved_chromosome_semantics() -> No
     np.testing.assert_allclose(centers, [5.0, 5_000_010.0])
 
 
+def test_manhattan_chromosome_selections_use_slices_only_for_contiguous_runs() -> None:
+    contiguous = prepare_manhattan_data(
+        np.asarray(["s1", "s2", "s3", "s4"]),
+        np.asarray(["1", "1", "2", "2"]),
+        np.asarray([10.0, 20.0, 5.0, 15.0]),
+        np.asarray([0.5, 0.1, 0.05, 0.01]),
+    )
+    assert list(_iter_chromosome_selections(contiguous)) == [
+        slice(0, 2),
+        slice(2, 4),
+    ]
+
+    interleaved = prepare_manhattan_data(
+        np.asarray(["s1", "s2", "s3"]),
+        np.asarray(["1", "2", "1"]),
+        np.asarray([10.0, 5.0, 20.0]),
+        np.asarray([0.5, 0.1, 0.01]),
+    )
+    selections = list(_iter_chromosome_selections(interleaved))
+    assert len(selections) == 2
+    assert all(isinstance(selection, np.ndarray) for selection in selections)
+    np.testing.assert_array_equal(selections[0], [True, False, True])
+    np.testing.assert_array_equal(selections[1], [False, True, False])
+
+
 @pytest.mark.parametrize("threshold", [0.0, -1.0, np.inf, np.nan, 1.1])
 def test_prepare_manhattan_data_rejects_invalid_threshold(threshold: float) -> None:
     with pytest.raises(ValueError, match="significance_threshold"):
@@ -199,12 +225,12 @@ def test_manhattan_rendering_is_selected_after_construction() -> None:
     plt.close(static)
 
 
-def test_manhattan_aggregate_renders_significant_points() -> None:
+def test_manhattan_aggregate_uses_one_color_raster_and_keeps_hits() -> None:
     arguments = (
-        np.asarray(["s1", "s2", "s3"]),
-        np.asarray(["1", "1", "2"]),
-        np.asarray([10.0, 20.0, 5.0]),
-        np.asarray([0.05, 1e-4, 0.2]),
+        np.asarray(["s1", "s2", "s3", "s4"]),
+        np.asarray(["1", "2", "3", "3"]),
+        np.asarray([10.0, 5.0, 5.0, 15.0]),
+        np.asarray([0.05, 1e-4, 0.2, 0.3]),
     )
     plot = manhattan(*arguments, large_data="aggregate")
     static = holoviews.render(plot, backend="matplotlib")
@@ -216,17 +242,20 @@ def test_manhattan_aggregate_renders_significant_points() -> None:
     assert isinstance(bokeh, BokehFigure)
     plotly_data = cast("list[dict[str, object]]", plotly["data"])
     assert len(plotly_data) >= 2
-    assert len(static.axes[0].images) == 2
-    assert any(trace.get("type") == "heatmap" for trace in plotly_data)
+    assert len(static.axes[0].images) == 1
+    plotly_layout = cast("dict[str, object]", plotly["layout"])
+    plotly_images = cast("list[dict[str, object]]", plotly_layout["images"])
+    assert len(plotly_images) == 1
     assert (
         sum(
             isinstance(
-                cast(_BokehGlyphRenderer, cast(object, renderer)).glyph, BokehImage
+                cast(_BokehGlyphRenderer, cast(object, renderer)).glyph,
+                BokehImageRGBA,
             )
             for renderer in bokeh.renderers
             if hasattr(renderer, "glyph")
         )
-        == 2
+        == 1
     )
     plt.close(static)
 
@@ -246,7 +275,7 @@ def test_manhattan_auto_uses_datashader_at_marker_threshold(
     )
 
     figure = holoviews.render(plot, backend="matplotlib")
-    assert len(figure.axes[0].images) == 2
+    assert len(figure.axes[0].images) == 1
     plt.close(figure)
 
 

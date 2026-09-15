@@ -19,13 +19,16 @@ import holoviews as hv
 import numpy as np
 from holoviews import opts as hv_opts
 from holoviews.core import Dimensioned
-from holoviews.operation.datashader import rasterize
+from holoviews.operation.datashader import datashade
 
 if t.TYPE_CHECKING:
+    from collections.abc import Iterator, Mapping
     from typing import Self
 
     from datashader.reductions import Reduction
     from holoviews.core.options import Options
+
+    from .._typing import Slice
 
 from .._typing import (
     BoolVector,
@@ -45,8 +48,8 @@ LargeDataMode = Literal["auto", "points", "aggregate"]
 
 _AGGREGATE_MARKER_THRESHOLD = 250_000
 
-_RasterizeInputT_contra = TypeVar("_RasterizeInputT_contra", contravariant=True)
-_RasterizeOutputT_co = TypeVar("_RasterizeOutputT_co", covariant=True)
+_DatashadeInputT_contra = TypeVar("_DatashadeInputT_contra", contravariant=True)
+_DatashadeOutputT_co = TypeVar("_DatashadeOutputT_co", covariant=True)
 
 
 class _HoloViewsObject(Protocol):
@@ -151,18 +154,20 @@ class _HoloViewsOptions(Protocol):
 
 class _DatashaderModule(Protocol):
     def max(self, column: str) -> Reduction: ...
+    def by(self, column: str, reduction: Reduction) -> Reduction: ...
 
 
-class _Rasterize(Protocol[_RasterizeInputT_contra, _RasterizeOutputT_co]):
+class _Datashade(Protocol[_DatashadeInputT_contra, _DatashadeOutputT_co]):
     def __call__(
         self,
-        obj: _RasterizeInputT_contra,
+        obj: _DatashadeInputT_contra,
         *,
         aggregator: Reduction,
+        color_key: Mapping[str, str],
         width: int,
         height: int,
         precompute: bool,
-    ) -> _RasterizeOutputT_co: ...
+    ) -> _DatashadeOutputT_co: ...
 
 
 def _runtime_object(value: object) -> object:
@@ -269,35 +274,38 @@ def _build_manhattan_plot(
     effect_values, maf_values = _interactive_manhattan_metadata(data, effects, maf)
     layers: list[_HoloViewsObject] = []
 
-    for chromosome_index, chromosome in enumerate(data.chromosome_labels):
-        mask = data.chromosomes == chromosome
-        color = CHR_COLORS[chromosome_index % len(CHR_COLORS)]
-        points = _manhattan_points(
-            holoviews,
-            options,
-            data,
-            mask,
-            effect_values=effect_values,
-            maf_values=maf_values,
-            color=color,
-            point_size=point_size,
+    if aggregate:
+        color_groups = np.empty(len(data.p_values), dtype=str)
+        for chromosome_index, selection in enumerate(
+            _iter_chromosome_selections(data),
+        ):
+            color_groups[selection] = str(chromosome_index % len(CHR_COLORS))
+        points = holoviews.Points(
+            (data.x_values, data.log_p_values, color_groups),
+            kdims=["genomic_position", "log_p"],
+            vdims=["color_group"],
         )
-        layers.append(
-            _rasterize_manhattan_layer(
-                points,
-                options,
-                color,
-                figsize,
+        layers.append(_datashade_manhattan_layer(points, figsize))
+    else:
+        for chromosome_index, selection in enumerate(
+            _iter_chromosome_selections(data),
+        ):
+            color = CHR_COLORS[chromosome_index % len(CHR_COLORS)]
+            layers.append(
+                _manhattan_points(
+                    holoviews,
+                    options,
+                    data,
+                    selection,
+                    effect_values=effect_values,
+                    maf_values=maf_values,
+                    color=color,
+                    point_size=point_size,
+                )
             )
-            if aggregate
-            else points
-        )
 
     plot = holoviews.Overlay(layers)
     if aggregate:
-        # ``rasterize`` returns DynamicMaps.  Collating them lifts the dynamic
-        # operation above the Overlay, which is the composition HoloViews can
-        # update correctly when an interactive viewport changes.
         plot = plot.collate()
     emphasized = (
         data.p_values <= data.significance_threshold
@@ -384,11 +392,32 @@ def _register_holoviews_backends() -> None:
     holoviews.Store.set_current_backend(previous_backend)
 
 
+def _iter_chromosome_selections(
+    data: ManhattanPlotData,
+) -> Iterator[BoolVector | Slice]:
+    """Yield zero-copy slices for chromosome blocks and masks as a fallback."""
+    run_starts: IntVector = np.concatenate((
+        np.asarray([0], dtype=np.int_),
+        np.flatnonzero(data.chromosomes[1:] != data.chromosomes[:-1]) + 1,
+    ))
+    if len(run_starts) == len(data.chromosome_labels):
+        run_stops: IntVector = np.concatenate((
+            run_starts[1:],
+            np.asarray([len(data.chromosomes)], dtype=np.int_),
+        ))
+        for start, stop in zip(run_starts, run_stops, strict=True):
+            yield slice(int(start), int(stop))
+        return
+
+    for chromosome in data.chromosome_labels:
+        yield data.chromosomes == chromosome
+
+
 def _manhattan_points(
     holoviews: _HoloViewsModule,
     options: _HoloViewsOptions,
     data: ManhattanPlotData,
-    mask: BoolVector,
+    selection: BoolVector | Slice,
     *,
     effect_values: FloatVector | None,
     maf_values: FloatVector | None,
@@ -396,19 +425,19 @@ def _manhattan_points(
     point_size: float,
 ) -> _HoloViewsObject:
     columns: list[Vector] = [
-        data.x_values[mask],
-        data.log_p_values[mask],
-        data.snp_names[mask],
-        data.chromosomes[mask],
-        data.positions[mask],
-        data.p_values[mask],
+        data.x_values[selection],
+        data.log_p_values[selection],
+        data.snp_names[selection],
+        data.chromosomes[selection],
+        data.positions[selection],
+        data.p_values[selection],
     ]
     dimensions = ["snp", "chromosome", "position", "p_value"]
     if effect_values is not None:
-        columns.append(effect_values[mask])
+        columns.append(effect_values[selection])
         dimensions.append("effect")
     if maf_values is not None:
-        columns.append(maf_values[mask])
+        columns.append(maf_values[selection])
         dimensions.append("maf")
 
     points = holoviews.Points(
@@ -441,29 +470,22 @@ def _manhattan_points(
     )
 
 
-def _rasterize_manhattan_layer(
+def _datashade_manhattan_layer(
     points: _HoloViewsObject,
-    options: _HoloViewsOptions,
-    color: str,
     figsize: tuple[float, float],
 ) -> _HoloViewsObject:
     datashader = cast(_DatashaderModule, _runtime_object(ds))
-    rasterizer = cast(
-        "_Rasterize[_HoloViewsObject, _HoloViewsObject]",
-        cast(object, rasterize),
+    shader = cast(
+        "_Datashade[_HoloViewsObject, _HoloViewsObject]",
+        cast(object, datashade),
     )
-    image = rasterizer(
+    return shader(
         points,
-        aggregator=datashader.max("log_p"),
+        aggregator=datashader.by("color_group", datashader.max("log_p")),
+        color_key={str(index): color for index, color in enumerate(CHR_COLORS)},
         width=max(int(figsize[0] * 100), 1),
         height=max(int(figsize[1] * 100), 1),
         precompute=True,
-    )
-    color_map = ["#FFFFFF", color]
-    return image.opts(
-        options.Image(backend="matplotlib", cmap=color_map, colorbar=False),
-        options.Image(backend="bokeh", cmap=color_map, colorbar=False),
-        options.Image(backend="plotly", cmap=color_map, colorbar=False),
     )
 
 
