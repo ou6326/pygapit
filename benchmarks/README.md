@@ -98,6 +98,24 @@ Pass `--output-dir benchmarks/results/profiles` to retain standard `.prof`
 files for `python -m pstats` or another compatible viewer. Compare profiles
 only on the same machine and thread configuration used for the baseline.
 
+## Manhattan plot preparation
+
+`benchmark_plot_preparation.py` measures genomic-axis construction separately
+from complete backend-independent Manhattan data preparation. Inputs are
+allocated before memory tracing so the report isolates preparation workspace.
+
+Run marker scales separately to avoid retaining multiple large input sets:
+
+```powershell
+pixi run python benchmarks/benchmark_plot_preparation.py --markers 100000
+pixi run python benchmarks/benchmark_plot_preparation.py --markers 1000000
+pixi run python benchmarks/benchmark_plot_preparation.py --markers 10000000
+```
+
+The benchmark uses chromosome-contiguous data, matching GWAS tables emitted by
+the top-level pipeline. Timings and traced peaks are diagnostic observations,
+not CI thresholds or renderer performance claims.
+
 ## cBLUP eigensolver crossover
 
 `benchmark_cblup_eigensolvers.py` compares the group-space and

@@ -10,6 +10,11 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 - Backend-independent Manhattan data and genomic-axis preparation shared by
   static and interactive renderers.
+- A typed unified Manhattan API with Matplotlib, Plotly, and Bokeh renderers;
+  HoloViews/Datashader aggregation; and optional locally scoped Seaborn and
+  SciencePlots styles.
+- A reproducible benchmark for genomic-axis and complete Manhattan data
+  preparation at configurable marker counts.
 - An optional Zarr 3 genotype backend with the same labeled, chunk-readable
   storage contract as the NumPy and HDF5 backends.
 - Chunked conversion between labeled NumPy, HDF5, and Zarr genotype stores
@@ -24,6 +29,12 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Reuse precomputed genomic ordering when building GWAS tables and bypass
   DataFrame sorting and merging when multi-model results already share marker
   order.
+- Build formatted Plotly hover labels only for point layers that can display
+  them, avoiding that allocation for static, Bokeh, and rasterized base layers.
+- Replace the separate static and interactive Manhattan entry points with the
+  mode- and backend-aware `manhattan()` API.
+- Use a linear, low-allocation genomic-axis path when chromosome blocks are
+  contiguous while preserving arbitrary-order input compatibility.
 - Require Python 3.11 or newer and test the complete optional-storage stack on
   Python 3.11 and 3.14.
 - Extend disk-backed top-level workflows through SUPER selection and sBLUP

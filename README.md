@@ -87,6 +87,7 @@ from PyPI; the Python import package and command-line entry point remain
 pip install pygapit-ng
 
 pip install "pygapit-ng[bigdata]"  # include HDF5 and Zarr for larger datasets
+pip install "pygapit-ng[styles]"   # optional Seaborn and SciencePlots styles
 ```
 
 The default installation supports both in-memory analysis and disk-backed
@@ -96,7 +97,9 @@ while an explicit HDF5 request emits an actionable warning to install
 `pygapit-ng[bigdata]` or select `backend="numpy"`.
 
 **Runtime dependencies** are installed automatically: `numpy`, `scipy`,
-`pandas`, `matplotlib`, and `plotly`.
+`pandas`, `matplotlib`, `holoviews`, `plotly`, `bokeh`, and `datashader`.
+Install `pygapit-ng[styles]` to add the optional Seaborn and SciencePlots
+Matplotlib styles.
 
 ### Development
 
@@ -113,7 +116,7 @@ pip install -e ".[dev,bigdata]"  # development tools plus big-data support
 ```
 
 The default Pixi environment uses the highest supported Python version and
-includes development and big-data dependencies:
+includes development, big-data, and optional plotting-style dependencies:
 
 ```bash
 pixi install
@@ -607,7 +610,7 @@ from pygapit import (
     gblup,
     genomic_inflation_factor,
     glm_gwas,
-    manhattan_plot,
+    manhattan,
     mlm_gwas,
     qq_plot,
     vanraden_kinship,
@@ -643,11 +646,66 @@ gs = gblup(y, X0, K)
 print(f"Prediction accuracy (r): {np.corrcoef(y, gs.prediction)[0, 1]:.3f}")
 
 # Plots
-manhattan_plot(
-    snp_names, chromosomes, positions, result.p_values, save_path="manhattan.pdf"
-)
+manhattan(snp_names, chromosomes, positions, result.p_values, save_path="manhattan.pdf")
 qq_plot(result.p_values, save_path="qq.pdf")
 ```
+
+### Plot modes, backends, and styles
+
+The plotting function signatures expose only implemented combinations. In
+particular, `manhattan(..., mode="static")` accepts `backend="matplotlib"`
+and returns a Matplotlib `Figure`; interactive calls accept Plotly or Bokeh and
+return that backend's figure type. `backend="auto"` selects Matplotlib for
+static output and Plotly for interactive output.
+
+| Function | Static | Interactive | Backends | Datashader aggregation |
+|---|---|---|---|---|
+| `manhattan` | Yes | Yes | Matplotlib; Plotly; Bokeh | `large_data="auto"` or `"aggregate"` |
+| `qq_plot` | Yes | No | Matplotlib | No |
+| `kinship_heatmap` | Yes | No | Matplotlib | No |
+| `pca_plot_2d` | Yes | No | Matplotlib | No |
+| `pca_plot_3d_interactive` | No | Yes | Plotly | No |
+| `gs_scatter` | Yes | No | Matplotlib | No |
+| `phenotype_distribution` | Yes | No | Matplotlib | No |
+
+All static functions accept `style="pygapit"`, `"seaborn"`, or
+`"science"`. The latter two require `pygapit-ng[styles]`; if unavailable,
+pyGAPIT emits a warning and falls back to its built-in style. Styles run in a
+local Matplotlib context and do not alter the caller's process-wide defaults.
+The SciencePlots preset includes `no-latex`, so a TeX installation is not
+required.
+
+```python
+# Publication PDF using the optional SciencePlots style.
+static_figure = manhattan(
+    snp_names,
+    chromosomes,
+    positions,
+    result.p_values,
+    mode="static",
+    backend="matplotlib",
+    style="science",
+    save_path="manhattan.pdf",
+)
+
+# Browser exploration. Plotly is the automatic interactive backend.
+interactive_figure = manhattan(
+    snp_names,
+    chromosomes,
+    positions,
+    result.p_values,
+    mode="interactive",
+    backend="plotly",
+    effects=result.effects,
+    save_path="manhattan.html",
+)
+```
+
+For 250,000 markers or more, `large_data="auto"` uses HoloViews and
+Datashader to retain the maximum `-log10(p)` value in each output pixel. Exact
+significant markers are overlaid so their locations and interactive hover data
+remain available. Use `large_data="points"` to force exact points or
+`large_data="aggregate"` to force bounded rasterization at any size.
 
 ---
 

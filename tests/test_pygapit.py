@@ -20,6 +20,7 @@ from numpy.typing import NDArray
 
 warnings.filterwarnings("ignore")
 
+import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
 import pytest
@@ -1278,18 +1279,13 @@ class TestGAPITPipeline:
 
 class TestVisualization:
     def test_manhattan_plot(self, real_data: RealDataset, tmp_path: Path) -> None:
-        import matplotlib
-
         from pygapit.gwas.glm import glm_gwas
-        from pygapit.visualization.plots import manhattan_plot
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
+        from pygapit.visualization.plots import manhattan
 
         r = glm_gwas(real_data["y"], real_data["X0"], real_data["GD"])
         GM = real_data["GM"]
         positions = as_float_vector(GM["Position"].to_numpy())
-        fig = manhattan_plot(
+        fig = manhattan(
             snp_names=as_str_vector(GM["SNP"].to_numpy()),
             chromosomes=as_str_vector(GM["Chromosome"].to_numpy()),
             positions=positions,
@@ -1300,13 +1296,8 @@ class TestVisualization:
         plt.close("all")
 
     def test_qq_plot(self, real_data: RealDataset, tmp_path: Path) -> None:
-        import matplotlib
-
         from pygapit.gwas.glm import glm_gwas
         from pygapit.visualization.plots import qq_plot
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         r = glm_gwas(real_data["y"], real_data["X0"], real_data["GD"])
         fig = qq_plot(r.p_values, save_path=str(tmp_path / "qq.pdf"))
@@ -1314,12 +1305,7 @@ class TestVisualization:
         plt.close("all")
 
     def test_kinship_heatmap(self, real_data: RealDataset, tmp_path: Path) -> None:
-        import matplotlib
-
         from pygapit.visualization.plots import kinship_heatmap
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         fig = kinship_heatmap(
             real_data["K"][:30, :30], save_path=str(tmp_path / "kinship.pdf")
@@ -1328,13 +1314,8 @@ class TestVisualization:
         plt.close("all")
 
     def test_pca_2d(self, real_data: RealDataset, tmp_path: Path) -> None:
-        import matplotlib
-
         from pygapit.stats.pca import compute_pca
         from pygapit.visualization.plots import pca_plot_2d
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         pca = compute_pca(real_data["GD"], n_components=3)
         fig = pca_plot_2d(
@@ -1344,13 +1325,8 @@ class TestVisualization:
         plt.close("all")
 
     def test_gs_scatter(self, real_data: RealDataset, tmp_path: Path) -> None:
-        import matplotlib
-
         from pygapit.gs.blup import gblup
         from pygapit.visualization.plots import gs_scatter
-
-        matplotlib.use("Agg")
-        import matplotlib.pyplot as plt
 
         gs = gblup(real_data["y"], real_data["X0"], real_data["K"])
         fig = gs_scatter(

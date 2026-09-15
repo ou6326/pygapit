@@ -50,6 +50,9 @@ dependencies = [
     "pandas>=2.3.3,<4",
     "matplotlib>=3.10.9,<4",
     "plotly>=7.0.0,<8",
+    "bokeh>=3.8.2,<3.10",
+    "datashader>=0.19.1,<0.20",
+    "holoviews>=1.23.1,<2",
 ]
 
 [project.optional-dependencies]
@@ -65,6 +68,7 @@ dev = [
     "basedpyright>=1.39.10,<2",
 ]
 bigdata = ["h5py>=3.16.0,<4", "zarr>=3,<4"]
+styles = ["seaborn>=0.13.2,<0.14", "SciencePlots>=2.2.2,<3"]
 
 [project.urls]
 Homepage = "https://github.com/ou6326/pygapit"
@@ -117,6 +121,10 @@ platforms = ["win-64", "linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 pygapit-ng = { path = ".", editable = true }
 
 [tool.pixi.dependencies]
+# libblas = { version = "*", build = "*openblas" }
+
+[tool.pixi.tasks]
+precommit = "ruff check --preview --ignore RUF069 && ruff format --check && basedpyright && pyrefly check -p all"
 
 [tool.pixi.feature.py311.dependencies]
 python = "3.11.*"
@@ -125,8 +133,8 @@ python = "3.11.*"
 python = "3.14.*"
 
 [tool.pixi.environments]
-default = { features = ["py314", "dev", "bigdata"], solve-group = "py314" }
-full311 = { features = ["py311", "dev", "bigdata"], solve-group = "py311" }
+default = { features = ["py314", "dev", "bigdata", "styles"], solve-group = "py314" }
+full311 = { features = ["py311", "dev", "bigdata", "styles"], solve-group = "py311" }
 
 [tool.pyrefly]
 project-includes = ["pygapit/**/*.py", "tests/**/*.py", "examples/**/*.py"]
@@ -166,3 +174,4 @@ reportUnusedParameter = false
 reportUnnecessaryTypeIgnoreComment = false
 reportPrivateUsage = false
 reportImplicitStringConcatenation = false
+reportUnreachable = false

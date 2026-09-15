@@ -8,6 +8,7 @@ import numpy as np
 
 from .._typing import (
     FloatVector,
+    IntVector,
     LabelVector,
     NumericVector,
     StrVector,
@@ -53,7 +54,39 @@ def prepare_genomic_axis(
     if not np.isfinite(chromosome_gap) or chromosome_gap < 0.0:
         raise ValueError("chromosome_gap must be finite and non-negative")
 
-    chromosome_labels = tuple(dict.fromkeys(chroms.tolist()))
+    run_starts: IntVector = np.concatenate((
+        np.asarray([0], dtype=np.int_),
+        np.flatnonzero(chroms[1:] != chroms[:-1]) + 1,
+    ))
+    run_labels = tuple(str(chroms[index]) for index in run_starts)
+    if len(set(run_labels)) == len(run_labels):
+        run_stops: IntVector = np.concatenate((
+            run_starts[1:],
+            np.asarray([len(pos)], dtype=np.int_),
+        ))
+        minima: FloatVector = np.minimum.reduceat(pos, run_starts)
+        maxima: FloatVector = np.maximum.reduceat(pos, run_starts)
+        spans = maxima - minima
+        offsets = np.zeros(len(run_starts), dtype=np.float64)
+        if len(offsets) > 1:
+            offsets[1:] = np.cumsum(spans[:-1] + chromosome_gap)
+
+        x_values = pos.copy()
+        for start, stop, minimum, offset in zip(
+            run_starts,
+            run_stops,
+            minima,
+            offsets,
+            strict=True,
+        ):
+            x_values[start:stop] += offset - minimum
+        chromosome_centers = offsets + spans / 2.0
+        return x_values, run_labels, chromosome_centers
+
+    unique_chromosomes, first_indices = np.unique(chroms, return_index=True)
+    chromosome_labels = tuple(
+        str(chromosome) for chromosome in unique_chromosomes[np.argsort(first_indices)]
+    )
     x_values = np.empty(len(pos), dtype=np.float64)
     chromosome_centers = np.empty(len(chromosome_labels), dtype=np.float64)
     cumulative = 0.0
