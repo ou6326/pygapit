@@ -91,9 +91,9 @@ pip install "pygapit-ng[styles]"   # optional Seaborn and SciencePlots styles
 ```
 
 The default installation supports both in-memory analysis and disk-backed
-NumPy memory maps. Optional backends are imported only when selected: the
-unified storage API silently uses the NumPy backend when `h5py` is unavailable,
-while an explicit HDF5 request emits an actionable warning to install
+NumPy memory maps. For automatic writes, the unified storage API prefers HDF5,
+then Zarr, and finally the dependency-free NumPy backend. Explicit requests for
+an unavailable optional backend emit an actionable warning to install
 `pygapit-ng[bigdata]` or select `backend="numpy"`.
 
 **Runtime dependencies** are installed automatically: `numpy`, `scipy`,
@@ -546,7 +546,6 @@ only the largest requested pseudo-QTN candidate pool and reuses its prefixes;
 MLMM and FarmCPU materialize only bounded marker batches and their small
 selected-cofactor designs. BLINK bounds parent-store reads for marker scans and
 LD pruning, while retaining only its sample-count-limited BIC candidate pool.
-cBLUP still requires an in-memory genotype matrix.
 
 `maf_filter()` returns a `GenotypeView` when its input is a store, so filtering
 does not copy the complete genotype matrix. `GenotypeView` also supports sample
@@ -558,13 +557,15 @@ to four times the requested unique markers.
 
 Without an explicit backend, the writer prefers HDF5, then Zarr, and silently
 falls back to a dependency-free NumPy memory-mapped store. An explicit
-`backend="zarr"` or `.zarr` path selects the optional Zarr 3 backend. All three
-preserve the sample-by-marker layout; VanRaden kinship and PCA read them in
-contiguous marker blocks. PCA's exact tall-matrix branch switches to sample
-batches under memory pressure as described above. A `.h5`/`.hdf5` filename or
-explicit `backend="hdf5"` requests HDF5. If an explicitly selected optional
-backend is unavailable, the warning includes the `pygapit-ng[bigdata]`
-installation command. Explicit `backend="numpy"` is always available.
+`backend="zarr"` or a `.zarr` path selects the optional backend implemented with
+the Zarr Python 3.x API. pyGAPIT currently writes Zarr format 2 stores for a
+stable, interoperable on-disk layout. All three backends preserve the
+sample-by-marker layout; VanRaden kinship and PCA read them in contiguous marker
+blocks. PCA's exact tall-matrix branch switches to sample batches under memory
+pressure as described above. A `.h5`/`.hdf5` filename or explicit
+`backend="hdf5"` requests HDF5. If an explicitly selected optional backend is
+unavailable, the warning includes the `pygapit-ng[bigdata]` installation
+command. Explicit `backend="numpy"` is always available.
 
 Disk stores read the layout produced by the corresponding writer and check the
 completion flag and schema version. Reading errors propagate from the backend.

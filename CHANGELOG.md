@@ -9,15 +9,15 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 ### Added
 
 - Backend-independent Manhattan data and genomic-axis preparation shared by
-  static and interactive renderers.
+  Matplotlib, Bokeh, and Plotly renderers.
 - Backend-neutral HoloViews objects for Manhattan, QQ, kinship, PCA, genomic
   selection, and phenotype plots, with rendering and saving delegated to
   HoloViews' Matplotlib, Bokeh, and Plotly backends.
 - A reproducible benchmark for genomic-axis and complete Manhattan data
   preparation, HoloViews object construction, and opt-in Matplotlib, Bokeh, or
   Plotly rendering at configurable marker counts.
-- An optional Zarr 3 genotype backend with the same labeled, chunk-readable
-  storage contract as the NumPy and HDF5 backends.
+- An optional backend using the Zarr Python 3.x API and Zarr format 2 storage,
+  with the same labeled, chunk-readable contract as NumPy and HDF5.
 - Chunked conversion between labeled NumPy, HDF5, and Zarr genotype stores
   without materializing the complete genotype matrix.
 - Direct bounded sample-row import from numeric GD/GM files into any
