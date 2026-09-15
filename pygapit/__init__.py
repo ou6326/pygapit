@@ -67,9 +67,8 @@ from .stats.testing import (
     genomic_inflation_factor,
     get_significant_snps,
 )
-from .visualization.output import OutputBackend, StaticStyle, save_plot
+from .visualization.output import save_plot
 from .visualization.plots import (
-    HoloViewsPlot,
     LargeDataMode,
     gs_scatter,
     kinship_heatmap,
@@ -94,7 +93,6 @@ __all__ = [
     "GenotypeStore",
     "GenotypeView",
     "HDF5GenotypeStore",
-    "HoloViewsPlot",
     "LabeledGenotypeStore",
     "LargeDataMode",
     "MLMMResult",
@@ -102,12 +100,10 @@ __all__ = [
     "MarkerChunkedGenotypeStore",
     "ModelRunResult",
     "NumpyGenotypeStore",
-    "OutputBackend",
     "PhenotypeData",
     "PredictionCVResult",
     "RRBLUPResult",
     "SUPERSelectionResult",
-    "StaticStyle",
     "ZarrGenotypeStore",
     "align_inputs",
     "align_taxa",

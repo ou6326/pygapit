@@ -14,12 +14,12 @@ import numpy as np
 import pytest
 from bokeh.models import Image as BokehImage
 from bokeh.plotting import figure as BokehFigure
+from holoviews.core import Dimensioned
 from matplotlib.figure import Figure
 
 from pygapit.visualization import prepare_genomic_axis, prepare_manhattan_data
 from pygapit.visualization.output import StaticStyle, save_plot
 from pygapit.visualization.plots import (
-    HoloViewsPlot,
     gs_scatter,
     kinship_heatmap,
     manhattan,
@@ -32,19 +32,23 @@ from pygapit.visualization.plots import (
 
 class _HoloViewsRuntime(Protocol):
     @overload
-    def render(
-        self, obj: HoloViewsPlot, *, backend: Literal["matplotlib"]
-    ) -> Figure: ...
+    def render(self, obj: Dimensioned, *, backend: Literal["matplotlib"]) -> Figure: ...
 
     @overload
     def render(
-        self, obj: HoloViewsPlot, *, backend: Literal["plotly"]
+        self, obj: Dimensioned, *, backend: Literal["plotly"]
     ) -> dict[str, object]: ...
 
     @overload
-    def render(
-        self, obj: HoloViewsPlot, *, backend: Literal["bokeh"]
-    ) -> BokehFigure: ...
+    def render(self, obj: Dimensioned, *, backend: Literal["bokeh"]) -> BokehFigure: ...
+
+
+class _Dimension(Protocol):
+    name: str
+
+
+class _DimensionedView(Protocol):
+    def dimensions(self) -> list[_Dimension]: ...
 
 
 def _runtime_object(value: object) -> object:
@@ -169,7 +173,10 @@ def test_manhattan_keeps_hover_metadata_in_dimensions() -> None:
         maf=np.asarray([0.2, 0.3, 0.4]),
         large_data="points",
     )
-    dimensions = {dimension.name for dimension in plot.dimensions()}
+    dimensions = {
+        dimension.name
+        for dimension in cast(_DimensionedView, _runtime_object(plot)).dimensions()
+    }
     assert {"snp", "chromosome", "position", "p_value", "effect", "maf"} <= dimensions
 
 
@@ -251,7 +258,11 @@ def test_pca_3d_returns_holoviews_scatter_with_metadata() -> None:
         groups=np.asarray(["group-1", "group-2"]),
     )
 
-    assert {dimension.name for dimension in plot.dimensions()} >= {"taxa", "group"}
+    dimensions = {
+        dimension.name
+        for dimension in cast(_DimensionedView, _runtime_object(plot)).dimensions()
+    }
+    assert dimensions >= {"taxa", "group"}
     figure = holoviews.render(plot, backend="plotly")
     assert isinstance(figure, dict)
 

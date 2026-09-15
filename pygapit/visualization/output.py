@@ -6,16 +6,15 @@ import importlib
 import typing as t
 import warnings
 from contextlib import contextmanager
-from typing import Literal, Protocol, cast
+from typing import Literal, Protocol, cast, overload
 
 import holoviews as hv
+from holoviews.core import Dimensioned
 
 if t.TYPE_CHECKING:
     from collections.abc import Generator, Mapping
     from contextlib import AbstractContextManager
     from os import PathLike
-
-    from .plots import HoloViewsPlot
 
 StaticStyle = Literal["pygapit", "seaborn", "science"]
 OutputBackend = Literal["matplotlib", "bokeh", "plotly"]
@@ -41,7 +40,7 @@ class _PyplotModule(Protocol):
 class _HoloViewsModule(Protocol):
     def save(
         self,
-        obj: HoloViewsPlot,
+        obj: Dimensioned,
         filename: str | PathLike[str],
         *,
         backend: OutputBackend,
@@ -88,8 +87,28 @@ def matplotlib_style(style: StaticStyle) -> Generator[None]:
         yield
 
 
+@overload
 def save_plot(
-    plot: HoloViewsPlot,
+    plot: Dimensioned,
+    path: str | PathLike[str],
+    *,
+    backend: Literal["matplotlib"] = "matplotlib",
+    style: StaticStyle = "pygapit",
+) -> None: ...
+
+
+@overload
+def save_plot(
+    plot: Dimensioned,
+    path: str | PathLike[str],
+    *,
+    backend: Literal["bokeh", "plotly"],
+    style: Literal["pygapit"] = "pygapit",
+) -> None: ...
+
+
+def save_plot(
+    plot: Dimensioned,
     path: str | PathLike[str],
     *,
     backend: OutputBackend = "matplotlib",
@@ -101,4 +120,6 @@ def save_plot(
         with matplotlib_style(style):
             holoviews.save(plot, path, backend=backend)
         return
+    if style != "pygapit":
+        raise ValueError("style is available only for the matplotlib backend")
     holoviews.save(plot, path, backend=backend)

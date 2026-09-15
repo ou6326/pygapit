@@ -18,6 +18,7 @@ import datashader as ds
 import holoviews as hv
 import numpy as np
 from holoviews import opts as hv_opts
+from holoviews.core import Dimensioned
 from holoviews.operation.datashader import rasterize
 
 if t.TYPE_CHECKING:
@@ -53,9 +54,6 @@ class _HoloViewsObject(Protocol):
     def collate(self) -> _HoloViewsObject: ...
     def dimensions(self) -> list[_HoloViewsDimension]: ...
     def opts(self, *options: Options) -> Self: ...
-
-
-HoloViewsPlot: t.TypeAlias = _HoloViewsObject
 
 
 class _HoloViewsDimension(Protocol):
@@ -172,6 +170,11 @@ def _runtime_object(value: object) -> object:
     return value
 
 
+def _as_dimensioned(value: object) -> Dimensioned:
+    """Narrow a HoloViews object across its incomplete typing boundary."""
+    return cast(Dimensioned, value)
+
+
 def _use_aggregate(marker_count: int, large_data: LargeDataMode) -> bool:
     match large_data:
         case "auto":
@@ -219,7 +222,7 @@ def manhattan(
     figsize: tuple[float, float] = (14, 5),
     point_size: float = 1.5,
     large_data: LargeDataMode = "auto",
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a backend-neutral HoloViews Manhattan plot.
 
     Use :func:`holoviews.render` to obtain a backend figure or
@@ -234,15 +237,17 @@ def manhattan(
         suggestive_threshold=suggestive_threshold,
     )
     _validate_plot_geometry(figsize, point_size)
-    return _build_manhattan_plot(
-        data,
-        aggregate=_use_aggregate(len(data.p_values), large_data),
-        title=title,
-        highlight_snps=highlight_snps,
-        effects=effects,
-        maf=maf,
-        figsize=figsize,
-        point_size=point_size,
+    return _as_dimensioned(
+        _build_manhattan_plot(
+            data,
+            aggregate=_use_aggregate(len(data.p_values), large_data),
+            title=title,
+            highlight_snps=highlight_snps,
+            effects=effects,
+            maf=maf,
+            figsize=figsize,
+            point_size=point_size,
+        ),
     )
 
 
@@ -496,9 +501,9 @@ def qq_plot(
     p_values: FloatVector,
     title: str = "QQ Plot",
     figsize: tuple[float, float] = (5, 5),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a backend-neutral HoloViews QQ plot."""
-    return _qq_plot(p_values, title, figsize)
+    return _as_dimensioned(_qq_plot(p_values, title, figsize))
 
 
 def _qq_plot(
@@ -604,9 +609,9 @@ def kinship_heatmap(
     taxa: Vector | None = None,
     title: str = "Kinship Matrix",
     figsize: tuple[float, float] = (8, 7),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a backend-neutral HoloViews kinship heatmap."""
-    return _kinship_heatmap(K, taxa, title, figsize)
+    return _as_dimensioned(_kinship_heatmap(K, taxa, title, figsize))
 
 
 def _kinship_heatmap(
@@ -680,9 +685,11 @@ def pca_plot_2d(
     groups: Vector | None = None,
     title: str = "PCA Plot",
     figsize: tuple[float, float] = (7, 6),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a backend-neutral HoloViews PC1/PC2 plot."""
-    return _pca_plot_2d(scores, var_explained, taxa, groups, title, figsize)
+    return _as_dimensioned(
+        _pca_plot_2d(scores, var_explained, taxa, groups, title, figsize),
+    )
 
 
 def _pca_plot_2d(
@@ -770,7 +777,7 @@ def pca_plot_3d(
     taxa: Vector | None = None,
     groups: Vector | None = None,
     title: str = "3D PCA",
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a backend-neutral HoloViews 3D PCA plot."""
     if scores.ndim != 2 or scores.shape[1] < 3:
         raise ValueError("scores must be a matrix with at least three components")
@@ -817,7 +824,7 @@ def pca_plot_3d(
             zlabel=f"PC3 ({pct[2]:.1f}%)",
         )
     )
-    return plot
+    return _as_dimensioned(plot)
 
 
 def _interactive_manhattan_metadata(
@@ -843,9 +850,9 @@ def gs_scatter(
     taxa: Vector | None = None,
     trait_name: str = "Trait",
     figsize: tuple[float, float] = (6, 5),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build backend-neutral genomic-selection diagnostics."""
-    return _gs_scatter(observed, predicted, taxa, trait_name, figsize)
+    return _as_dimensioned(_gs_scatter(observed, predicted, taxa, trait_name, figsize))
 
 
 def _gs_scatter(
@@ -938,9 +945,11 @@ def phenotype_distribution(
     trait_name: str = "Trait",
     significant_snp_geno: Vector | None = None,
     figsize: tuple[float, float] = (6, 4),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a backend-neutral phenotype distribution."""
-    return _phenotype_distribution(y, trait_name, significant_snp_geno, figsize)
+    return _as_dimensioned(
+        _phenotype_distribution(y, trait_name, significant_snp_geno, figsize),
+    )
 
 
 def _phenotype_distribution(
@@ -1025,7 +1034,7 @@ def multiple_manhattan(
     *,
     title: str = "Multiple Manhattan",
     figsize: tuple[float, float] = (12, 5),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a multi-model Manhattan comparison as a HoloViews overlay."""
     x_values, labels, centers = prepare_genomic_axis(chromosomes, positions)
     _register_holoviews_backends()
@@ -1050,16 +1059,18 @@ def multiple_manhattan(
             )
         )
     ticks = list(zip(centers.tolist(), labels, strict=True))
-    return holoviews.Overlay(layers).opts(
-        options.Overlay(
-            backend="matplotlib",
-            fig_inches=figsize,
-            title=title,
-            xlabel="Chromosome",
-            ylabel="-log10(p)",
-            xticks=ticks,
-            show_legend=True,
-        )
+    return _as_dimensioned(
+        holoviews.Overlay(layers).opts(
+            options.Overlay(
+                backend="matplotlib",
+                fig_inches=figsize,
+                title=title,
+                xlabel="Chromosome",
+                ylabel="-log10(p)",
+                xticks=ticks,
+                show_legend=True,
+            )
+        ),
     )
 
 
@@ -1068,7 +1079,7 @@ def multiple_qq(
     *,
     title: str = "Multiple QQ",
     figsize: tuple[float, float] = (6, 6),
-) -> HoloViewsPlot:
+) -> Dimensioned:
     """Build a multi-model QQ comparison as a HoloViews overlay."""
     _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
@@ -1110,11 +1121,13 @@ def multiple_qq(
             )
         )
     )
-    return holoviews.Overlay(layers).opts(
-        options.Overlay(
-            backend="matplotlib",
-            fig_inches=figsize,
-            title=title,
-            show_legend=True,
-        )
+    return _as_dimensioned(
+        holoviews.Overlay(layers).opts(
+            options.Overlay(
+                backend="matplotlib",
+                fig_inches=figsize,
+                title=title,
+                show_legend=True,
+            )
+        ),
     )

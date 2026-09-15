@@ -1,7 +1,6 @@
 from .data import ManhattanPlotData, prepare_genomic_axis, prepare_manhattan_data
 from .output import OutputBackend, StaticStyle, save_plot
 from .plots import (
-    HoloViewsPlot,
     LargeDataMode,
     gs_scatter,
     kinship_heatmap,
@@ -13,7 +12,6 @@ from .plots import (
 )
 
 __all__ = [
-    "HoloViewsPlot",
     "LargeDataMode",
     "ManhattanPlotData",
     "OutputBackend",
