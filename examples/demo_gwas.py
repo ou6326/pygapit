@@ -18,45 +18,13 @@ All output files are written to ./pygapit_demo_output/
 import sys
 import time
 import warnings
-from collections.abc import Iterator, Mapping
 from os import environ
 from pathlib import Path
-from typing import Any, Protocol, cast
-
-from numpy import ndarray
 
 warnings.filterwarnings("ignore")
 
-import matplotlib
 import numpy as np
 import pandas as pd
-
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
-
-class _SpineLike(Protocol):
-    def set_visible(self, visible: bool) -> None: ...
-
-
-class _AxesLike(Protocol):
-    spines: Mapping[str, _SpineLike]
-
-    def scatter(self, *args: Any, **kwargs: Any) -> object: ...
-    def plot(self, *args: Any, **kwargs: Any) -> object: ...
-    def axhline(self, *args: Any, **kwargs: Any) -> object: ...
-    def set_title(self, *args: Any, **kwargs: Any) -> object: ...
-    def set_xlabel(self, *args: Any, **kwargs: Any) -> object: ...
-    def set_ylabel(self, *args: Any, **kwargs: Any) -> object: ...
-    def set_xticks(self, *args: Any, **kwargs: Any) -> object: ...
-    def set_xticklabels(self, *args: Any, **kwargs: Any) -> object: ...
-
-
-class _AxesSequence(Protocol):
-    def __getitem__(self, index: int) -> _AxesLike: ...
-    def __iter__(self) -> Iterator[_AxesLike]: ...
-    def __len__(self) -> int: ...
-
 
 from pygapit import (
     GAPIT,
@@ -81,8 +49,9 @@ from pygapit import (
     sblup,
     vanraden_kinship,
 )
-from pygapit._typing import as_float_vector, as_str_vector
+from pygapit._typing import FloatVector, as_float_vector, as_str_vector
 from pygapit.visualization.output import save_plot
+from pygapit.visualization.plots import multiple_manhattan, multiple_qq
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE = Path(
@@ -215,7 +184,7 @@ positions = as_float_vector(GM_arr["Position"].to_numpy(), name="positions")
 snp_names = as_str_vector(GM_arr["SNP"].to_numpy(), name="SNP names")
 thresh_bon = bonferroni_threshold(len(snp_names))
 
-gwas_results: dict[str, ndarray] = {}
+gwas_results: dict[str, FloatVector] = {}
 
 # GLM
 print("GLM...", end=" ", flush=True)
@@ -297,104 +266,43 @@ print(f"h^2={gs_s.h2:.3f}, r={r_acc_s:.4f} [{time.time() - t0:.1f}s]")
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n-- Section 6: Generating plots -----------------------------")
 
-# Manhattan plots for all models
-fig, raw_axes = plt.subplots(4, 1, figsize=(14, 18))
-axes = cast(_AxesSequence, raw_axes)
-for ax, (model_name, pvals) in zip(axes, gwas_results.items()):
-    valid_p = np.where((pvals > 0) & ~np.isnan(pvals), pvals, 1.0)
-    log_p = -np.log10(valid_p)
-    chroms = np.array([str(c) for c in chromosomes])
-    unique_chr: list[str] = []
-    seen: set[str] = set()
-    for c in chroms:
-        if c not in seen:
-            unique_chr.append(c)
-            seen.add(c)
-    offset: dict[str, float] = {}
-    x_vals = np.zeros(len(pvals))
-    chr_centers: dict[str, float] = {}
-    cum = 0
-    for ch in unique_chr:
-        mask = chroms == ch
-        mx = positions[mask].max() if mask.any() else 0
-        offset[ch] = cum
-        chr_centers[ch] = cum + mx / 2
-        cum += mx + 5_000_000
-    for i in range(len(pvals)):
-        x_vals[i] = positions[i] + offset.get(chroms[i], 0)
-    colors = [
-        "#3C5587" if i % 2 == 0 else "#89A8D0"
-        for i, ch in enumerate(unique_chr)
-        for _ in np.where(chroms == ch)[0]
-    ]
-    col_arr = np.empty(len(pvals), dtype=object)
-    for i, ch in enumerate(unique_chr):
-        col_arr[chroms == ch] = "#3C5587" if i % 2 == 0 else "#89A8D0"
-    ax.scatter(x_vals, log_p, c=col_arr, s=1.2, linewidths=0, rasterized=True)
-    sig_line = -np.log10(thresh_bon)
-    ax.axhline(sig_line, color="#E41A1C", linestyle="--", linewidth=0.8)
-    ax.set_xticks([chr_centers[c] for c in unique_chr])
-    ax.set_xticklabels(unique_chr, fontsize=7)
-    ax.set_ylabel(r"$-\log_{10}(p)$", fontsize=9)
-    ax.set_title(
-        f"{model_name}  (λ={genomic_inflation_factor(pvals):.3f})",
-        fontsize=10,
-        fontweight="bold",
-    )
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-plt.tight_layout()
-cast(Any, fig).savefig(
-    f"{OUT}/demo_manhattan_all_models.pdf", dpi=120, bbox_inches="tight"
+# Manhattan and QQ comparisons use the same backend-neutral HoloViews contract
+# as the public plotting API.
+model_p_values = list(gwas_results.items())
+plot = multiple_manhattan(
+    chromosomes,
+    positions,
+    model_p_values,
+    title="GWAS model comparison",
 )
-plt.close()
+save_plot(plot, OUT / "demo_manhattan_all_models.pdf")
 print(f"  Saved: {OUT}/demo_manhattan_all_models.pdf")
 
-# QQ plots
-fig, raw_axes = plt.subplots(1, 4, figsize=(18, 4))
-axes = cast(_AxesSequence, raw_axes)
-for ax, (model_name, pvals) in zip(axes, gwas_results.items()):
-    valid = pvals[(pvals > 0) & ~np.isnan(pvals)]
-    n = len(valid)
-    expected = -np.log10(np.arange(1, n + 1) / n)
-    observed = -np.log10(np.sort(valid)[::-1])
-    max_v = max(observed.max(), expected.max()) * 1.1
-    ax.plot([0, max_v], [0, max_v], "k--", lw=0.8, alpha=0.6)
-    ax.scatter(
-        np.sort(expected)[::-1], observed, c="#3C5587", s=3, alpha=0.6, linewidths=0
-    )
-    lam = genomic_inflation_factor(pvals)
-    ax.set_title(f"{model_name} (λ={lam:.3f})", fontsize=9, fontweight="bold")
-    ax.set_xlabel("Expected", fontsize=8)
-    ax.set_ylabel("Observed", fontsize=8)
-    ax.spines["top"].set_visible(False)
-    ax.spines["right"].set_visible(False)
-plt.tight_layout()
-cast(Any, fig).savefig(f"{OUT}/demo_qq_all_models.pdf", dpi=120, bbox_inches="tight")
-plt.close()
+plot = multiple_qq(model_p_values, title="GWAS model QQ comparison")
+save_plot(plot, OUT / "demo_qq_all_models.pdf")
 print(f"  Saved: {OUT}/demo_qq_all_models.pdf")
 
 # Kinship heatmap
-fig = kinship_heatmap(
+plot = kinship_heatmap(
     K[:50, :50],
     taxa=taxa[:50],
     title="Kinship (first 50 lines)",
 )
-save_plot(fig, f"{OUT}/demo_kinship.pdf")
+save_plot(plot, OUT / "demo_kinship.pdf")
 print(f"  Saved: {OUT}/demo_kinship.pdf")
 
 # PCA
-fig = pca_plot_2d(
+plot = pca_plot_2d(
     pca.scores,
     pca.var_explained,
     title="PCA — Maize inbred lines",
 )
-save_plot(fig, f"{OUT}/demo_pca.pdf")
+save_plot(plot, OUT / "demo_pca.pdf")
 print(f"  Saved: {OUT}/demo_pca.pdf")
 
 # GS scatter
-fig = gs_scatter(y, gs.prediction, trait_name="EarHT")
-save_plot(fig, f"{OUT}/demo_gs_scatter.pdf")
+plot = gs_scatter(y, gs.prediction, trait_name="EarHT")
+save_plot(plot, OUT / "demo_gs_scatter.pdf")
 print(f"  Saved: {OUT}/demo_gs_scatter.pdf")
 
 # ─────────────────────────────────────────────────────────────────────────────
@@ -403,7 +311,7 @@ print(f"  Saved: {OUT}/demo_gs_scatter.pdf")
 print("\n-- Section 7: Simulation (h^2=0.7, 20 QTNs) ----------------")
 print("Simulating phenotype from genotype data...")
 
-rng = np.random.default_rng(198521)  # same seed as GAPIT's demo
+rng = np.random.default_rng(198521)
 m_total = GD_arr.shape[1]
 qtn_idx = rng.choice(m_total, size=20, replace=False)
 alpha_q = rng.normal(0, 1, 20)
