@@ -1,31 +1,31 @@
 from .data import ManhattanPlotData, prepare_genomic_axis, prepare_manhattan_data
+from .output import OutputBackend, StaticStyle, save_plot
 from .plots import (
+    HoloViewsPlot,
     LargeDataMode,
-    PlotBackend,
-    PlotMode,
-    StaticStyle,
     gs_scatter,
     kinship_heatmap,
     manhattan,
     pca_plot_2d,
-    pca_plot_3d_interactive,
+    pca_plot_3d,
     phenotype_distribution,
     qq_plot,
 )
 
 __all__ = [
+    "HoloViewsPlot",
     "LargeDataMode",
     "ManhattanPlotData",
-    "PlotBackend",
-    "PlotMode",
+    "OutputBackend",
     "StaticStyle",
     "gs_scatter",
     "kinship_heatmap",
     "manhattan",
     "pca_plot_2d",
-    "pca_plot_3d_interactive",
+    "pca_plot_3d",
     "phenotype_distribution",
     "prepare_genomic_axis",
     "prepare_manhattan_data",
     "qq_plot",
+    "save_plot",
 ]

@@ -82,6 +82,7 @@ from pygapit import (
     vanraden_kinship,
 )
 from pygapit._typing import as_float_vector, as_str_vector
+from pygapit.visualization.output import save_plot
 
 # ── Paths ────────────────────────────────────────────────────────────────────
 BASE = Path(
@@ -355,7 +356,7 @@ axes = cast(_AxesSequence, raw_axes)
 for ax, (model_name, pvals) in zip(axes, gwas_results.items()):
     valid = pvals[(pvals > 0) & ~np.isnan(pvals)]
     n = len(valid)
-    expected = -np.log10(np.arange(1, n + 1) / n)  # pyright: ignore[reportOperatorIssue]
+    expected = -np.log10(np.arange(1, n + 1) / n)
     observed = -np.log10(np.sort(valid)[::-1])
     max_v = max(observed.max(), expected.max()) * 1.1
     ax.plot([0, max_v], [0, max_v], "k--", lw=0.8, alpha=0.6)
@@ -378,9 +379,8 @@ fig = kinship_heatmap(
     K[:50, :50],
     taxa=taxa[:50],
     title="Kinship (first 50 lines)",
-    save_path=f"{OUT}/demo_kinship.pdf",
 )
-plt.close(fig)
+save_plot(fig, f"{OUT}/demo_kinship.pdf")
 print(f"  Saved: {OUT}/demo_kinship.pdf")
 
 # PCA
@@ -388,16 +388,13 @@ fig = pca_plot_2d(
     pca.scores,
     pca.var_explained,
     title="PCA — Maize inbred lines",
-    save_path=f"{OUT}/demo_pca.pdf",
 )
-plt.close(fig)
+save_plot(fig, f"{OUT}/demo_pca.pdf")
 print(f"  Saved: {OUT}/demo_pca.pdf")
 
 # GS scatter
-fig = gs_scatter(
-    y, gs.prediction, trait_name="EarHT", save_path=f"{OUT}/demo_gs_scatter.pdf"
-)
-plt.close(fig)
+fig = gs_scatter(y, gs.prediction, trait_name="EarHT")
+save_plot(fig, f"{OUT}/demo_gs_scatter.pdf")
 print(f"  Saved: {OUT}/demo_gs_scatter.pdf")
 
 # ─────────────────────────────────────────────────────────────────────────────

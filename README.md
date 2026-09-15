@@ -613,6 +613,7 @@ from pygapit import (
     manhattan,
     mlm_gwas,
     qq_plot,
+    save_plot,
     vanraden_kinship,
 )
 
@@ -645,60 +646,59 @@ print(f"λ = {lam:.3f},  {sig} significant SNPs")
 gs = gblup(y, X0, K)
 print(f"Prediction accuracy (r): {np.corrcoef(y, gs.prediction)[0, 1]:.3f}")
 
-# Plots
-manhattan(snp_names, chromosomes, positions, result.p_values, save_path="manhattan.pdf")
-qq_plot(result.p_values, save_path="qq.pdf")
+# Plots are HoloViews objects; choose the renderer at the output boundary.
+import holoviews as hv
+
+manhattan_plot = manhattan(snp_names, chromosomes, positions, result.p_values)
+qq = qq_plot(result.p_values)
+hv.save(manhattan_plot, "manhattan.pdf", backend="matplotlib")
+hv.save(qq, "qq.pdf", backend="matplotlib")
 ```
 
-### Plot modes, backends, and styles
+### HoloViews plots and output backends
 
-The plotting function signatures expose only implemented combinations. In
-particular, `manhattan(..., mode="static")` accepts `backend="matplotlib"`
-and returns a Matplotlib `Figure`; interactive calls accept Plotly or Bokeh and
-return that backend's figure type. `backend="auto"` selects Matplotlib for
-static output and Plotly for interactive output.
+Every plotting function returns a HoloViews object. The plot data, dimensions,
+overlays, and large-data strategy are therefore independent of the final
+renderer. Choose Matplotlib for report-ready static output, or Bokeh/Plotly for
+interactive exploration, when calling `holoviews.render()` or
+`holoviews.save()`.
 
-| Function | Static | Interactive | Backends | Datashader aggregation |
-|---|---|---|---|---|
-| `manhattan` | Yes | Yes | Matplotlib; Plotly; Bokeh | `large_data="auto"` or `"aggregate"` |
-| `qq_plot` | Yes | No | Matplotlib | No |
-| `kinship_heatmap` | Yes | No | Matplotlib | No |
-| `pca_plot_2d` | Yes | No | Matplotlib | No |
-| `pca_plot_3d_interactive` | No | Yes | Plotly | No |
-| `gs_scatter` | Yes | No | Matplotlib | No |
-| `phenotype_distribution` | Yes | No | Matplotlib | No |
+| Function | HoloViews element | Matplotlib | Bokeh | Plotly | Datashader |
+|---|---|---:|---:|---:|---:|
+| `manhattan` | Overlay / DynamicMap | Yes | Yes | Yes | `large_data="auto"` or `"aggregate"` |
+| `qq_plot` | Overlay | Yes | Yes | Yes | No |
+| `kinship_heatmap` | Image | Yes | Yes | Yes | No |
+| `pca_plot_2d` | Overlay | Yes | Yes | Yes | No |
+| `pca_plot_3d` | Scatter3D | Yes | No | Yes | No |
+| `gs_scatter` | Overlay | Yes | Yes | Yes | No |
+| `phenotype_distribution` | Overlay | Yes | Yes | Yes | No |
 
-All static functions accept `style="pygapit"`, `"seaborn"`, or
-`"science"`. The latter two require `pygapit-ng[styles]`; if unavailable,
-pyGAPIT emits a warning and falls back to its built-in style. Styles run in a
-local Matplotlib context and do not alter the caller's process-wide defaults.
-The SciencePlots preset includes `no-latex`, so a TeX installation is not
-required.
+The Bokeh renderer does not implement HoloViews `Scatter3D`; use Matplotlib or
+Plotly for `pca_plot_3d`. The return value is still a HoloViews object, so this
+renderer limitation stays outside pyGAPIT's plotting API.
+
+Seaborn and SciencePlots remain optional Matplotlib output styles. They are
+deliberately not plot-construction arguments: use `save_plot()` when a
+style preset is wanted, or call HoloViews directly. `save_plot()` applies its
+style in a local context and falls back with a warning when the optional
+`pygapit-ng[styles]` extra is unavailable. The SciencePlots preset includes
+`no-latex`, so a TeX installation is not required.
 
 ```python
-# Publication PDF using the optional SciencePlots style.
-static_figure = manhattan(
+# One plot specification, three output choices.
+plot = manhattan(
     snp_names,
     chromosomes,
     positions,
     result.p_values,
-    mode="static",
-    backend="matplotlib",
-    style="science",
-    save_path="manhattan.pdf",
-)
-
-# Browser exploration. Plotly is the automatic interactive backend.
-interactive_figure = manhattan(
-    snp_names,
-    chromosomes,
-    positions,
-    result.p_values,
-    mode="interactive",
-    backend="plotly",
     effects=result.effects,
-    save_path="manhattan.html",
 )
+hv.save(plot, "manhattan.pdf", backend="matplotlib")
+hv.save(plot, "manhattan.html", backend="bokeh")
+plotly_figure = hv.render(plot, backend="plotly")
+
+# Optional publication style, applied only while saving this figure.
+save_plot(plot, "manhattan-science.pdf", style="science")
 ```
 
 For 250,000 markers or more, `large_data="auto"` uses HoloViews and

@@ -4,15 +4,15 @@ Translates GAPIT.Manhattan.R, GAPIT.QQ.R, GAPIT.PCA.R,
 GAPIT.GS.Visualization.R, GAPIT.Phenotype.View.R
 
 All plots are publication-ready and match GAPIT's visual style.
-Static plots use Matplotlib. Interactive plots use Plotly or Bokeh, with
-HoloViews and Datashader providing bounded rendering for dense point clouds.
+Plots are returned as backend-neutral HoloViews objects. Callers choose a
+renderer with ``holoviews.render`` or an output format with ``holoviews.save``.
 """
 
 from __future__ import annotations
 
 import typing as t
 from functools import cache
-from typing import Literal, Protocol, TypedDict, TypeVar, cast, overload
+from typing import Literal, Protocol, TypeVar, cast
 
 import datashader as ds
 import holoviews as hv
@@ -23,11 +23,8 @@ from holoviews.operation.datashader import rasterize
 if t.TYPE_CHECKING:
     from typing import Self
 
-    from bokeh.plotting import figure as BokehFigure
     from datashader.reductions import Reduction
     from holoviews.core.options import Options
-    from matplotlib.figure import Figure
-    from plotly.graph_objs._figure import Figure as PlotlyFigure
 
 from .._typing import (
     BoolVector,
@@ -41,17 +38,9 @@ from .._typing import (
     as_float_vector,
     require_length,
 )
-from ._backends import StaticStyle as _StaticStyle
-from ._backends import matplotlib_style, plotly_figure
-from .data import ManhattanPlotData, prepare_manhattan_data
+from .data import ManhattanPlotData, prepare_genomic_axis, prepare_manhattan_data
 
-StaticStyle: t.TypeAlias = _StaticStyle
-PlotMode = Literal["static", "interactive"]
-PlotBackend = Literal["auto", "matplotlib", "plotly", "bokeh"]
 LargeDataMode = Literal["auto", "points", "aggregate"]
-StaticBackend = Literal["auto", "matplotlib"]
-PlotlyBackend = Literal["auto", "plotly"]
-BokehBackend = Literal["bokeh"]
 
 _AGGREGATE_MARKER_THRESHOLD = 250_000
 
@@ -62,7 +51,15 @@ _RasterizeOutputT_co = TypeVar("_RasterizeOutputT_co", covariant=True)
 class _HoloViewsObject(Protocol):
     def __mul__(self, other: _HoloViewsObject) -> _HoloViewsObject: ...
     def collate(self) -> _HoloViewsObject: ...
+    def dimensions(self) -> list[_HoloViewsDimension]: ...
     def opts(self, *options: Options) -> Self: ...
+
+
+HoloViewsPlot: t.TypeAlias = _HoloViewsObject
+
+
+class _HoloViewsDimension(Protocol):
+    name: str
 
 
 class _HoloViewsStore(Protocol):
@@ -90,6 +87,7 @@ class _HoloViewsModule(Protocol):
         *,
         kdims: list[str],
         vdims: list[str],
+        label: str = "",
     ) -> _HoloViewsObject: ...
 
     def Curve(
@@ -98,6 +96,7 @@ class _HoloViewsModule(Protocol):
         *,
         kdims: list[str],
         vdims: list[str],
+        label: str = "",
     ) -> _HoloViewsObject: ...
 
     def Area(
@@ -138,38 +137,6 @@ class _HoloViewsModule(Protocol):
     def HLine(self, y: float) -> _HoloViewsObject: ...
     def VLine(self, x: float) -> _HoloViewsObject: ...
 
-    @overload
-    def render(
-        self,
-        obj: _HoloViewsObject,
-        *,
-        backend: Literal["matplotlib"],
-    ) -> Figure: ...
-
-    @overload
-    def render(
-        self,
-        obj: _HoloViewsObject,
-        *,
-        backend: Literal["plotly"],
-    ) -> dict[str, object]: ...
-
-    @overload
-    def render(
-        self,
-        obj: _HoloViewsObject,
-        *,
-        backend: Literal["bokeh"],
-    ) -> BokehFigure: ...
-
-    def save(
-        self,
-        obj: _HoloViewsObject,
-        filename: str,
-        *,
-        backend: Literal["matplotlib", "plotly", "bokeh"],
-    ) -> object: ...
-
 
 class _HoloViewsOptions(Protocol):
     def Points(self, **kwargs: object) -> Options: ...
@@ -200,45 +167,9 @@ class _Rasterize(Protocol[_RasterizeInputT_contra, _RasterizeOutputT_co]):
     ) -> _RasterizeOutputT_co: ...
 
 
-class _PlotlyTraceState(TypedDict, total=False):
-    type: str
-    text: StrVector
-    hovertemplate: str
-
-
-class _PlotlyRenderState(TypedDict, total=False):
-    data: list[_PlotlyTraceState]
-
-
-class _PlotlyHookPlot(Protocol):
-    state: _PlotlyRenderState
-
-
-class _HoloViewsHook(Protocol):
-    def __call__(self, plot: object, _element: object) -> None: ...
-
-
 def _runtime_object(value: object) -> object:
     """Cross a third-party stub boundary without weakening the result type."""
     return value
-
-
-def _resolve_manhattan_backend(
-    mode: PlotMode,
-    backend: PlotBackend,
-) -> Literal["matplotlib", "plotly", "bokeh"]:
-    match mode, backend:
-        case "static", "auto" | "matplotlib":
-            return "matplotlib"
-        case "interactive", "auto" | "plotly":
-            return "plotly"
-        case "interactive", "bokeh":
-            return "bokeh"
-        case "static", _:
-            raise ValueError("static Manhattan plots require the matplotlib backend")
-        case "interactive", _:
-            raise ValueError("interactive Manhattan plots require plotly or bokeh")
-    raise ValueError("unsupported Manhattan plot mode or backend")
 
 
 def _use_aggregate(marker_count: int, large_data: LargeDataMode) -> bool:
@@ -273,100 +204,27 @@ SIG_COLOR = "#E41A1C"  # red for significant hits
 SUGGEST_COLOR = "#FF7F00"  # orange for suggestive
 
 
-@overload
 def manhattan(
     snp_names: StrVector,
     chromosomes: LabelVector,
     positions: NumericVector,
     p_values: NumericVector,
     *,
-    mode: Literal["static"] = "static",
-    backend: StaticBackend = "auto",
-    style: StaticStyle = "pygapit",
     title: str = "Manhattan Plot",
     significance_threshold: float | None = None,
     suggestive_threshold: float | None = None,
     highlight_snps: IntVector | None = None,
-    save_path: str | None = None,
+    effects: NumericVector | None = None,
+    maf: NumericVector | None = None,
     figsize: tuple[float, float] = (14, 5),
     point_size: float = 1.5,
     large_data: LargeDataMode = "auto",
-) -> Figure: ...
+) -> HoloViewsPlot:
+    """Build a backend-neutral HoloViews Manhattan plot.
 
-
-@overload
-def manhattan(
-    snp_names: StrVector,
-    chromosomes: LabelVector,
-    positions: NumericVector,
-    p_values: NumericVector,
-    *,
-    mode: Literal["interactive"],
-    backend: PlotlyBackend = "auto",
-    style: Literal["pygapit"] = "pygapit",
-    title: str = "Interactive Manhattan",
-    significance_threshold: float | None = None,
-    suggestive_threshold: float | None = None,
-    effects: NumericVector | None = None,
-    maf: NumericVector | None = None,
-    save_path: str | None = None,
-    figsize: tuple[float, float] = (9, 4),
-    point_size: float = 3.0,
-    large_data: LargeDataMode = "auto",
-) -> PlotlyFigure: ...
-
-
-@overload
-def manhattan(
-    snp_names: StrVector,
-    chromosomes: LabelVector,
-    positions: NumericVector,
-    p_values: NumericVector,
-    *,
-    mode: Literal["interactive"],
-    backend: BokehBackend,
-    style: Literal["pygapit"] = "pygapit",
-    title: str = "Interactive Manhattan",
-    significance_threshold: float | None = None,
-    suggestive_threshold: float | None = None,
-    effects: NumericVector | None = None,
-    maf: NumericVector | None = None,
-    save_path: str | None = None,
-    figsize: tuple[float, float] = (9, 4),
-    point_size: float = 3.0,
-    large_data: LargeDataMode = "auto",
-) -> BokehFigure: ...
-
-
-def manhattan(
-    snp_names: StrVector,
-    chromosomes: LabelVector,
-    positions: NumericVector,
-    p_values: NumericVector,
-    *,
-    mode: PlotMode = "static",
-    backend: PlotBackend = "auto",
-    style: StaticStyle = "pygapit",
-    title: str | None = None,
-    significance_threshold: float | None = None,
-    suggestive_threshold: float | None = None,
-    highlight_snps: IntVector | None = None,
-    effects: NumericVector | None = None,
-    maf: NumericVector | None = None,
-    save_path: str | None = None,
-    figsize: tuple[float, float] | None = None,
-    point_size: float | None = None,
-    large_data: LargeDataMode = "auto",
-) -> Figure | PlotlyFigure | BokehFigure:
-    """Render a Manhattan plot through a statically valid backend/mode pair."""
-    resolved_backend = _resolve_manhattan_backend(mode, backend)
-    if mode == "interactive" and style != "pygapit":
-        raise ValueError("seaborn and science styles require static matplotlib output")
-    if mode == "static" and (effects is not None or maf is not None):
-        raise ValueError("effects and maf are available only for interactive output")
-    if mode == "interactive" and highlight_snps is not None:
-        raise ValueError("highlight_snps is available only for static output")
-
+    Use :func:`holoviews.render` to obtain a backend figure or
+    :func:`holoviews.save` to write a static or interactive artifact.
+    """
     data = prepare_manhattan_data(
         snp_names,
         chromosomes,
@@ -375,49 +233,22 @@ def manhattan(
         significance_threshold=significance_threshold,
         suggestive_threshold=suggestive_threshold,
     )
-    resolved_figsize = (
-        figsize if figsize is not None else ((14, 5) if mode == "static" else (9, 4))
-    )
-    resolved_point_size = (
-        point_size if point_size is not None else (1.5 if mode == "static" else 3.0)
-    )
-    _validate_plot_geometry(resolved_figsize, resolved_point_size)
-    plot = _build_manhattan_plot(
+    _validate_plot_geometry(figsize, point_size)
+    return _build_manhattan_plot(
         data,
-        backend=resolved_backend,
         aggregate=_use_aggregate(len(data.p_values), large_data),
-        title=title
-        or ("Manhattan Plot" if mode == "static" else "Interactive Manhattan"),
+        title=title,
         highlight_snps=highlight_snps,
         effects=effects,
         maf=maf,
-        figsize=resolved_figsize,
-        point_size=resolved_point_size,
-    )
-    if resolved_backend == "matplotlib":
-        with matplotlib_style(style):
-            return _render_holoviews(
-                plot,
-                backend="matplotlib",
-                save_path=save_path,
-            )
-    if resolved_backend == "plotly":
-        return _render_holoviews(
-            plot,
-            backend="plotly",
-            save_path=save_path,
-        )
-    return _render_holoviews(
-        plot,
-        backend="bokeh",
-        save_path=save_path,
+        figsize=figsize,
+        point_size=point_size,
     )
 
 
 def _build_manhattan_plot(
     data: ManhattanPlotData,
     *,
-    backend: Literal["matplotlib", "plotly", "bokeh"],
     aggregate: bool,
     title: str,
     highlight_snps: IntVector | None,
@@ -426,8 +257,8 @@ def _build_manhattan_plot(
     figsize: tuple[float, float],
     point_size: float,
 ) -> _HoloViewsObject:
-    """Build a HoloViews graph configured only for the selected renderer."""
-    _register_holoviews_backend(backend)
+    """Build one HoloViews graph that can be rendered by any loaded backend."""
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
     effect_values, maf_values = _interactive_manhattan_metadata(data, effects, maf)
@@ -445,8 +276,6 @@ def _build_manhattan_plot(
             maf_values=maf_values,
             color=color,
             point_size=point_size,
-            backend=backend,
-            hover=not aggregate,
         )
         layers.append(
             _rasterize_manhattan_layer(
@@ -454,7 +283,6 @@ def _build_manhattan_plot(
                 options,
                 color,
                 figsize,
-                backend=backend,
             )
             if aggregate
             else points
@@ -484,15 +312,12 @@ def _build_manhattan_plot(
             maf_values=maf_values,
             color=SIG_COLOR,
             point_size=point_size * 2,
-            backend=backend,
-            hover=True,
         )
 
     plot *= _threshold_line(
         holoviews,
         options,
         -np.log10(data.significance_threshold),
-        backend=backend,
         color=SIG_COLOR,
         width=0.8,
     )
@@ -500,7 +325,6 @@ def _build_manhattan_plot(
         holoviews,
         options,
         -np.log10(data.suggestive_threshold),
-        backend=backend,
         color=SUGGEST_COLOR,
         width=0.6,
     )
@@ -516,42 +340,42 @@ def _build_manhattan_plot(
             strict=True,
         )
     )
-    match backend:
-        case "matplotlib":
-            overlay_options = options.Overlay(
-                backend=backend,
-                fig_inches=figsize,
-                title=title,
-                xlabel="Chromosome",
-                ylabel="-log10(p)",
-                xlim=(0.0, x_limit),
-                ylim=(0.0, y_limit),
-                xticks=ticks,
-                show_frame=False,
-            )
-        case "bokeh" | "plotly":
-            overlay_options = options.Overlay(
-                backend=backend,
-                width=max(int(figsize[0] * 100), 1),
-                height=max(int(figsize[1] * 100), 1),
-                title=title,
-                xlabel="Chromosome",
-                ylabel="-log10(p)",
-                xlim=(0.0, x_limit),
-                ylim=(0.0, y_limit),
-                xticks=ticks,
-            )
-    return plot.opts(overlay_options)
+    common = {
+        "title": title,
+        "xlabel": "Chromosome",
+        "ylabel": "-log10(p)",
+        "xlim": (0.0, x_limit),
+        "ylim": (0.0, y_limit),
+        "xticks": ticks,
+    }
+    return plot.opts(
+        options.Overlay(
+            backend="matplotlib",
+            fig_inches=figsize,
+            show_frame=False,
+            **common,
+        ),
+        options.Overlay(
+            backend="bokeh",
+            width=max(int(figsize[0] * 100), 1),
+            height=max(int(figsize[1] * 100), 1),
+            **common,
+        ),
+        options.Overlay(
+            backend="plotly",
+            width=max(int(figsize[0] * 100), 1),
+            height=max(int(figsize[1] * 100), 1),
+            **common,
+        ),
+    )
 
 
 @cache
-def _register_holoviews_backend(
-    backend: Literal["matplotlib", "plotly", "bokeh"],
-) -> None:
-    """Register one renderer while preserving the caller's selected backend."""
+def _register_holoviews_backends() -> None:
+    """Register supported renderers while preserving the caller's selection."""
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     previous_backend = holoviews.Store.current_backend
-    holoviews.extension(backend)
+    holoviews.extension("matplotlib", "bokeh", "plotly")
     holoviews.Store.set_current_backend(previous_backend)
 
 
@@ -565,8 +389,6 @@ def _manhattan_points(
     maf_values: FloatVector | None,
     color: str,
     point_size: float,
-    backend: Literal["matplotlib", "plotly", "bokeh"],
-    hover: bool,
 ) -> _HoloViewsObject:
     columns: list[Vector] = [
         data.x_values[mask],
@@ -589,95 +411,29 @@ def _manhattan_points(
         kdims=["genomic_position", "log_p"],
         vdims=dimensions,
     )
-    match backend:
-        case "matplotlib":
-            point_options = options.Points(
-                backend=backend,
-                color=color,
-                s=point_size,
-                alpha=0.8,
-                linewidth=0,
-            )
-        case "bokeh":
-            if hover:
-                tooltips = [
-                    ("SNP", "@snp"),
-                    ("Chromosome", "@chromosome"),
-                    ("Position", "@position{0,0}"),
-                    ("P-value", "@p_value{0.00e}"),
-                ]
-                if effect_values is not None:
-                    tooltips.append(("Effect", "@effect{0.0000}"))
-                if maf_values is not None:
-                    tooltips.append(("MAF", "@maf{0.000}"))
-                point_options = options.Points(
-                    backend=backend,
-                    color=color,
-                    size=point_size,
-                    alpha=0.7,
-                    tools=["hover"],
-                    hover_tooltips=tooltips,
-                )
-            else:
-                point_options = options.Points(
-                    backend=backend,
-                    color=color,
-                    size=point_size,
-                    alpha=0.7,
-                )
-        case "plotly":
-            hooks: list[_HoloViewsHook] = (
-                [_plotly_manhattan_hook(data, mask, effect_values, maf_values)]
-                if hover
-                else []
-            )
-            point_options = options.Points(
-                backend=backend,
-                color=color,
-                size=point_size,
-                alpha=0.7,
-                marker="circle",
-                hooks=hooks,
-            )
-    return points.opts(point_options)
-
-
-def _plotly_manhattan_hook(
-    data: ManhattanPlotData,
-    mask: BoolVector,
-    effect_values: FloatVector | None,
-    maf_values: FloatVector | None,
-) -> _HoloViewsHook:
-    marker_names = data.snp_names[mask]
-    chromosomes = data.chromosomes[mask]
-    positions = data.positions[mask]
-    p_values = data.p_values[mask]
-    effects = None if effect_values is None else effect_values[mask]
-    frequencies = None if maf_values is None else maf_values[mask]
-    labels: list[str] = []
-    for index, marker_name in enumerate(marker_names):
-        label = (
-            f"<b>{marker_name}</b><br>Chromosome: {chromosomes[index]}<br>"
-            f"Position: {positions[index]:,.0f}<br>P-value: {p_values[index]:.2e}"
-        )
-        if effects is not None:
-            label += f"<br>Effect: {effects[index]:.4f}"
-        if frequencies is not None:
-            label += f"<br>MAF: {frequencies[index]:.3f}"
-        labels.append(label)
-    hover_text = np.asarray(labels, dtype=np.str_)
-
-    def apply_hover(plot: object, _element: object) -> None:
-        state = cast(_PlotlyHookPlot, _runtime_object(plot)).state
-        traces = state.get("data", [])
-        if not traces:
-            return
-        trace = traces[0]
-        trace["type"] = "scattergl"
-        trace["text"] = hover_text
-        trace["hovertemplate"] = "%{text}<extra></extra>"
-
-    return apply_hover
+    return points.opts(
+        options.Points(
+            backend="matplotlib",
+            color=color,
+            s=point_size,
+            alpha=0.8,
+            linewidth=0,
+        ),
+        options.Points(
+            backend="bokeh",
+            color=color,
+            size=point_size,
+            alpha=0.7,
+            tools=["hover"],
+        ),
+        options.Points(
+            backend="plotly",
+            color=color,
+            size=point_size,
+            alpha=0.7,
+            marker="circle",
+        ),
+    )
 
 
 def _rasterize_manhattan_layer(
@@ -685,8 +441,6 @@ def _rasterize_manhattan_layer(
     options: _HoloViewsOptions,
     color: str,
     figsize: tuple[float, float],
-    *,
-    backend: Literal["matplotlib", "plotly", "bokeh"],
 ) -> _HoloViewsObject:
     datashader = cast(_DatashaderModule, _runtime_object(ds))
     rasterizer = cast(
@@ -701,7 +455,11 @@ def _rasterize_manhattan_layer(
         precompute=True,
     )
     color_map = ["#FFFFFF", color]
-    return image.opts(options.Image(backend=backend, cmap=color_map, colorbar=False))
+    return image.opts(
+        options.Image(backend="matplotlib", cmap=color_map, colorbar=False),
+        options.Image(backend="bokeh", cmap=color_map, colorbar=False),
+        options.Image(backend="plotly", cmap=color_map, colorbar=False),
+    )
 
 
 def _threshold_line(
@@ -709,98 +467,38 @@ def _threshold_line(
     options: _HoloViewsOptions,
     y: float,
     *,
-    backend: Literal["matplotlib", "plotly", "bokeh"],
     color: str,
     width: float,
 ) -> _HoloViewsObject:
-    match backend:
-        case "matplotlib":
-            line_options = options.HLine(
-                backend=backend,
-                color=color,
-                linestyle="--",
-                linewidth=width,
-            )
-        case "bokeh":
-            line_options = options.HLine(
-                backend=backend,
-                color=color,
-                line_dash="dashed",
-                line_width=width,
-            )
-        case "plotly":
-            line_options = options.HLine(
-                backend=backend,
-                line_color=color,
-                line_dash="dash",
-                line_width=width,
-            )
-    return holoviews.HLine(y).opts(line_options)
-
-
-@overload
-def _render_holoviews(
-    obj: _HoloViewsObject,
-    *,
-    backend: Literal["matplotlib"],
-    save_path: str | None,
-) -> Figure: ...
-
-
-@overload
-def _render_holoviews(
-    obj: _HoloViewsObject,
-    *,
-    backend: Literal["plotly"],
-    save_path: str | None,
-) -> PlotlyFigure: ...
-
-
-@overload
-def _render_holoviews(
-    obj: _HoloViewsObject,
-    *,
-    backend: Literal["bokeh"],
-    save_path: str | None,
-) -> BokehFigure: ...
-
-
-def _render_holoviews(
-    obj: _HoloViewsObject,
-    *,
-    backend: Literal["matplotlib", "plotly", "bokeh"],
-    save_path: str | None,
-) -> Figure | PlotlyFigure | BokehFigure:
-    """Render and optionally export through HoloViews' public entry points."""
-    holoviews = cast(_HoloViewsModule, _runtime_object(hv))
-    if save_path is not None:
-        holoviews.save(obj, save_path, backend=backend)
-    match backend:
-        case "matplotlib":
-            return holoviews.render(obj, backend="matplotlib")
-        case "bokeh":
-            return holoviews.render(obj, backend="bokeh")
-        case "plotly":
-            # Plotly's public Figure model ignores HoloViews' private axis
-            # metadata while retaining its fully rendered trace state.
-            return plotly_figure(holoviews.render(obj, backend="plotly"))
+    return holoviews.HLine(y).opts(
+        options.HLine(
+            backend="matplotlib",
+            color=color,
+            linestyle="--",
+            linewidth=width,
+        ),
+        options.HLine(
+            backend="bokeh",
+            color=color,
+            line_dash="dashed",
+            line_width=width,
+        ),
+        options.HLine(
+            backend="plotly",
+            line_color=color,
+            line_dash="dash",
+            line_width=width,
+        ),
+    )
 
 
 def qq_plot(
     p_values: FloatVector,
     title: str = "QQ Plot",
-    save_path: str | None = None,
     figsize: tuple[float, float] = (5, 5),
-    *,
-    style: StaticStyle = "pygapit",
-) -> Figure:
-    """Render a QQ plot through HoloViews' Matplotlib backend."""
-    with matplotlib_style(style):
-        return _render_holoviews(
-            _qq_plot(p_values, title, figsize),
-            backend="matplotlib",
-            save_path=save_path,
-        )
+) -> HoloViewsPlot:
+    """Build a backend-neutral HoloViews QQ plot."""
+    return _qq_plot(p_values, title, figsize)
 
 
 def _qq_plot(
@@ -822,7 +520,7 @@ def _qq_plot(
     p_obs = np.sort(p_values[valid])
     n = len(p_obs)
 
-    _register_holoviews_backend("matplotlib")
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
 
@@ -905,18 +603,10 @@ def kinship_heatmap(
     K: FloatMatrix,
     taxa: Vector | None = None,
     title: str = "Kinship Matrix",
-    save_path: str | None = None,
     figsize: tuple[float, float] = (8, 7),
-    *,
-    style: StaticStyle = "pygapit",
-) -> Figure:
-    """Render a kinship heatmap through HoloViews' Matplotlib backend."""
-    with matplotlib_style(style):
-        return _render_holoviews(
-            _kinship_heatmap(K, taxa, title, figsize),
-            backend="matplotlib",
-            save_path=save_path,
-        )
+) -> HoloViewsPlot:
+    """Build a backend-neutral HoloViews kinship heatmap."""
+    return _kinship_heatmap(K, taxa, title, figsize)
 
 
 def _kinship_heatmap(
@@ -959,7 +649,7 @@ def _kinship_heatmap(
         taxa_sorted = np.asarray(taxa)[order]
         ticks = [(index + 0.5, str(taxon)) for index, taxon in enumerate(taxa_sorted)]
 
-    _register_holoviews_backend("matplotlib")
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
     return holoviews.Image(
@@ -989,18 +679,10 @@ def pca_plot_2d(
     taxa: Vector | None = None,
     groups: Vector | None = None,
     title: str = "PCA Plot",
-    save_path: str | None = None,
     figsize: tuple[float, float] = (7, 6),
-    *,
-    style: StaticStyle = "pygapit",
-) -> Figure:
-    """Render static PC1/PC2 scores through HoloViews."""
-    with matplotlib_style(style):
-        return _render_holoviews(
-            _pca_plot_2d(scores, var_explained, taxa, groups, title, figsize),
-            backend="matplotlib",
-            save_path=save_path,
-        )
+) -> HoloViewsPlot:
+    """Build a backend-neutral HoloViews PC1/PC2 plot."""
+    return _pca_plot_2d(scores, var_explained, taxa, groups, title, figsize)
 
 
 def _pca_plot_2d(
@@ -1037,7 +719,7 @@ def _pca_plot_2d(
 
     pct1 = var_explained[0] * 100 if len(var_explained) > 0 else 0
     pct2 = var_explained[1] * 100 if len(var_explained) > 1 else 0
-    _register_holoviews_backend("matplotlib")
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
     points = holoviews.Points(
@@ -1082,18 +764,17 @@ def _pca_plot_2d(
     )
 
 
-def pca_plot_3d_interactive(
+def pca_plot_3d(
     scores: FloatMatrix,
     var_explained: FloatVector,
     taxa: Vector | None = None,
     groups: Vector | None = None,
     title: str = "3D PCA",
-    save_path: str | None = None,
-) -> PlotlyFigure:
-    """Render interactive PCA scores through HoloViews' Plotly backend."""
+) -> HoloViewsPlot:
+    """Build a backend-neutral HoloViews 3D PCA plot."""
     if scores.ndim != 2 or scores.shape[1] < 3:
         raise ValueError("scores must be a matrix with at least three components")
-    _register_holoviews_backend("plotly")
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
     pc1, pc2, pc3 = scores[:, 0], scores[:, 1], scores[:, 2]
@@ -1134,43 +815,9 @@ def pca_plot_3d_interactive(
             xlabel=f"PC1 ({pct[0]:.1f}%)",
             ylabel=f"PC2 ({pct[1]:.1f}%)",
             zlabel=f"PC3 ({pct[2]:.1f}%)",
-            hooks=[_pca_plotly_hover_hook(taxa_values, groups)],
         )
     )
-    return _render_holoviews(
-        plot,
-        backend="plotly",
-        save_path=save_path,
-    )
-
-
-def _pca_plotly_hover_hook(
-    taxa: Vector,
-    groups: Vector | None,
-) -> _HoloViewsHook:
-    labels = np.asarray(taxa, dtype=np.str_)
-    if groups is not None:
-        labels = np.asarray(
-            [
-                f"{taxon}<br>Group: {group}"
-                for taxon, group in zip(labels, groups, strict=True)
-            ],
-            dtype=np.str_,
-        )
-
-    def apply_hover(plot: object, _element: object) -> None:
-        state = cast(_PlotlyHookPlot, _runtime_object(plot)).state
-        traces = state.get("data", [])
-        if not traces:
-            return
-        trace = traces[0]
-        trace["text"] = labels
-        trace["hovertemplate"] = (
-            "<b>%{text}</b><br>PC1: %{x:.3f}<br>PC2: %{y:.3f}<br>"
-            "PC3: %{z:.3f}<extra></extra>"
-        )
-
-    return apply_hover
+    return plot
 
 
 def _interactive_manhattan_metadata(
@@ -1195,18 +842,10 @@ def gs_scatter(
     predicted: NumericVector,
     taxa: Vector | None = None,
     trait_name: str = "Trait",
-    save_path: str | None = None,
     figsize: tuple[float, float] = (6, 5),
-    *,
-    style: StaticStyle = "pygapit",
-) -> Figure:
-    """Render genomic-selection diagnostics through HoloViews."""
-    with matplotlib_style(style):
-        return _render_holoviews(
-            _gs_scatter(observed, predicted, taxa, trait_name, figsize),
-            backend="matplotlib",
-            save_path=save_path,
-        )
+) -> HoloViewsPlot:
+    """Build backend-neutral genomic-selection diagnostics."""
+    return _gs_scatter(observed, predicted, taxa, trait_name, figsize)
 
 
 def _gs_scatter(
@@ -1230,7 +869,7 @@ def _gs_scatter(
     obs_v = observed[valid]
     pred_v = predicted[valid]
 
-    _register_holoviews_backend("matplotlib")
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
 
@@ -1298,18 +937,10 @@ def phenotype_distribution(
     y: FloatVector,
     trait_name: str = "Trait",
     significant_snp_geno: Vector | None = None,
-    save_path: str | None = None,
     figsize: tuple[float, float] = (6, 4),
-    *,
-    style: StaticStyle = "pygapit",
-) -> Figure:
-    """Render a phenotype distribution through HoloViews."""
-    with matplotlib_style(style):
-        return _render_holoviews(
-            _phenotype_distribution(y, trait_name, significant_snp_geno, figsize),
-            backend="matplotlib",
-            save_path=save_path,
-        )
+) -> HoloViewsPlot:
+    """Build a backend-neutral phenotype distribution."""
+    return _phenotype_distribution(y, trait_name, significant_snp_geno, figsize)
 
 
 def _phenotype_distribution(
@@ -1325,7 +956,7 @@ def _phenotype_distribution(
     """
     finite = np.isfinite(y)
     valid_y = y[finite]
-    _register_holoviews_backend("matplotlib")
+    _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
     frequencies, edges = np.histogram(valid_y, bins=30)
@@ -1383,5 +1014,107 @@ def _phenotype_distribution(
             title=f"Distribution of {trait_name}",
             show_legend=significant_snp_geno is not None,
             legend_position="right",
+        )
+    )
+
+
+def multiple_manhattan(
+    chromosomes: LabelVector,
+    positions: NumericVector,
+    model_p_values: list[tuple[str, FloatVector]],
+    *,
+    title: str = "Multiple Manhattan",
+    figsize: tuple[float, float] = (12, 5),
+) -> HoloViewsPlot:
+    """Build a multi-model Manhattan comparison as a HoloViews overlay."""
+    x_values, labels, centers = prepare_genomic_axis(chromosomes, positions)
+    _register_holoviews_backends()
+    holoviews = cast(_HoloViewsModule, _runtime_object(hv))
+    options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
+    layers: list[_HoloViewsObject] = []
+    for model, p_values in model_p_values:
+        require_length(p_values, len(x_values), name=f"{model} p_values")
+        valid = np.isfinite(p_values) & (p_values > 0.0) & (p_values <= 1.0)
+        layers.append(
+            holoviews.Scatter(
+                (x_values[valid], -np.log10(p_values[valid])),
+                kdims=["genomic_position"],
+                vdims=["log_p"],
+                label=model,
+            ).opts(
+                options.Scatter(
+                    backend="matplotlib",
+                    s=12,
+                    alpha=0.65,
+                )
+            )
+        )
+    ticks = list(zip(centers.tolist(), labels, strict=True))
+    return holoviews.Overlay(layers).opts(
+        options.Overlay(
+            backend="matplotlib",
+            fig_inches=figsize,
+            title=title,
+            xlabel="Chromosome",
+            ylabel="-log10(p)",
+            xticks=ticks,
+            show_legend=True,
+        )
+    )
+
+
+def multiple_qq(
+    model_p_values: list[tuple[str, FloatVector]],
+    *,
+    title: str = "Multiple QQ",
+    figsize: tuple[float, float] = (6, 6),
+) -> HoloViewsPlot:
+    """Build a multi-model QQ comparison as a HoloViews overlay."""
+    _register_holoviews_backends()
+    holoviews = cast(_HoloViewsModule, _runtime_object(hv))
+    options = cast(_HoloViewsOptions, _runtime_object(hv_opts))
+    layers: list[_HoloViewsObject] = []
+    upper = 1.0
+    for model, p_values in model_p_values:
+        valid = p_values[np.isfinite(p_values) & (p_values > 0.0) & (p_values <= 1.0)]
+        observed = -np.log10(np.sort(valid))
+        expected = (
+            -np.log10(
+                (np.arange(1, len(observed) + 1, dtype=np.float64) - 0.5)
+                / len(observed)
+            )
+            if len(observed)
+            else np.empty(0, dtype=np.float64)
+        )
+        if len(observed):
+            upper = max(upper, observed.max(), expected.max())
+        layers.append(
+            holoviews.Curve(
+                (expected, observed),
+                kdims=["Expected -log10(p)"],
+                vdims=["Observed -log10(p)"],
+                label=model,
+            ).opts(options.Curve(backend="matplotlib", marker="o", linewidth=1))
+        )
+    diagonal = np.asarray([0.0, upper], dtype=np.float64)
+    layers.append(
+        holoviews.Curve(
+            (diagonal, diagonal),
+            kdims=["Expected -log10(p)"],
+            vdims=["Observed -log10(p)"],
+        ).opts(
+            options.Curve(
+                backend="matplotlib",
+                color="grey",
+                linestyle="dashed",
+            )
+        )
+    )
+    return holoviews.Overlay(layers).opts(
+        options.Overlay(
+            backend="matplotlib",
+            fig_inches=figsize,
+            title=title,
+            show_legend=True,
         )
     )

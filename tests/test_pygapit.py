@@ -27,6 +27,7 @@ import pytest
 
 from pygapit._typing import as_float_vector, as_str_vector
 from pygapit.gapit import GAPITResult
+from pygapit.visualization.output import save_plot
 
 GAPIT_EXTDATA = Path(__file__).resolve().parents[1] / "GAPIT" / "inst" / "extdata"
 PHENOTYPE_PATH = GAPIT_EXTDATA / "mdp_traits.txt.gz"
@@ -1285,14 +1286,14 @@ class TestVisualization:
         r = glm_gwas(real_data["y"], real_data["X0"], real_data["GD"])
         GM = real_data["GM"]
         positions = as_float_vector(GM["Position"].to_numpy())
-        fig = manhattan(
+        plot = manhattan(
             snp_names=as_str_vector(GM["SNP"].to_numpy()),
             chromosomes=as_str_vector(GM["Chromosome"].to_numpy()),
             positions=positions,
             p_values=r.p_values,
-            save_path=str(tmp_path / "manhattan.pdf"),
         )
-        assert fig is not None
+        save_plot(plot, tmp_path / "manhattan.pdf")
+        assert (tmp_path / "manhattan.pdf").exists()
         plt.close("all")
 
     def test_qq_plot(self, real_data: RealDataset, tmp_path: Path) -> None:
@@ -1300,17 +1301,17 @@ class TestVisualization:
         from pygapit.visualization.plots import qq_plot
 
         r = glm_gwas(real_data["y"], real_data["X0"], real_data["GD"])
-        fig = qq_plot(r.p_values, save_path=str(tmp_path / "qq.pdf"))
-        assert fig is not None
+        plot = qq_plot(r.p_values)
+        save_plot(plot, tmp_path / "qq.pdf")
+        assert (tmp_path / "qq.pdf").exists()
         plt.close("all")
 
     def test_kinship_heatmap(self, real_data: RealDataset, tmp_path: Path) -> None:
         from pygapit.visualization.plots import kinship_heatmap
 
-        fig = kinship_heatmap(
-            real_data["K"][:30, :30], save_path=str(tmp_path / "kinship.pdf")
-        )
-        assert fig is not None
+        plot = kinship_heatmap(real_data["K"][:30, :30])
+        save_plot(plot, tmp_path / "kinship.pdf")
+        assert (tmp_path / "kinship.pdf").exists()
         plt.close("all")
 
     def test_pca_2d(self, real_data: RealDataset, tmp_path: Path) -> None:
@@ -1318,10 +1319,9 @@ class TestVisualization:
         from pygapit.visualization.plots import pca_plot_2d
 
         pca = compute_pca(real_data["GD"], n_components=3)
-        fig = pca_plot_2d(
-            pca.scores, pca.var_explained, save_path=str(tmp_path / "pca.pdf")
-        )
-        assert fig is not None
+        plot = pca_plot_2d(pca.scores, pca.var_explained)
+        save_plot(plot, tmp_path / "pca.pdf")
+        assert (tmp_path / "pca.pdf").exists()
         plt.close("all")
 
     def test_gs_scatter(self, real_data: RealDataset, tmp_path: Path) -> None:
@@ -1329,8 +1329,7 @@ class TestVisualization:
         from pygapit.visualization.plots import gs_scatter
 
         gs = gblup(real_data["y"], real_data["X0"], real_data["K"])
-        fig = gs_scatter(
-            real_data["y"], gs.prediction, save_path=str(tmp_path / "gs.pdf")
-        )
-        assert fig is not None
+        plot = gs_scatter(real_data["y"], gs.prediction)
+        save_plot(plot, tmp_path / "gs.pdf")
+        assert (tmp_path / "gs.pdf").exists()
         plt.close("all")

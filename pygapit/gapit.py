@@ -1503,8 +1503,8 @@ def _attach_multiple_analysis_outputs(
     results: dict[str, GAPITResult], output_dir: str | Path
 ) -> None:
     """Create GAPIT-style cross-model Manhattan and QQ plots per trait."""
-    from .visualization._backends import axes, pyplot, savefig
-    from .visualization.data import prepare_genomic_axis
+    from .visualization.output import save_plot
+    from .visualization.plots import multiple_manhattan, multiple_qq
 
     grouped: dict[str, list[GAPITResult]] = {}
     for result in results.values():
@@ -1521,64 +1521,29 @@ def _attach_multiple_analysis_outputs(
         qq_path = out / f"GAPIT.Multiple.QQ.{component}.pdf"
 
         marker_reference, aligned_p_values = _align_multiple_gwas(trait_results)
-        x_values, chromosome_labels, chromosome_centers = prepare_genomic_axis(
-            as_str_vector(marker_reference["Chr"].to_numpy()),
-            as_float_vector(marker_reference["Pos"].to_numpy()),
+        save_plot(
+            multiple_manhattan(
+                as_str_vector(marker_reference["Chr"].to_numpy()),
+                as_float_vector(marker_reference["Pos"].to_numpy()),
+                aligned_p_values,
+                title=f"Multiple Manhattan: {trait_name}",
+            ),
+            manhattan_path,
         )
-        mpl = pyplot()
-        fig_man, raw_ax_man = mpl.subplots(figsize=(12, 5))
-        ax_man = axes(raw_ax_man)
-        for model, p_values in aligned_p_values:
-            valid = np.isfinite(p_values) & (p_values > 0.0) & (p_values <= 1.0)
-            ax_man.scatter(
-                x_values[valid],
-                -np.log10(np.maximum(p_values[valid], 1e-300)),
-                s=12,
-                alpha=0.65,
-                label=model,
-            )
-        ax_man.set_xticks(chromosome_centers)
-        ax_man.set_xticklabels(chromosome_labels)
-        ax_man.set_xlabel("Chromosome")
-        ax_man.set_ylabel(r"$-\log_{10}(p)$")
-        ax_man.set_title(f"Multiple Manhattan: {trait_name}")
-        ax_man.legend()
-        fig_man.tight_layout()
-        savefig(fig_man, manhattan_path, bbox_inches="tight")
-        mpl.close(fig_man)
-
-        fig_qq, raw_ax_qq = mpl.subplots(figsize=(6, 6))
-        ax_qq = axes(raw_ax_qq)
-        qq_upper = 1.0
-        for result in trait_results:
-            gwas = result.GWAS
-            if gwas is None:
-                continue
-            observed = np.sort(
-                np.clip(np.asarray(gwas["P.value"], dtype=np.float64), 1e-300, 1.0)
-            )
-            expected = (np.arange(1, len(observed) + 1) - 0.5) / len(observed)
-            qq_upper = max(
-                qq_upper,
-                np.max(-np.log10(expected)),
-                np.max(-np.log10(observed)),
-            )
-            ax_qq.plot(
-                -np.log10(expected),
-                -np.log10(observed),
-                marker="o",
-                markersize=3,
-                linewidth=1,
-                label=result.model,
-            )
-        ax_qq.plot([0.0, qq_upper], [0.0, qq_upper], linestyle="--", color="grey")
-        ax_qq.set_xlabel(r"Expected $-\log_{10}(p)$")
-        ax_qq.set_ylabel(r"Observed $-\log_{10}(p)$")
-        ax_qq.set_title(f"Multiple QQ: {trait_name}")
-        ax_qq.legend()
-        fig_qq.tight_layout()
-        savefig(fig_qq, qq_path, bbox_inches="tight")
-        mpl.close(fig_qq)
+        save_plot(
+            multiple_qq(
+                [
+                    (
+                        result.model,
+                        as_float_vector(result.GWAS["P.value"].to_numpy()),
+                    )
+                    for result in trait_results
+                    if result.GWAS is not None
+                ],
+                title=f"Multiple QQ: {trait_name}",
+            ),
+            qq_path,
+        )
 
         paths = (manhattan_path, qq_path)
         for result in trait_results:
@@ -1596,7 +1561,7 @@ def _save_outputs(
     output_dir: str | Path,
 ) -> GAPITOutputFiles:
     """Save all result files and plots. Translates GAPIT.ID.R output logic."""
-    from .visualization._backends import pyplot
+    from .visualization.output import save_plot
     from .visualization.plots import (
         kinship_heatmap,
         manhattan,
@@ -1640,7 +1605,6 @@ def _save_outputs(
     kinship_plot_path = out / f"GAPIT.{trait_component}.Kinship.pdf"
     pca_plot_path = out / f"GAPIT.{trait_component}.PCA.pdf"
     try:
-        mpl = pyplot()
         # Manhattan
         sig_mask = gwas_df["P.value"] <= bonferroni_threshold(len(gwas_df))
         sig_indices = np.where(np.asarray(sig_mask.to_numpy(), dtype=bool))[0]
@@ -1649,42 +1613,38 @@ def _save_outputs(
         plot_positions = as_float_vector(gwas_df["Pos"].to_numpy())
         plot_p_values = as_float_vector(gwas_df["P.value"].to_numpy())
 
-        fig_man = manhattan(
+        manhattan_plot = manhattan(
             snp_names=plot_snp_names,
             chromosomes=plot_chromosomes,
             positions=plot_positions,
             p_values=plot_p_values,
             title=f"Manhattan: {trait_name} ({model_name})",
             highlight_snps=sig_indices if len(sig_indices) > 0 else None,
-            save_path=str(manhattan_path),
         )
-        mpl.close(fig_man)
+        save_plot(manhattan_plot, manhattan_path)
 
         # QQ
-        fig_qq = qq_plot(
+        qq = qq_plot(
             p_values=plot_p_values,
             title=f"QQ: {trait_name} ({model_name})",
-            save_path=str(qq_path),
         )
-        mpl.close(fig_qq)
+        save_plot(qq, qq_path)
 
         # Kinship heatmap
-        fig_k = kinship_heatmap(
+        kinship_plot = kinship_heatmap(
             K=K,
             taxa=taxa,
-            save_path=str(kinship_plot_path),
         )
-        mpl.close(fig_k)
+        save_plot(kinship_plot, kinship_plot_path)
 
         # PCA 2D
         if pca_result.scores.shape[1] >= 2:
-            fig_pca = pca_plot_2d(
+            pca_plot = pca_plot_2d(
                 scores=pca_result.scores,
                 var_explained=pca_result.var_explained,
                 title=f"PCA: {trait_name}",
-                save_path=str(pca_plot_path),
             )
-            mpl.close(fig_pca)
+            save_plot(pca_plot, pca_plot_path)
 
     except (ValueError, TypeError, OSError, np.linalg.LinAlgError) as e:
         warnings.warn(f"Plot generation failed: {e}")
