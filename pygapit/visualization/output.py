@@ -6,55 +6,20 @@ import importlib
 import typing as t
 import warnings
 from contextlib import contextmanager
-from typing import Literal, Protocol, cast, overload
+from os import fspath
+from typing import Literal, cast, overload
 
 import holoviews as hv
+import matplotlib.pyplot as plt
 from holoviews.core import Dimensioned
 
 if t.TYPE_CHECKING:
-    from collections.abc import Generator, Mapping
+    from collections.abc import Callable, Generator
     from contextlib import AbstractContextManager
     from os import PathLike
 
 StaticStyle = Literal["pygapit", "seaborn", "science"]
 OutputBackend = Literal["matplotlib", "bokeh", "plotly"]
-
-
-class _SeabornModule(Protocol):
-    def axes_style(self, style: str) -> Mapping[str, object]: ...
-
-
-class _MatplotlibStyleLibrary(Protocol):
-    def context(self, style: list[str]) -> AbstractContextManager[None]: ...
-
-
-class _PyplotModule(Protocol):
-    style: _MatplotlibStyleLibrary
-
-    def rc_context(
-        self,
-        rc: Mapping[str, object],
-    ) -> AbstractContextManager[None]: ...
-
-
-class _HoloViewsModule(Protocol):
-    def save(
-        self,
-        obj: Dimensioned,
-        filename: str | PathLike[str],
-        *,
-        backend: OutputBackend,
-    ) -> object: ...
-
-
-def _runtime_object(value: object) -> object:
-    return value
-
-
-def _pyplot() -> _PyplotModule:
-    import matplotlib.pyplot as plt
-
-    return cast(_PyplotModule, _runtime_object(plt))
 
 
 @contextmanager
@@ -67,15 +32,15 @@ def matplotlib_style(style: StaticStyle) -> Generator[None]:
     try:
         match style:
             case "seaborn":
-                seaborn = cast(
-                    _SeabornModule,
-                    cast(object, importlib.import_module("seaborn")),
+                axes_style = cast(
+                    "Callable[[str], AbstractContextManager[None]]",
+                    importlib.import_module("seaborn").axes_style,
                 )
-                with _pyplot().rc_context(seaborn.axes_style("white")):
+                with axes_style("white"):
                     yield
             case "science":
                 importlib.import_module("scienceplots")
-                with _pyplot().style.context(["science", "no-latex"]):
+                with plt.style.context(["science", "no-latex"]):
                     yield
     except ImportError:
         warnings.warn(
@@ -115,11 +80,14 @@ def save_plot(
     style: StaticStyle = "pygapit",
 ) -> None:
     """Save a HoloViews object at pyGAPIT's automatic-output boundary."""
-    holoviews = cast(_HoloViewsModule, _runtime_object(hv))
     if backend == "matplotlib":
         with matplotlib_style(style):
-            holoviews.save(plot, path, backend=backend)
+            hv.save(  # pyright: ignore[reportUnknownMemberType]
+                plot, fspath(path), backend=backend
+            )
         return
     if style != "pygapit":
         raise ValueError("style is available only for the matplotlib backend")
-    holoviews.save(plot, path, backend=backend)
+    hv.save(  # pyright: ignore[reportUnknownMemberType]
+        plot, fspath(path), backend=backend
+    )
