@@ -32,6 +32,7 @@ def test_backend_capability_typechecking(tmp_path: Path) -> None:
     pytest.importorskip("basedpyright")
     source = """from typing import assert_type
 import numpy as np
+from bokeh.plotting import figure as BokehFigure
 from plotly.graph_objects import Figure as PlotlyFigure
 from pygapit import pca_plot_3d, qq_plot, save_plot
 from pygapit.visualization.view import OutputBackend, ThreeDBackend, Visualization
@@ -39,6 +40,7 @@ p = qq_plot(np.asarray([.5, .1]), backend="bokeh")
 q = pca_plot_3d(np.ones((3, 3)), np.asarray([.5, .3, .2]))
 assert_type(p, Visualization[OutputBackend])
 assert_type(q, Visualization[ThreeDBackend])
+assert_type(p.render("bokeh"), BokehFigure)
 assert_type(p.render("plotly"), PlotlyFigure)
 save_plot(p, "plot.html")
 save_plot(p, "plot.pdf", style="science")

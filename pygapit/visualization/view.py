@@ -18,6 +18,7 @@ import holoviews as hv
 from holoviews.core import Dimensioned
 
 if TYPE_CHECKING:
+    from bokeh.plotting import figure as BokehFigure
     from matplotlib.figure import Figure as MatplotlibFigure
     from plotly.graph_objs._figure import Figure as PlotlyFigure
 
@@ -94,9 +95,16 @@ class Visualization(Generic[BackendT]):
     def render(self, backend: Literal["plotly"]) -> PlotlyFigure: ...
 
     @overload
+    def render(
+        self: Visualization[OutputBackend], backend: Literal["bokeh"]
+    ) -> BokehFigure: ...
+
+    @overload
     def render(self, backend: BackendT | None = None) -> object: ...
 
-    def render(self, backend: OutputBackend | None = None) -> object:
+    def render(  # pyright: ignore[reportInconsistentOverload]
+        self, backend: OutputBackend | None = None
+    ) -> object:
         """Render a backend-native figure without changing notebook display."""
         selected = self.backend if backend is None else backend
         if selected not in self.supported_backends:
