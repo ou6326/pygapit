@@ -31,6 +31,7 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Changed
 
+- Document the Python 3.11 and HoloViews visualization migration from 1.2.4.
 - Reuse precomputed genomic ordering when building GWAS tables and bypass
   DataFrame sorting and merging when multi-model results already share marker
   order.

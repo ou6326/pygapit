@@ -121,7 +121,6 @@ platforms = ["win-64", "linux-64", "linux-aarch64", "osx-64", "osx-arm64"]
 pygapit-ng = { path = ".", editable = true }
 
 [tool.pixi.dependencies]
-# libblas = { version = "*", build = "*openblas" }
 
 [tool.pixi.tasks]
 precommit = "ruff check --preview --ignore RUF069 && ruff format --check && basedpyright && pyrefly check -p all"

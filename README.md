@@ -20,6 +20,9 @@ will use descriptive `snake_case` names, explicit option semantics, and typed
 result objects. Legacy spellings will be deprecated gradually rather than
 removed without a transition period.
 
+The next major release has deliberate visualization and Python-runtime breaks;
+see [Migrating from pyGAPIT 1.2.4](MIGRATING.md) for direct replacements.
+
 ### Compatibility evidence
 
 The table below reports tested behavior, not an estimate of feature
