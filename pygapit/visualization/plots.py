@@ -4,8 +4,8 @@ Translates GAPIT.Manhattan.R, GAPIT.QQ.R, GAPIT.PCA.R,
 GAPIT.GS.Visualization.R, GAPIT.Phenotype.View.R
 
 All plots are publication-ready and match GAPIT's visual style.
-Plots are returned as backend-neutral HoloViews objects. Callers choose a
-renderer with ``holoviews.render`` or an output format with ``holoviews.save``.
+Plots return a Visualization with a typed notebook backend and direct rendering.
+The underlying HoloViews graph remains available for advanced composition.
 """
 
 from __future__ import annotations
@@ -43,6 +43,13 @@ from .._typing import (
     require_length,
 )
 from .data import ManhattanPlotData, prepare_genomic_axis, prepare_manhattan_data
+from .view import (
+    ALL_BACKENDS,
+    THREE_D_BACKENDS,
+    OutputBackend,
+    ThreeDBackend,
+    Visualization,
+)
 
 LargeDataMode = Literal["auto", "points", "aggregate"]
 
@@ -227,11 +234,12 @@ def manhattan(
     figsize: tuple[float, float] = (14, 5),
     point_size: float = 1.5,
     large_data: LargeDataMode = "auto",
-) -> Dimensioned:
-    """Build a backend-neutral HoloViews Manhattan plot.
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
+    """Build a HoloViews Manhattan graph with a notebook backend preference.
 
-    Use :func:`holoviews.render` to obtain a backend figure or
-    :func:`holoviews.save` to write a static or interactive artifact.
+    The backend selects notebook display. Use ``plot.render()`` for a native
+    backend figure or ``save_plot`` for file output.
     """
     data = prepare_manhattan_data(
         snp_names,
@@ -242,17 +250,21 @@ def manhattan(
         suggestive_threshold=suggestive_threshold,
     )
     _validate_plot_geometry(figsize, point_size)
-    return _as_dimensioned(
-        _build_manhattan_plot(
-            data,
-            aggregate=_use_aggregate(len(data.p_values), large_data),
-            title=title,
-            highlight_snps=highlight_snps,
-            effects=effects,
-            maf=maf,
-            figsize=figsize,
-            point_size=point_size,
+    return Visualization(
+        _as_dimensioned(
+            _build_manhattan_plot(
+                data,
+                aggregate=_use_aggregate(len(data.p_values), large_data),
+                title=title,
+                highlight_snps=highlight_snps,
+                effects=effects,
+                maf=maf,
+                figsize=figsize,
+                point_size=point_size,
+            ),
         ),
+        backend,
+        ALL_BACKENDS,
     )
 
 
@@ -523,9 +535,13 @@ def qq_plot(
     p_values: FloatVector,
     title: str = "QQ Plot",
     figsize: tuple[float, float] = (5, 5),
-) -> Dimensioned:
-    """Build a backend-neutral HoloViews QQ plot."""
-    return _as_dimensioned(_qq_plot(p_values, title, figsize))
+    *,
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
+    """Build a QQ visualization with a notebook backend preference."""
+    return Visualization(
+        _as_dimensioned(_qq_plot(p_values, title, figsize)), backend, ALL_BACKENDS
+    )
 
 
 def _qq_plot(
@@ -631,9 +647,15 @@ def kinship_heatmap(
     taxa: Vector | None = None,
     title: str = "Kinship Matrix",
     figsize: tuple[float, float] = (8, 7),
-) -> Dimensioned:
-    """Build a backend-neutral HoloViews kinship heatmap."""
-    return _as_dimensioned(_kinship_heatmap(K, taxa, title, figsize))
+    *,
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
+    """Build a kinship visualization with a notebook backend preference."""
+    return Visualization(
+        _as_dimensioned(_kinship_heatmap(K, taxa, title, figsize)),
+        backend,
+        ALL_BACKENDS,
+    )
 
 
 def _kinship_heatmap(
@@ -707,10 +729,16 @@ def pca_plot_2d(
     groups: Vector | None = None,
     title: str = "PCA Plot",
     figsize: tuple[float, float] = (7, 6),
-) -> Dimensioned:
-    """Build a backend-neutral HoloViews PC1/PC2 plot."""
-    return _as_dimensioned(
-        _pca_plot_2d(scores, var_explained, taxa, groups, title, figsize),
+    *,
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
+    """Build a PC1/PC2 visualization with a notebook backend preference."""
+    return Visualization(
+        _as_dimensioned(
+            _pca_plot_2d(scores, var_explained, taxa, groups, title, figsize),
+        ),
+        backend,
+        ALL_BACKENDS,
     )
 
 
@@ -799,8 +827,10 @@ def pca_plot_3d(
     taxa: Vector | None = None,
     groups: Vector | None = None,
     title: str = "3D PCA",
-) -> Dimensioned:
-    """Build a backend-neutral HoloViews 3D PCA plot."""
+    *,
+    backend: ThreeDBackend = "plotly",
+) -> Visualization[ThreeDBackend]:
+    """Build a 3D PCA visualization for Matplotlib or Plotly."""
     if scores.ndim != 2 or scores.shape[1] < 3:
         raise ValueError("scores must be a matrix with at least three components")
     _register_holoviews_backends()
@@ -846,7 +876,7 @@ def pca_plot_3d(
             zlabel=f"PC3 ({pct[2]:.1f}%)",
         )
     )
-    return _as_dimensioned(plot)
+    return Visualization(_as_dimensioned(plot), backend, THREE_D_BACKENDS)
 
 
 def _interactive_manhattan_metadata(
@@ -872,9 +902,15 @@ def gs_scatter(
     taxa: Vector | None = None,
     trait_name: str = "Trait",
     figsize: tuple[float, float] = (6, 5),
-) -> Dimensioned:
-    """Build backend-neutral genomic-selection diagnostics."""
-    return _as_dimensioned(_gs_scatter(observed, predicted, taxa, trait_name, figsize))
+    *,
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
+    """Build genomic-selection diagnostics with a notebook backend preference."""
+    return Visualization(
+        _as_dimensioned(_gs_scatter(observed, predicted, taxa, trait_name, figsize)),
+        backend,
+        ALL_BACKENDS,
+    )
 
 
 def _gs_scatter(
@@ -967,10 +1003,16 @@ def phenotype_distribution(
     trait_name: str = "Trait",
     significant_snp_geno: Vector | None = None,
     figsize: tuple[float, float] = (6, 4),
-) -> Dimensioned:
-    """Build a backend-neutral phenotype distribution."""
-    return _as_dimensioned(
-        _phenotype_distribution(y, trait_name, significant_snp_geno, figsize),
+    *,
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
+    """Build a phenotype visualization with a notebook backend preference."""
+    return Visualization(
+        _as_dimensioned(
+            _phenotype_distribution(y, trait_name, significant_snp_geno, figsize),
+        ),
+        backend,
+        ALL_BACKENDS,
     )
 
 
@@ -1056,7 +1098,8 @@ def multiple_manhattan(
     *,
     title: str = "Multiple Manhattan",
     figsize: tuple[float, float] = (12, 5),
-) -> Dimensioned:
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
     """Build a multi-model Manhattan comparison as a HoloViews overlay."""
     x_values, labels, centers = prepare_genomic_axis(chromosomes, positions)
     _register_holoviews_backends()
@@ -1081,18 +1124,22 @@ def multiple_manhattan(
             )
         )
     ticks = list(zip(centers.tolist(), labels, strict=True))
-    return _as_dimensioned(
-        holoviews.Overlay(layers).opts(
-            options.Overlay(
-                backend="matplotlib",
-                fig_inches=figsize,
-                title=title,
-                xlabel="Chromosome",
-                ylabel="-log10(p)",
-                xticks=ticks,
-                show_legend=True,
-            )
+    return Visualization(
+        _as_dimensioned(
+            holoviews.Overlay(layers).opts(
+                options.Overlay(
+                    backend="matplotlib",
+                    fig_inches=figsize,
+                    title=title,
+                    xlabel="Chromosome",
+                    ylabel="-log10(p)",
+                    xticks=ticks,
+                    show_legend=True,
+                )
+            ),
         ),
+        backend,
+        ALL_BACKENDS,
     )
 
 
@@ -1101,7 +1148,8 @@ def multiple_qq(
     *,
     title: str = "Multiple QQ",
     figsize: tuple[float, float] = (6, 6),
-) -> Dimensioned:
+    backend: OutputBackend = "bokeh",
+) -> Visualization[OutputBackend]:
     """Build a multi-model QQ comparison as a HoloViews overlay."""
     _register_holoviews_backends()
     holoviews = cast(_HoloViewsModule, _runtime_object(hv))
@@ -1143,13 +1191,17 @@ def multiple_qq(
             )
         )
     )
-    return _as_dimensioned(
-        holoviews.Overlay(layers).opts(
-            options.Overlay(
-                backend="matplotlib",
-                fig_inches=figsize,
-                title=title,
-                show_legend=True,
-            )
+    return Visualization(
+        _as_dimensioned(
+            holoviews.Overlay(layers).opts(
+                options.Overlay(
+                    backend="matplotlib",
+                    fig_inches=figsize,
+                    title=title,
+                    show_legend=True,
+                )
+            ),
         ),
+        backend,
+        ALL_BACKENDS,
     )

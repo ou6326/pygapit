@@ -8,6 +8,10 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Added
 
+- Typed `Visualization` objects with independently assignable notebook
+  backends, direct native `render()`, and format-aware saving. Static formats
+  select Matplotlib automatically; 3D PCA excludes Bokeh.
+
 - Backend-independent Manhattan data and genomic-axis preparation shared by
   Matplotlib, Bokeh, and Plotly renderers.
 - Backend-neutral HoloViews objects for Manhattan, QQ, kinship, PCA, genomic
@@ -33,8 +37,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Store Manhattan hover fields as HoloViews value dimensions instead of
   allocating backend-specific formatted labels.
 - Replace backend-specific plotting arguments and native figure return values
-  with a single HoloViews visualization contract; renderer selection and file
-  output now happen at the output boundary.
+  with a typed HoloViews visualization view; construction selects notebook
+  display preference while `render()` and `save_plot()` handle output.
 - Use a linear, low-allocation genomic-axis path when chromosome blocks are
   contiguous while preserving arbitrary-order input compatibility.
 - Reuse zero-copy chromosome slices while constructing exact Manhattan points

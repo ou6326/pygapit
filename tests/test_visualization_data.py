@@ -180,9 +180,9 @@ def test_manhattan_returns_one_holoviews_object_for_all_backends() -> None:
             large_data="points",
         )
         assert store.current_backend == "plotly"
-        matplotlib_figure = holoviews.render(plot, backend="matplotlib")
-        plotly_figure = holoviews.render(plot, backend="plotly")
-        bokeh_figure = holoviews.render(plot, backend="bokeh")
+        matplotlib_figure = plot.render("matplotlib")
+        plotly_figure = plot.render("plotly")
+        bokeh_figure = plot.render("bokeh")
         assert isinstance(matplotlib_figure, Figure)
         assert isinstance(plotly_figure, dict)
         assert isinstance(bokeh_figure, BokehFigure)
@@ -203,7 +203,9 @@ def test_manhattan_keeps_hover_metadata_in_dimensions() -> None:
     )
     dimensions = {
         dimension.name
-        for dimension in cast(_DimensionedView, _runtime_object(plot)).dimensions()
+        for dimension in cast(
+            _DimensionedView, _runtime_object(plot.specification)
+        ).dimensions()
     }
     assert {"snp", "chromosome", "position", "p_value", "effect", "maf"} <= dimensions
 
@@ -217,9 +219,9 @@ def test_manhattan_rendering_is_selected_after_construction() -> None:
     )
 
     plot = manhattan(*arguments, large_data="points")
-    static = holoviews.render(plot, backend="matplotlib")
-    plotly = holoviews.render(plot, backend="plotly")
-    bokeh = holoviews.render(plot, backend="bokeh")
+    static = plot.render("matplotlib")
+    plotly = plot.render("plotly")
+    bokeh = plot.render("bokeh")
 
     assert isinstance(static, Figure)
     assert isinstance(plotly, dict)
@@ -235,9 +237,9 @@ def test_manhattan_aggregate_uses_one_color_raster_and_keeps_hits() -> None:
         np.asarray([0.05, 1e-4, 0.2, 0.3]),
     )
     plot = manhattan(*arguments, large_data="aggregate")
-    static = holoviews.render(plot, backend="matplotlib")
-    plotly = holoviews.render(plot, backend="plotly")
-    bokeh = holoviews.render(plot, backend="bokeh")
+    static = plot.render("matplotlib")
+    plotly = plot.render("plotly")
+    bokeh = plot.render("bokeh")
 
     assert isinstance(static, Figure)
     assert isinstance(plotly, dict)
@@ -276,7 +278,7 @@ def test_manhattan_auto_uses_datashader_at_marker_threshold(
         large_data="auto",
     )
 
-    figure = holoviews.render(plot, backend="matplotlib")
+    figure = plot.render("matplotlib")
     assert len(figure.axes[0].images) == 1
     plt.close(figure)
 
@@ -291,10 +293,12 @@ def test_pca_3d_returns_holoviews_scatter_with_metadata() -> None:
 
     dimensions = {
         dimension.name
-        for dimension in cast(_DimensionedView, _runtime_object(plot)).dimensions()
+        for dimension in cast(
+            _DimensionedView, _runtime_object(plot.specification)
+        ).dimensions()
     }
     assert dimensions >= {"taxa", "group"}
-    figure = holoviews.render(plot, backend="plotly")
+    figure = plot.render("plotly")
     assert isinstance(figure, dict)
 
 
@@ -308,37 +312,25 @@ def test_pca_3d_validates_hover_metadata_lengths() -> None:
 
 
 def test_static_holoviews_diagnostics_cover_specialized_layers() -> None:
-    qq = holoviews.render(qq_plot(np.asarray([0.5, 0.1, 0.01])), backend="matplotlib")
-    kinship = holoviews.render(
-        kinship_heatmap(
-            np.asarray([[1.0, 0.2], [0.2, 1.0]]),
-            taxa=np.asarray(["sample-a", "sample-b"]),
-        ),
-        backend="matplotlib",
-    )
-    pca = holoviews.render(
-        pca_plot_2d(
-            np.asarray([[1.0, 2.0], [3.0, 4.0]]),
-            np.asarray([0.6, 0.3]),
-            taxa=np.asarray(["sample-a", "sample-b"]),
-            groups=np.asarray(["group-1", "group-2"]),
-        ),
-        backend="matplotlib",
-    )
-    gs = holoviews.render(
-        gs_scatter(
-            np.asarray([1.0, 2.0, 3.0]),
-            np.asarray([1.1, 1.9, 3.2]),
-        ),
-        backend="matplotlib",
-    )
-    phenotype = holoviews.render(
-        phenotype_distribution(
-            np.asarray([1.0, 1.5, 2.0, 2.5]),
-            significant_snp_geno=np.asarray([0, 1, 2, 2]),
-        ),
-        backend="matplotlib",
-    )
+    qq = qq_plot(np.asarray([0.5, 0.1, 0.01])).render("matplotlib")
+    kinship = kinship_heatmap(
+        np.asarray([[1.0, 0.2], [0.2, 1.0]]),
+        taxa=np.asarray(["sample-a", "sample-b"]),
+    ).render("matplotlib")
+    pca = pca_plot_2d(
+        np.asarray([[1.0, 2.0], [3.0, 4.0]]),
+        np.asarray([0.6, 0.3]),
+        taxa=np.asarray(["sample-a", "sample-b"]),
+        groups=np.asarray(["group-1", "group-2"]),
+    ).render("matplotlib")
+    gs = gs_scatter(
+        np.asarray([1.0, 2.0, 3.0]),
+        np.asarray([1.1, 1.9, 3.2]),
+    ).render("matplotlib")
+    phenotype = phenotype_distribution(
+        np.asarray([1.0, 1.5, 2.0, 2.5]),
+        significant_snp_geno=np.asarray([0, 1, 2, 2]),
+    ).render("matplotlib")
 
     assert all(
         isinstance(figure, Figure) for figure in (qq, kinship, pca, gs, phenotype)
@@ -389,8 +381,8 @@ def test_two_dimensional_diagnostics_render_with_interactive_backends() -> None:
         multiple_qq(model_p_values),
     )
 
-    bokeh_figures = [holoviews.render(plot, backend="bokeh") for plot in plots]
-    plotly_figures = [holoviews.render(plot, backend="plotly") for plot in plots]
+    bokeh_figures = [plot.render("bokeh") for plot in plots]
+    plotly_figures = [plot.render("plotly") for plot in plots]
 
     assert all(isinstance(figure, BokehFigure) for figure in bokeh_figures)
     assert all(isinstance(figure, dict) for figure in plotly_figures)
@@ -428,7 +420,11 @@ def test_optional_static_styles_do_not_leak_rc_changes(
         np.asarray([0.05]),
         large_data="points",
     )
-    save_plot(plot, tmp_path / "styled.pdf", style=cast("StaticStyle", style))
+    save_plot(
+        plot,
+        tmp_path / "styled.pdf",
+        style=cast("StaticStyle", style),
+    )
 
     assert plt.rcParams["axes.facecolor"] == facecolor
     assert list(plt.rcParams["font.family"]) == font_family
@@ -500,3 +496,78 @@ def test_manhattan_validates_maf_length() -> None:
             np.asarray([0.05, 1e-4]),
             maf=np.asarray([0.1]),
         )
+
+
+def test_notebook_views_keep_independent_backends() -> None:
+    store = cast(_HoloViewsStore, cast(object, hv.Store))
+    before = store.current_backend
+    plot = qq_plot(np.asarray([0.5, 0.1, 0.01]), backend="bokeh")
+    other = qq_plot(np.asarray([0.5, 0.1, 0.01]), backend="plotly")
+    specification = plot.specification
+    for backend in ("bokeh", "matplotlib", "plotly", "bokeh"):
+        plot.backend = backend
+        data, _metadata = plot._repr_mimebundle_()
+        assert "text/html" in data
+        assert plot.specification is specification
+        assert store.current_backend == before
+        assert other.backend == "plotly"
+    data, metadata = plot._repr_mimebundle_(include=["text/html"])
+    assert set(data) == {"text/html"}
+    assert set(metadata) <= set(data)
+
+
+def test_aggregate_notebook_view_keeps_dynamic_graph() -> None:
+    plot = manhattan(
+        np.asarray(["a", "b"]),
+        np.asarray(["1", "2"]),
+        np.asarray([1.0, 2.0]),
+        np.asarray([0.01, 0.5]),
+        large_data="aggregate",
+        backend="bokeh",
+    )
+    data, _metadata = plot._repr_mimebundle_()
+    assert "text/html" in data
+    assert "application/vnd.holoviews_exec.v0+json" in data
+
+
+def test_save_uses_preferred_backend_and_preserves_view(tmp_path: Path) -> None:
+    plot = qq_plot(np.asarray([0.5, 0.1, 0.01]), backend="bokeh")
+    save_plot(plot, tmp_path / "qq.html")
+    save_plot(plot, tmp_path / "qq.pdf")
+    save_plot(plot, tmp_path / "styled.pdf", style="science")
+    assert (tmp_path / "qq.html").stat().st_size > 100
+    assert (tmp_path / "qq.pdf").read_bytes().startswith(b"%PDF")
+    assert (tmp_path / "styled.pdf").read_bytes().startswith(b"%PDF")
+    assert plot.backend == "bokeh"
+
+
+@pytest.mark.parametrize("unsupported", ["bokeh"])
+def test_three_dimensional_view_rejects_bokeh(tmp_path: Path, unsupported: str) -> None:
+    from pygapit.visualization.view import ThreeDBackend
+
+    plot = pca_plot_3d(
+        np.asarray([[1.0, 2.0, 3.0], [2.0, 3.0, 4.0]]), np.asarray([0.5, 0.3, 0.2])
+    )
+    assert plot.backend == "plotly"
+    assert plot.supported_backends == ("matplotlib", "plotly")
+    with pytest.raises(ValueError, match="not supported"):
+        plot.backend = cast(ThreeDBackend, unsupported)
+    with pytest.raises(ValueError, match="not supported"):
+        save_plot(
+            plot, tmp_path / "invalid.html", backend=cast(ThreeDBackend, unsupported)
+        )
+    plot.backend = "matplotlib"
+    data, _metadata = plot._repr_mimebundle_()
+    assert "text/html" in data
+
+
+def test_interactive_output_rejects_matplotlib_style(tmp_path: Path) -> None:
+    from collections.abc import Callable
+
+    from pygapit.visualization.view import OutputBackend, Visualization
+
+    # Exercise an untyped caller; the typed public call is rejected statically.
+    untyped_save = cast(Callable[..., None], save_plot)
+    plot: Visualization[OutputBackend] = qq_plot(np.asarray([0.5, 0.1]))
+    with pytest.raises(ValueError, match="only for the matplotlib"):
+        untyped_save(plot, tmp_path / "invalid.html", backend="bokeh", style="science")

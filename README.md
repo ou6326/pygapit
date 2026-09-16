@@ -647,22 +647,21 @@ print(f"λ = {lam:.3f},  {sig} significant SNPs")
 gs = gblup(y, X0, K)
 print(f"Prediction accuracy (r): {np.corrcoef(y, gs.prediction)[0, 1]:.3f}")
 
-# Plots are HoloViews objects; choose the renderer at the output boundary.
-import holoviews as hv
-
+# Plots carry a typed notebook backend preference.
 manhattan_plot = manhattan(snp_names, chromosomes, positions, result.p_values)
 qq = qq_plot(result.p_values)
-hv.save(manhattan_plot, "manhattan.pdf", backend="matplotlib")
-hv.save(qq, "qq.pdf", backend="matplotlib")
+save_plot(manhattan_plot, "manhattan.pdf")
+save_plot(qq, "qq.pdf")
 ```
 
 ### HoloViews plots and output backends
 
-Every plotting function returns a HoloViews object. The plot data, dimensions,
-overlays, and large-data strategy are therefore independent of the final
-renderer. Choose Matplotlib for report-ready static output, or Bokeh/Plotly for
-interactive exploration, when calling `holoviews.render()` or
-`holoviews.save()`.
+Every plotting function returns a thin `Visualization` with a typed set of
+supported backends and a preferred display backend. Use `backend="bokeh"`,
+`"matplotlib"`, or `"plotly"` at construction to choose how that object displays
+in Jupyter. The default is Bokeh for 2D plots and Plotly for 3D PCA. Assigning
+`plot.backend` changes only that object and never changes the current global
+HoloViews backend.
 
 | Function | HoloViews element | Matplotlib | Bokeh | Plotly | Datashader |
 |---|---|---:|---:|---:|---:|
@@ -675,18 +674,19 @@ interactive exploration, when calling `holoviews.render()` or
 | `phenotype_distribution` | Overlay | Yes | Yes | Yes | No |
 
 The Bokeh renderer does not implement HoloViews `Scatter3D`; use Matplotlib or
-Plotly for `pca_plot_3d`. The return value is still a HoloViews object, so this
-renderer limitation stays outside pyGAPIT's plotting API.
+Plotly for `pca_plot_3d`. Its backend argument, mutable `backend` property,
+`render()`, and `save_plot()` carry this restriction in their types, and
+unsupported selections raise at runtime.
 
 Seaborn and SciencePlots remain optional Matplotlib output styles. They are
-deliberately not plot-construction arguments: use `save_plot()` when a
-style preset is wanted, or call HoloViews directly. `save_plot()` applies its
-style in a local context and falls back with a warning when the optional
+deliberately not plot-construction arguments: use `save_plot()` when a style
+preset is wanted. A static filename or style selects Matplotlib automatically.
+The helper applies the style in a local context and falls back with a warning when the optional
 `pygapit-ng[styles]` extra is unavailable. The SciencePlots preset includes
 `no-latex`, so a TeX installation is not required.
 
 ```python
-# One plot specification, three output choices.
+# One HoloViews specification with a per-object notebook backend.
 plot = manhattan(
     snp_names,
     chromosomes,
@@ -694,13 +694,21 @@ plot = manhattan(
     result.p_values,
     effects=result.effects,
 )
-hv.save(plot, "manhattan.pdf", backend="matplotlib")
-hv.save(plot, "manhattan.html", backend="bokeh")
-plotly_figure = hv.render(plot, backend="plotly")
+plot  # Last expression in Jupyter: interactive Bokeh display.
+plot.backend = "plotly"
+plot  # The same object now displays with Plotly.
+
+save_plot(plot, "manhattan.html")  # Uses plot.backend.
+save_plot(plot, "manhattan.pdf")  # Static suffix selects Matplotlib.
+matplotlib_figure = plot.render("matplotlib")
 
 # Optional publication style, applied only while saving this figure.
 save_plot(plot, "manhattan-science.pdf", style="science")
 ```
+
+Advanced HoloViews composition remains available through
+`plot.specification`; ordinary notebook, rendering, and saving workflows do not
+need to unwrap it.
 
 For 250,000 markers or more, `large_data="auto"` uses HoloViews and
 Datashader to retain the maximum `-log10(p)` value in each output pixel. Exact

@@ -266,8 +266,6 @@ print(f"h^2={gs_s.h2:.3f}, r={r_acc_s:.4f} [{time.time() - t0:.1f}s]")
 # ─────────────────────────────────────────────────────────────────────────────
 print("\n-- Section 6: Generating plots -----------------------------")
 
-# Manhattan and QQ comparisons use the same backend-neutral HoloViews contract
-# as the public plotting API.
 model_p_values = list(gwas_results.items())
 plot = multiple_manhattan(
     chromosomes,

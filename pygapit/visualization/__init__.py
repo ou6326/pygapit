@@ -1,5 +1,5 @@
 from .data import ManhattanPlotData, prepare_genomic_axis, prepare_manhattan_data
-from .output import OutputBackend, StaticStyle, save_plot
+from .output import StaticStyle, save_plot
 from .plots import (
     LargeDataMode,
     gs_scatter,
@@ -10,12 +10,14 @@ from .plots import (
     phenotype_distribution,
     qq_plot,
 )
+from .view import OutputBackend, Visualization
 
 __all__ = [
     "LargeDataMode",
     "ManhattanPlotData",
     "OutputBackend",
     "StaticStyle",
+    "Visualization",
     "gs_scatter",
     "kinship_heatmap",
     "manhattan",

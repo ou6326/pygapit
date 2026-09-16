@@ -7,11 +7,13 @@ import typing as t
 import warnings
 from contextlib import contextmanager
 from os import fspath
+from os.path import splitext
 from typing import Literal, cast, overload
 
 import holoviews as hv
 import matplotlib.pyplot as plt
-from holoviews.core import Dimensioned
+
+from .view import BackendT, OutputBackend, Visualization
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -19,7 +21,18 @@ if t.TYPE_CHECKING:
     from os import PathLike
 
 StaticStyle = Literal["pygapit", "seaborn", "science"]
-OutputBackend = Literal["matplotlib", "bokeh", "plotly"]
+_STATIC_SUFFIXES = frozenset({
+    ".eps",
+    ".jpeg",
+    ".jpg",
+    ".pdf",
+    ".png",
+    ".ps",
+    ".svg",
+    ".tif",
+    ".tiff",
+    ".webp",
+})
 
 
 @contextmanager
@@ -54,40 +67,63 @@ def matplotlib_style(style: StaticStyle) -> Generator[None]:
 
 @overload
 def save_plot(
-    plot: Dimensioned,
+    plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,
-    backend: Literal["matplotlib"] = "matplotlib",
+    backend: None = None,
     style: StaticStyle = "pygapit",
 ) -> None: ...
 
 
 @overload
 def save_plot(
-    plot: Dimensioned,
+    plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,
-    backend: Literal["bokeh", "plotly"],
+    backend: Literal["matplotlib"],
+    style: StaticStyle = "pygapit",
+) -> None: ...
+
+
+@overload
+def save_plot(
+    plot: Visualization[BackendT],
+    path: str | PathLike[str],
+    *,
+    backend: BackendT,
     style: Literal["pygapit"] = "pygapit",
 ) -> None: ...
 
 
 def save_plot(
-    plot: Dimensioned,
+    plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,
-    backend: OutputBackend = "matplotlib",
+    backend: OutputBackend | None = None,
     style: StaticStyle = "pygapit",
 ) -> None:
-    """Save a HoloViews object at pyGAPIT's automatic-output boundary."""
-    if backend == "matplotlib":
+    """Save using an explicit backend or a format-appropriate default.
+
+    Static image extensions and Matplotlib styles select Matplotlib. Other
+    formats use the visualization's current notebook backend.
+    """
+    path_string = fspath(path)
+    if backend is not None:
+        selected = backend
+    elif style != "pygapit" or splitext(path_string)[1].lower() in _STATIC_SUFFIXES:
+        selected = "matplotlib"
+    else:
+        selected = plot.backend
+    if selected not in plot.supported_backends:
+        raise ValueError(f"backend {selected!r} is not supported by this plot")
+    if selected == "matplotlib":
         with matplotlib_style(style):
             hv.save(  # pyright: ignore[reportUnknownMemberType]
-                plot, fspath(path), backend=backend
+                plot.specification, path_string, backend=selected
             )
         return
     if style != "pygapit":
         raise ValueError("style is available only for the matplotlib backend")
     hv.save(  # pyright: ignore[reportUnknownMemberType]
-        plot, fspath(path), backend=backend
+        plot.specification, path_string, backend=selected
     )

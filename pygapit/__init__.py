@@ -78,6 +78,7 @@ from .visualization.plots import (
     phenotype_distribution,
     qq_plot,
 )
+from .visualization.view import Visualization
 
 __all__ = [
     "GAPIT",
@@ -104,6 +105,7 @@ __all__ = [
     "PredictionCVResult",
     "RRBLUPResult",
     "SUPERSelectionResult",
+    "Visualization",
     "ZarrGenotypeStore",
     "align_inputs",
     "align_taxa",
