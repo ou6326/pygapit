@@ -34,7 +34,7 @@ failure.
 
 | Model | Public interface | GAPIT 3.5 numerical evidence | Official maize regression | Current boundary coverage |
 |---|---|---|---|---|
-| GLM | `GAPIT(model="GLM")` | R-validated top-level workflow | Full MAF-filtered marker set | PCA, covariates, supplied kinship alignment, shuffled labels, and missing phenotypes |
+| GLM | `GAPIT(model="GLM")` | R-validated top-level workflow | Full MAF-filtered marker set | Missing-genotype imputation, phenotype subsetting, MAF filtering, PCA/kinship, covariates, supplied kinship alignment, shuffled labels, final-table ordering, and BH adjustment |
 | MLM | `GAPIT(model="MLM")` | R-validated top-level workflow and EMMA/P3D statistics | Full MAF-filtered marker set | Variance components, monomorphic markers, missing genotypes, and data alignment |
 | CMLM | `GAPIT(model="CMLM")` | R-validated top-level workflow | Full MAF-filtered marker set with fixed 40-group compression | Fixed and automatic compression, native incidence matrices, redundant levels, near-collinear covariates, and invalid designs |
 | MLMM | `GAPIT(model="MLMM")` | R-validated top-level workflow | Full MAF-filtered marker set without added covariates | Forward/backward selection, final marker statistics, corrected extended BIC, and indefinite-kinship rejection |
