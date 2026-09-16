@@ -11,8 +11,8 @@ import pytest
 from numpy.typing import NDArray
 
 from pygapit.gapit import GAPIT
-from pygapit.gwas.mlmm import _ext_bic, _normalize_kinship
-from tests.cross_language.r_bridge import RBridge
+from pygapit.gwas.mlmm import _ext_bic, _mlmm_gwas_with_state_paths, _normalize_kinship
+from tests.cross_language.r_bridge import RBridge, RList
 from tests.cross_language.workflow import (
     assert_top_level_preparation,
     make_workflow_inputs,
@@ -131,8 +131,25 @@ def test_top_level_mlmm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
         "      effect=as.numeric(fit$opt_extBIC$out$effect),"
         "      cof=as.character(fit$opt_extBIC$cof),"
         "      seq=as.numeric(fit$seqQTN),"
-        "      table=fit$step_table)"
-        "}"
+        "      table=fit$step_table,"
+        "      forward=vapply(fit$pval_step, function(step) {"
+        "        cof <- as.character(step$cof);"
+        "        if (length(cof) == 1 && (is.na(cof) || cof == 'NA')) ''"
+        "        else paste(cof, collapse=',')"
+        "      }, character(1)),"
+        "      backward=local({"
+        "        rows <- fit$step_table[grepl('^bwd', fit$step_table$step_), , drop=FALSE];"
+        "        current <- colnames(X)[fit$seqQTN];"
+        "        vapply(seq_len(nrow(rows)), function(i) {"
+        "          if (i > 1) {"
+        "            removed <- sub('^-', '', as.character(rows$cof[i]));"
+        "            if (!is.na(removed) && removed != 'NA') current <<- setdiff(current, removed);"
+        "          };"
+        "          paste(current, collapse=',')"
+        "        }, character(1))"
+        "      }))"
+        "}",
+        returns=RList,
     )
     marker_names = inputs.marker_map["SNP"].astype(str).tolist()
     r_result = r_run(
@@ -176,6 +193,25 @@ def test_top_level_mlmm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
     ]
     r_cofactors = np.asarray(r_bridge.component(r_result, "cof"), dtype=np.str_)
     r_sequence = r_bridge.float_array(r_bridge.component(r_result, "seq"))
+
+    _, state_paths = _mlmm_gwas_with_state_paths(
+        inputs.phenotype_values,
+        design,
+        inputs.genotype_values,
+        inputs.kinship_values,
+        max_steps=3,
+    )
+    r_forward = np.asarray(r_bridge.component(r_result, "forward"), dtype=np.str_)
+    r_backward = np.asarray(r_bridge.component(r_result, "backward"), dtype=np.str_)
+
+    def state_names(states: tuple[NDArray[np.int64], ...]) -> NDArray[np.str_]:
+        return np.asarray(
+            [",".join(np.asarray(marker_names)[state]) for state in states],
+            dtype=np.str_,
+        )
+
+    nt.assert_array_equal(state_names(state_paths.forward), r_forward)
+    nt.assert_array_equal(state_names(state_paths.backward), r_backward)
 
     nt.assert_array_equal(py_result.QTNs + 1, r_sequence.astype(np.int64))
     nt.assert_array_equal(

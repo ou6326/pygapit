@@ -54,6 +54,26 @@ class MLMMResult:
             object.__setattr__(self, field, readonly_copy(getattr(self, field)))
 
 
+@dataclass(frozen=True, slots=True)
+class _MLMMStatePaths:
+    """Internal forward/backward cofactor states for regression auditing."""
+
+    forward: tuple[IntVector, ...]
+    backward: tuple[IntVector, ...]
+
+    def __post_init__(self) -> None:
+        object.__setattr__(
+            self,
+            "forward",
+            tuple(readonly_copy(state) for state in self.forward),
+        )
+        object.__setattr__(
+            self,
+            "backward",
+            tuple(readonly_copy(state) for state in self.backward),
+        )
+
+
 def _normalize_kinship(K: FloatMatrix) -> FloatMatrix:
     """Apply the GAPIT MLMM kinship scaling without changing its structure."""
     if not np.allclose(K, K.T, rtol=1e-10, atol=1e-12):
@@ -342,7 +362,7 @@ def _cofactor_design(
     return design
 
 
-def mlmm_gwas(
+def _mlmm_gwas_with_state_paths(
     y: FloatVector,
     X0: FloatMatrix,
     GD: FloatMatrix | GenotypeStore,
@@ -351,7 +371,7 @@ def mlmm_gwas(
     ngrids: int = 100,
     *,
     marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
-) -> MLMMResult:
+) -> tuple[MLMMResult, _MLMMStatePaths]:
     """
     MLMM genome-wide association.
     Translates mlmm() from GAPIT.mlmm.R
@@ -366,7 +386,7 @@ def mlmm_gwas(
 
     Returns
     -------
-    MLMMResult with final p-values and selected QTN indices
+    Result plus the internal forward/backward state paths.
     """
     marker_workspace_mib = validate_marker_workspace_mib(marker_workspace_mib)
     genotype = as_genotype_store(GD)
@@ -392,6 +412,7 @@ def mlmm_gwas(
         ))
 
     cofactors: list[int] = []
+    forward_states: list[IntVector] = [np.array([], dtype=int)]
     record_model(cofactors)
 
     # ── Initial scan without cofactors ───────────────────────────────────
@@ -423,6 +444,7 @@ def mlmm_gwas(
                 marker_workspace_mib,
             )
             record_model(cofactors)
+            forward_states.append(np.asarray(cofactors, dtype=int))
         except (ValueError, np.linalg.LinAlgError, FloatingPointError):
             cofactors.pop()
             break
@@ -432,8 +454,9 @@ def mlmm_gwas(
     # ── Backward elimination ─────────────────────────────────────────────
     # GAPIT builds a complete backward path from the final forward model.
     backward_cofactors = cofactors.copy()
+    backward_states: list[IntVector] = [np.asarray(backward_cofactors, dtype=int)]
     backward_variance_fit: GWASResult | None = result
-    while len(backward_cofactors) > 1:
+    while backward_cofactors:
         dropped = _least_significant_cofactor(
             y,
             X0,
@@ -445,6 +468,7 @@ def mlmm_gwas(
         )
         backward_cofactors.remove(dropped)
         record_model(backward_cofactors)
+        backward_states.append(np.asarray(backward_cofactors, dtype=int))
         backward_variance_fit = None
 
     def criterion(candidate: tuple[np.float64, list[int]]) -> np.float64:
@@ -473,7 +497,7 @@ def mlmm_gwas(
         variance_fit=final_result,
     )
 
-    return MLMMResult(
+    result = MLMMResult(
         p_values=final_result.p_values,
         effects=final_result.effects,
         se=final_result.se,
@@ -485,3 +509,30 @@ def mlmm_gwas(
         n_steps=len(best_cofactors),
         method="MLMM",
     )
+    return result, _MLMMStatePaths(
+        forward=tuple(forward_states),
+        backward=tuple(backward_states),
+    )
+
+
+def mlmm_gwas(
+    y: FloatVector,
+    X0: FloatMatrix,
+    GD: FloatMatrix | GenotypeStore,
+    K: FloatMatrix,
+    max_steps: int = 10,
+    ngrids: int = 100,
+    *,
+    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
+) -> MLMMResult:
+    """Run MLMM without exposing its internal selection-state trace."""
+    result, _ = _mlmm_gwas_with_state_paths(
+        y,
+        X0,
+        GD,
+        K,
+        max_steps=max_steps,
+        ngrids=ngrids,
+        marker_workspace_mib=marker_workspace_mib,
+    )
+    return result
