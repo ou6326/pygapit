@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Iterable
+from typing import TypeAlias
 
 import pygapit
 import pygapit.gs
@@ -190,8 +191,18 @@ _MODULE_EXPORTS = {
 }
 
 
-def _parameter_names(function: Callable[..., object]) -> tuple[str, ...]:
-    return tuple(inspect.signature(function).parameters)
+_POSITIONAL = inspect.Parameter.POSITIONAL_OR_KEYWORD.name
+_KEYWORD_ONLY = inspect.Parameter.KEYWORD_ONLY.name
+_REQUIRED = inspect.Parameter.empty
+
+SignatureContract: TypeAlias = tuple[tuple[str, str, object], ...]
+
+
+def _signature_contract(function: Callable[..., object]) -> SignatureContract:
+    return tuple(
+        (parameter.name, parameter.kind.name, parameter.default)
+        for parameter in inspect.signature(function).parameters.values()
+    )
 
 
 def test_top_level_exports_are_frozen() -> None:
@@ -204,70 +215,100 @@ def test_subpackage_exports_are_frozen() -> None:
 
 
 def test_storage_boundary_signatures_are_frozen() -> None:
-    signatures: Iterable[tuple[Callable[..., object], tuple[str, ...]]] = (
-        (GenotypeStore.read_markers, ("self", "marker_slice", "sample_indices")),
+    signatures: Iterable[tuple[Callable[..., object], SignatureContract]] = (
+        (
+            GenotypeStore.read_markers,
+            (
+                ("self", _POSITIONAL, _REQUIRED),
+                ("marker_slice", _POSITIONAL, _REQUIRED),
+                ("sample_indices", _POSITIONAL, None),
+            ),
+        ),
         (
             GenotypeView.__init__,
-            ("self", "parent", "sample_indices", "marker_indices"),
+            (
+                ("self", _POSITIONAL, _REQUIRED),
+                ("parent", _POSITIONAL, _REQUIRED),
+                ("sample_indices", _KEYWORD_ONLY, None),
+                ("marker_indices", _KEYWORD_ONLY, None),
+            ),
         ),
-        (GenotypeView.read_markers, ("self", "marker_slice", "sample_indices")),
-        (open_genotype_store, ("path", "backend")),
+        (
+            GenotypeView.read_markers,
+            (
+                ("self", _POSITIONAL, _REQUIRED),
+                ("marker_slice", _POSITIONAL, _REQUIRED),
+                ("sample_indices", _POSITIONAL, None),
+            ),
+        ),
+        (
+            open_genotype_store,
+            (
+                ("path", _POSITIONAL, _REQUIRED),
+                ("backend", _KEYWORD_ONLY, "auto"),
+            ),
+        ),
         (
             write_genotype_store,
-            ("path", "genotype", "backend", "marker_chunk_size"),
+            (
+                ("path", _POSITIONAL, _REQUIRED),
+                ("genotype", _POSITIONAL, _REQUIRED),
+                ("backend", _KEYWORD_ONLY, "auto"),
+                ("marker_chunk_size", _KEYWORD_ONLY, 1024),
+            ),
         ),
         (
             import_hapmap_genotype_store,
             (
-                "store_path",
-                "filepath",
-                "major_allele_zero",
-                "impute_method",
-                "backend",
-                "marker_chunk_size",
+                ("store_path", _POSITIONAL, _REQUIRED),
+                ("filepath", _POSITIONAL, _REQUIRED),
+                ("major_allele_zero", _KEYWORD_ONLY, False),
+                ("impute_method", _KEYWORD_ONLY, "middle"),
+                ("backend", _KEYWORD_ONLY, "auto"),
+                ("marker_chunk_size", _KEYWORD_ONLY, 1024),
             ),
         ),
         (
             import_numeric_genotype_store,
             (
-                "store_path",
-                "gd_path",
-                "gm_path",
-                "impute_method",
-                "backend",
-                "marker_chunk_size",
-                "marker_workspace_mib",
+                ("store_path", _POSITIONAL, _REQUIRED),
+                ("gd_path", _POSITIONAL, _REQUIRED),
+                ("gm_path", _POSITIONAL, _REQUIRED),
+                ("impute_method", _KEYWORD_ONLY, "middle"),
+                ("backend", _KEYWORD_ONLY, "auto"),
+                ("marker_chunk_size", _KEYWORD_ONLY, 1024),
+                ("marker_workspace_mib", _KEYWORD_ONLY, 32.0),
             ),
         ),
     )
     for function, expected in signatures:
-        assert _parameter_names(function) == expected
+        assert _signature_contract(function) == expected
 
 
 def test_visualization_boundary_signatures_are_frozen() -> None:
-    assert _parameter_names(manhattan) == (
-        "snp_names",
-        "chromosomes",
-        "positions",
-        "p_values",
-        "title",
-        "significance_threshold",
-        "suggestive_threshold",
-        "highlight_snps",
-        "effects",
-        "maf",
-        "figsize",
-        "point_size",
-        "large_data",
-        "backend",
+    assert _signature_contract(manhattan) == (
+        ("snp_names", _POSITIONAL, _REQUIRED),
+        ("chromosomes", _POSITIONAL, _REQUIRED),
+        ("positions", _POSITIONAL, _REQUIRED),
+        ("p_values", _POSITIONAL, _REQUIRED),
+        ("title", _KEYWORD_ONLY, "Manhattan Plot"),
+        ("significance_threshold", _KEYWORD_ONLY, None),
+        ("suggestive_threshold", _KEYWORD_ONLY, None),
+        ("highlight_snps", _KEYWORD_ONLY, None),
+        ("effects", _KEYWORD_ONLY, None),
+        ("maf", _KEYWORD_ONLY, None),
+        ("figsize", _KEYWORD_ONLY, (14, 5)),
+        ("point_size", _KEYWORD_ONLY, 1.5),
+        ("large_data", _KEYWORD_ONLY, "auto"),
+        ("backend", _KEYWORD_ONLY, "bokeh"),
     )
-    assert _parameter_names(pca_plot_3d) == (
-        "scores",
-        "var_explained",
-        "taxa",
-        "groups",
-        "title",
-        "backend",
+    assert _signature_contract(pca_plot_3d) == (
+        ("scores", _POSITIONAL, _REQUIRED),
+        ("var_explained", _POSITIONAL, _REQUIRED),
+        ("taxa", _POSITIONAL, None),
+        ("groups", _POSITIONAL, None),
+        ("title", _POSITIONAL, "3D PCA"),
+        ("backend", _KEYWORD_ONLY, "plotly"),
     )
 
     # Static lookup keeps this runtime contract check independent of overload
@@ -276,8 +317,16 @@ def test_visualization_boundary_signatures_are_frozen() -> None:
     output = inspect.getattr_static(pygapit.visualization, "save_plot")
     assert callable(render)
     assert callable(output)
-    assert _parameter_names(render) == ("self", "backend")
-    assert _parameter_names(output) == ("plot", "path", "backend", "style")
+    assert _signature_contract(render) == (
+        ("self", _POSITIONAL, _REQUIRED),
+        ("backend", _POSITIONAL, None),
+    )
+    assert _signature_contract(output) == (
+        ("plot", _POSITIONAL, _REQUIRED),
+        ("path", _POSITIONAL, _REQUIRED),
+        ("backend", _KEYWORD_ONLY, None),
+        ("style", _KEYWORD_ONLY, "pygapit"),
+    )
 
 
 def test_removed_plotting_api_is_not_reexported() -> None:
