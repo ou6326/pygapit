@@ -25,10 +25,12 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_mlm.py`: EMMA null-model REML likelihood, variance components, and heritability, plus SNP-level EMMAX/P3D p-values, effects, standard errors, and test statistics
 - `test_mlm_boundaries.py`: monomorphic and missing-genotype P3D behavior
 - `test_workflows.py`: public GLM and MLM orchestration with PCA, covariates,
-  supplied kinship, shuffled labels, and missing phenotype observations. A
-  complete GLM preprocessing regression additionally connects GAPIT's numeric
-  imputation to phenotype subsetting, MAF filtering, PCA, VanRaden kinship,
-  marker statistics, ordering, MAF/nobs fields, and BH-adjusted final output.
+  supplied kinship, shuffled labels, and missing phenotype observations.
+  Complete GLM and MLM preprocessing regressions additionally connect GAPIT's
+  numeric `Middle` imputation to phenotype subsetting, MAF filtering, PCA, VanRaden
+  kinship, marker statistics, ordering, MAF/nobs fields, and BH-adjusted final
+  output. The MLM path also covers P3D/REML variance components and
+  heritability from the same raw input and preprocessing order.
 - `test_official_data.py`: public GLM, MLM, CMLM, MLMM, FarmCPU, BLINK, and
   gBLUP workflows on GAPIT's bundled maize diversity panel. Comparisons cover
   every MAF-filtered marker, PCA, iterative-model pseudo-QTNs, effects and

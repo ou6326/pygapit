@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 from pathlib import Path
 
 import numpy as np
@@ -10,7 +11,7 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from pygapit.gapit import GAPIT, GAPITResult
-from tests.cross_language.r_bridge import RBridge
+from tests.cross_language.r_bridge import RBridge, RList
 from tests.cross_language.workflow import (
     WorkflowInputs,
     assert_top_level_preparation,
@@ -18,6 +19,27 @@ from tests.cross_language.workflow import (
     r_design_with_pca,
     r_scalar,
 )
+
+FloatArray = NDArray[np.float64]
+StringArray = NDArray[np.str_]
+
+
+@dataclass(frozen=True, slots=True)
+class _PreprocessingReference:
+    """Shared GAPIT preprocessing reference for complete workflow tests."""
+
+    phenotype: pd.DataFrame
+    genotype: pd.DataFrame
+    marker_map: pd.DataFrame
+    filtered_map: pd.DataFrame
+    taxa: StringArray
+    phenotype_values: FloatArray
+    genotype_values: FloatArray
+    maf: FloatArray
+    pca_scores: FloatArray
+    design: FloatArray
+    kinship: FloatArray
+    output_order: NDArray[np.intp]
 
 
 def _run_python_workflow(inputs: WorkflowInputs, model: str) -> GAPITResult:
@@ -38,6 +60,51 @@ def _run_python_workflow(inputs: WorkflowInputs, model: str) -> GAPITResult:
     assert result.pca is not None
     assert result.kinship is not None
     return result
+
+
+def _run_r_mlm(
+    r_bridge: RBridge,
+    r_root: Path,
+    phenotype: FloatArray,
+    genotype: FloatArray,
+    kinship: FloatArray,
+    design: FloatArray,
+) -> RList:
+    """Run GAPIT's EMMAX/P3D implementation on prepared arrays."""
+    for filename in (
+        "GAPIT.emma.R",
+        "GAPIT.replaceNaN.R",
+        "GAPIT.emma.REMLE.R",
+        "GAPIT.Timmer.R",
+        "GAPIT.Memory.R",
+    ):
+        r_bridge.source(r_root, filename)
+    r_mlm = r_bridge.source_function(
+        r_root,
+        "GAPIT.EMMAxP3D.R",
+        "GAPIT.EMMAxP3D",
+        returns=RList,
+    )
+    r_null = r_bridge.evaluate("NULL")
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(phenotype), dtype=np.float64),
+        design[:, 1:],
+    ])
+    return r_mlm(
+        ys=r_bridge.matrix(phenotype[np.newaxis, :]),
+        xs=r_bridge.matrix(genotype),
+        K=r_bridge.matrix(kinship),
+        X0=r_bridge.matrix(design),
+        CVI=r_bridge.matrix(covariates_with_taxa),
+        file_from=1,
+        file_to=1,
+        file_fragment=genotype.shape[1],
+        fullGD=True,
+        SNP_P3D=True,
+        Timmer=r_null,
+        Memory=r_null,
+        optOnly=False,
+    )
 
 
 def test_top_level_glm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
@@ -100,34 +167,13 @@ def test_top_level_mlm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
         fixed_gapit_inputs,
     )
     design, r_scores = r_design_with_pca(r_bridge, r_root, inputs, pca_total=2)
-    covariates_with_taxa = np.column_stack([
-        np.arange(len(inputs.taxa), dtype=np.float64),
-        design[:, 1:],
-    ])
-    for filename in (
-        "GAPIT.emma.R",
-        "GAPIT.replaceNaN.R",
-        "GAPIT.emma.REMLE.R",
-        "GAPIT.Timmer.R",
-        "GAPIT.Memory.R",
-    ):
-        r_bridge.source(r_root, filename)
-    r_mlm = r_bridge.source_function(r_root, "GAPIT.EMMAxP3D.R", "GAPIT.EMMAxP3D")
-    r_null = r_bridge.evaluate("NULL")
-    r_result = r_mlm(
-        ys=r_bridge.matrix(inputs.phenotype_values[np.newaxis, :]),
-        xs=r_bridge.matrix(inputs.genotype_values),
-        K=r_bridge.matrix(inputs.kinship_values),
-        X0=r_bridge.matrix(design),
-        CVI=r_bridge.matrix(covariates_with_taxa),
-        file_from=1,
-        file_to=1,
-        file_fragment=inputs.genotype_values.shape[1],
-        fullGD=True,
-        SNP_P3D=True,
-        Timmer=r_null,
-        Memory=r_null,
-        optOnly=False,
+    r_result = _run_r_mlm(
+        r_bridge,
+        r_root,
+        inputs.phenotype_values,
+        inputs.genotype_values,
+        inputs.kinship_values,
+        design,
     )
     py_result = _run_python_workflow(inputs, "MLM")
 
@@ -163,12 +209,12 @@ def test_top_level_mlm_with_pca_cv_ki_and_missing_phenotype_matches_gapit(
     nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-6, atol=1e-12)
 
 
-def test_top_level_glm_preprocessing_and_final_table_match_gapit(
+def _prepare_complete_workflow_reference(
     r_bridge: RBridge,
     r_root: Path,
     fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
-) -> None:
-    """Connect R imputation, MAF, PCA/K, scan, and final-table evidence."""
+) -> _PreprocessingReference:
+    """Run GAPIT's imputation, phenotype subset, MAF, PCA, and kinship steps."""
     phenotype, genotype, marker_map = (frame.copy() for frame in fixed_gapit_inputs)
     phenotype.loc[3, "Trait"] = np.nan
     genotype.iloc[0, 1] = np.nan
@@ -207,7 +253,7 @@ def test_top_level_glm_preprocessing_and_final_table_match_gapit(
     r_scores_with_taxa = r_bridge.float_array(r_bridge.component(r_pca_result, "PCs"))
     if r_scores_with_taxa.shape[0] != len(analysis_phenotype):
         r_scores_with_taxa = r_scores_with_taxa.T
-    r_scores = r_scores_with_taxa[:, 1:3]
+    r_scores = r_scores_with_taxa[:, 1:3].copy()
     design = np.column_stack([np.ones(len(analysis_phenotype)), r_scores])
 
     r_kinship = r_bridge.source_function(
@@ -217,12 +263,104 @@ def test_top_level_glm_preprocessing_and_final_table_match_gapit(
     )
     expected_kinship = r_bridge.float_array(
         r_kinship(r_bridge.matrix(filtered_genotypes))
+    ).copy()
+
+    chromosomes = filtered_map["Chromosome"].astype(str).to_numpy()
+    positions = filtered_map["Position"].to_numpy(dtype=np.float64)
+    output_order = np.lexsort((np.arange(len(filtered_map)), positions, chromosomes))
+    return _PreprocessingReference(
+        phenotype=phenotype,
+        genotype=genotype,
+        marker_map=marker_map,
+        filtered_map=filtered_map,
+        taxa=phenotype.loc[valid_samples, "Taxa"].to_numpy(dtype=np.str_),
+        phenotype_values=analysis_phenotype,
+        genotype_values=filtered_genotypes,
+        maf=retained_maf,
+        pca_scores=r_scores,
+        design=design,
+        kinship=expected_kinship,
+        output_order=output_order,
+    )
+
+
+def _assert_complete_workflow_preparation(
+    result: GAPITResult,
+    reference: _PreprocessingReference,
+) -> pd.DataFrame:
+    """Check preprocessing and return the non-optional final GWAS table."""
+    assert result.GWAS is not None
+    assert result.pca is not None
+    assert result.kinship is not None
+    nt.assert_array_equal(result.taxa, reference.taxa)
+    nt.assert_allclose(result.kinship, reference.kinship, rtol=1e-12, atol=1e-12)
+    for component in range(reference.pca_scores.shape[1]):
+        py_scores = result.pca.scores[:, component]
+        r_scores = reference.pca_scores[:, component]
+        sign = np.sign(np.dot(py_scores, r_scores)) or 1.0
+        nt.assert_allclose(py_scores, sign * r_scores, rtol=1e-12, atol=1e-12)
+
+    output_order = reference.output_order
+    marker_map = reference.filtered_map
+    gwas = result.GWAS
+    nt.assert_array_equal(gwas["SNP"], marker_map.loc[output_order, "SNP"])
+    nt.assert_array_equal(
+        gwas["Chr"].astype(str),
+        marker_map["Chromosome"].astype(str).to_numpy()[output_order],
+    )
+    nt.assert_array_equal(
+        gwas["Pos"], marker_map["Position"].to_numpy(dtype=np.float64)[output_order]
+    )
+    nt.assert_array_equal(
+        np.asarray(gwas["maf"], dtype=np.float64),
+        np.round(reference.maf[output_order], 4),
+    )
+    nt.assert_array_equal(gwas["nobs"], len(reference.phenotype_values))
+    return gwas
+
+
+def _run_complete_workflow(
+    reference: _PreprocessingReference,
+    model: str,
+) -> GAPITResult:
+    """Run the public workflow from the same raw labeled inputs."""
+    result = GAPIT(
+        Y=reference.phenotype,
+        GD=reference.genotype,
+        GM=reference.marker_map,
+        model=model,
+        trait="Trait",
+        PCA_total=2,
+        maf_threshold=0.1,
+        SNP_impute="middle",
+        file_output=False,
+    )
+    assert not isinstance(result, dict)
+    return result
+
+
+def _r_adjusted_p_values(r_bridge: RBridge, p_values: FloatArray) -> FloatArray:
+    """Return GAPIT's R-side BH adjustment reference."""
+    r_adjust = r_bridge.function("stats::p.adjust")
+    return r_bridge.float_array(
+        r_adjust(r_bridge.float_vector(p_values), method="BH")
+    ).reshape(-1)
+
+
+def test_top_level_glm_preprocessing_and_final_table_match_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+    fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Connect R imputation, MAF, PCA/K, GLM, and final-table evidence."""
+    reference = _prepare_complete_workflow_reference(
+        r_bridge, r_root, fixed_gapit_inputs
     )
     r_glm = r_bridge.source_function(r_root, "GAPIT.FarmCPU.R", "FarmCPU.LM")
     r_glm_result = r_glm(
-        r_bridge.float_vector(analysis_phenotype),
-        w=r_bridge.matrix(design[:, 1:]),
-        GDP=r_bridge.matrix(filtered_genotypes),
+        r_bridge.float_vector(reference.phenotype_values),
+        w=r_bridge.matrix(reference.design[:, 1:]),
+        GDP=r_bridge.matrix(reference.genotype_values),
         orientation="col",
         model="A",
         ncpus=1,
@@ -231,46 +369,11 @@ def test_top_level_glm_preprocessing_and_final_table_match_gapit(
         -1
     )
     r_effects = r_bridge.float_array(r_bridge.component(r_glm_result, "B")).reshape(-1)
-    r_adjust = r_bridge.function("function(p) stats::p.adjust(p, method='BH')")
-    r_adjusted = r_bridge.float_array(
-        r_adjust(r_bridge.float_vector(r_p_values))
-    ).reshape(-1)
+    r_adjusted = _r_adjusted_p_values(r_bridge, r_p_values)
 
-    py_result = GAPIT(
-        Y=phenotype,
-        GD=genotype,
-        GM=marker_map,
-        model="GLM",
-        trait="Trait",
-        PCA_total=2,
-        maf_threshold=0.1,
-        SNP_impute="middle",
-        file_output=False,
-    )
-    assert not isinstance(py_result, dict)
-    assert py_result.GWAS is not None
-    assert py_result.pca is not None
-    assert py_result.kinship is not None
-
-    nt.assert_array_equal(
-        py_result.taxa,
-        phenotype.loc[valid_samples, "Taxa"].to_numpy(dtype=np.str_),
-    )
-    nt.assert_allclose(py_result.kinship, expected_kinship, rtol=1e-12, atol=1e-12)
-    for component in range(r_scores.shape[1]):
-        py_scores = py_result.pca.scores[:, component]
-        sign = np.sign(np.dot(py_scores, r_scores[:, component])) or 1.0
-        nt.assert_allclose(
-            py_scores, sign * r_scores[:, component], rtol=1e-12, atol=1e-12
-        )
-
-    chromosomes = filtered_map["Chromosome"].astype(str).to_numpy()
-    positions = filtered_map["Position"].to_numpy(dtype=np.float64)
-    output_order = np.lexsort((np.arange(len(filtered_map)), positions, chromosomes))
-    gwas = py_result.GWAS
-    nt.assert_array_equal(gwas["SNP"], filtered_map.loc[output_order, "SNP"])
-    nt.assert_array_equal(gwas["Chr"].astype(str), chromosomes[output_order])
-    nt.assert_array_equal(gwas["Pos"], positions[output_order])
+    py_result = _run_complete_workflow(reference, "GLM")
+    gwas = _assert_complete_workflow_preparation(py_result, reference)
+    output_order = reference.output_order
     nt.assert_allclose(
         np.asarray(gwas["P.value"], dtype=np.float64),
         r_p_values[output_order],
@@ -282,11 +385,60 @@ def test_top_level_glm_preprocessing_and_final_table_match_gapit(
         np.round(r_effects[output_order], 6),
     )
     nt.assert_array_equal(
-        np.asarray(gwas["maf"], dtype=np.float64),
-        np.round(retained_maf[output_order], 4),
+        np.asarray(gwas["FDR.Adjusted.P.values"], dtype=np.float64),
+        np.round(r_adjusted[output_order], 6),
     )
-    nt.assert_array_equal(gwas["nobs"], len(analysis_phenotype))
+
+
+def test_top_level_mlm_preprocessing_and_final_table_match_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+    fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+) -> None:
+    """Connect R preprocessing, P3D/REML, and MLM final-table evidence."""
+    reference = _prepare_complete_workflow_reference(
+        r_bridge, r_root, fixed_gapit_inputs
+    )
+    r_result = _run_r_mlm(
+        r_bridge,
+        r_root,
+        reference.phenotype_values,
+        reference.genotype_values,
+        reference.kinship,
+        reference.design,
+    )
+    r_p_values = r_bridge.float_array(r_bridge.component(r_result, "ps")).reshape(-1)
+    r_effects = r_bridge.float_array(
+        r_bridge.component(r_result, "effect.est")
+    ).reshape(-1)
+    r_standard_errors = r_bridge.float_array(
+        r_bridge.component(r_result, "stderr")
+    ).reshape(-1)
+    r_vg = r_scalar(r_bridge, r_result, "vgs")
+    r_ve = r_scalar(r_bridge, r_result, "ves")
+    r_adjusted = _r_adjusted_p_values(r_bridge, r_p_values)
+
+    py_result = _run_complete_workflow(reference, "MLM")
+    gwas = _assert_complete_workflow_preparation(py_result, reference)
+    output_order = reference.output_order
+    nt.assert_allclose(
+        np.asarray(gwas["P.value"], dtype=np.float64),
+        r_p_values[output_order],
+        rtol=2e-6,
+        atol=1e-12,
+    )
+    nt.assert_array_equal(
+        np.asarray(gwas["effect"], dtype=np.float64),
+        np.round(r_effects[output_order], 6),
+    )
+    nt.assert_array_equal(
+        np.asarray(gwas["se"], dtype=np.float64),
+        np.round(r_standard_errors[output_order], 6),
+    )
     nt.assert_array_equal(
         np.asarray(gwas["FDR.Adjusted.P.values"], dtype=np.float64),
         np.round(r_adjusted[output_order], 6),
     )
+    nt.assert_allclose(py_result.vg, r_vg, rtol=2e-6, atol=1e-12)
+    nt.assert_allclose(py_result.ve, r_ve, rtol=2e-6, atol=1e-12)
+    nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-6, atol=1e-12)
