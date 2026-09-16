@@ -42,7 +42,11 @@ The suite is divided by function so a failure identifies the affected layer dire
   and validates pyGAPIT against the corrected-CV R workflow.
 - `test_cmlm.py`: public CMLM orchestration with fixed compression, native
   incidence-matrix REML/EMMAX statistics, automatic group selection, and a
-  direct NumPy mmap-store-to-R comparison
+  direct NumPy mmap-store-to-R comparison. Its complete preprocessing
+  regression connects raw labeled input through numeric `Middle` imputation,
+  phenotype subsetting, MAF filtering, PCA, VanRaden kinship, group membership,
+  compressed kinship, incidence P3D/REML, variance components and heritability,
+  marker statistics, ordering, MAF/nobs fields, and BH-adjusted final output.
 - `test_cmlm_boundaries.py`: redundant incidence levels, near-collinear fixed
   effects, and singular-design behavior in native-incidence REML
 - `test_mlmm.py`: public MLMM orchestration with PCA, covariates, supplied
