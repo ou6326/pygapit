@@ -15,6 +15,7 @@ from tests.cross_language.r_bridge import RBridge
 from tests.cross_language.workflow import (
     assert_top_level_preparation,
     make_workflow_inputs,
+    open_numpy_workflow_store,
     r_design_with_pca,
     r_scalar,
 )
@@ -27,6 +28,7 @@ def test_top_level_cmlm_with_fixed_compression_matches_gapit(
     fixed_phenotype: NDArray[np.float64],
     fixed_covariate: NDArray[np.float64],
     fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+    tmp_path: Path,
 ) -> None:
     """Compare a fixed five-group CMLM through the public Python pipeline."""
     inputs = make_workflow_inputs(
@@ -118,11 +120,26 @@ def test_top_level_cmlm_with_fixed_compression_matches_gapit(
         group_to=5,
         file_output=False,
     )
+    with open_numpy_workflow_store(
+        tmp_path,
+        inputs.genotype,
+        inputs.marker_map,
+    ) as store:
+        disk_result = GAPIT(
+            Y=inputs.phenotype,
+            GD=store,
+            CV=inputs.covariate,
+            KI=inputs.kinship,
+            model="CMLM",
+            trait="Trait",
+            PCA_total=2,
+            maf_threshold=0.0,
+            group_from=5,
+            group_to=5,
+            marker_workspace_mib=0.0002,
+            file_output=False,
+        )
 
-    assert not isinstance(py_result, dict)
-    assert py_result.GWAS is not None
-    assert py_result.model == "CMLM"
-    assert_top_level_preparation(py_result, inputs, r_scores)
     r_p_values = r_bridge.float_array(r_bridge.component(r_result, "ps")).reshape(-1)
     r_effects = r_bridge.float_array(
         r_bridge.component(r_result, "effect.est")
@@ -133,12 +150,22 @@ def test_top_level_cmlm_with_fixed_compression_matches_gapit(
     r_vg = r_scalar(r_bridge, r_result, "vgs")
     r_ve = r_scalar(r_bridge, r_result, "ves")
 
-    nt.assert_allclose(py_result.GWAS["P.value"], r_p_values, rtol=2e-6, atol=1e-12)
-    nt.assert_array_equal(py_result.GWAS["effect"], np.round(r_effects, 6))
-    nt.assert_array_equal(py_result.GWAS["se"], np.round(r_standard_errors, 6))
-    nt.assert_allclose(py_result.vg, r_vg, rtol=2e-6, atol=1e-12)
-    nt.assert_allclose(py_result.ve, r_ve, rtol=2e-6, atol=1e-12)
-    nt.assert_allclose(py_result.h2, r_vg / (r_vg + r_ve), rtol=2e-6, atol=1e-12)
+    for result in (py_result, disk_result):
+        assert not isinstance(result, dict)
+        assert result.GWAS is not None
+        assert result.model == "CMLM"
+        assert_top_level_preparation(result, inputs, r_scores)
+        nt.assert_allclose(result.GWAS["P.value"], r_p_values, rtol=2e-6, atol=1e-12)
+        nt.assert_array_equal(result.GWAS["effect"], np.round(r_effects, 6))
+        nt.assert_array_equal(result.GWAS["se"], np.round(r_standard_errors, 6))
+        nt.assert_allclose(result.vg, r_vg, rtol=2e-6, atol=1e-12)
+        nt.assert_allclose(result.ve, r_ve, rtol=2e-6, atol=1e-12)
+        nt.assert_allclose(
+            result.h2,
+            r_vg / (r_vg + r_ve),
+            rtol=2e-6,
+            atol=1e-12,
+        )
 
 
 def test_cmlm_selects_same_compression_as_gapit(

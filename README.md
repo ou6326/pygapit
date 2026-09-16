@@ -58,6 +58,14 @@ upstream path is also executed to lock its different QTN selection as an
 intentional divergence. Other rows must not be interpreted as official-data
 parity until a corresponding regression is added.
 
+Storage evidence is reported separately from model evidence. Every listed
+model is exercised by the backend parity matrix on ndarray, NumPy mmap, HDF5,
+and Zarr inputs. Those tests prove that storage paths preserve the established
+in-memory statistics. In addition, the CMLM and cBLUP cross-language workflows
+run a NumPy mmap store directly against the pinned GAPIT 3.5 result. HDF5 and
+Zarr currently inherit their R-alignment evidence transitively from the strict
+backend matrix; they are not presented as independent R executions.
+
 Intentional divergences are tested rather than hidden. They include replacing
 GAPIT's invalid BLINK `NaN`/infinite statistics with documented valid outputs,
 retaining PCA covariates during BLINK BIC selection,

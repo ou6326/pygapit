@@ -36,7 +36,8 @@ The suite is divided by function so a failure identifies the affected layer dire
   characterizes GAPIT's omission of supplied PCA covariates from BIC selection
   and validates pyGAPIT against the corrected-CV R workflow.
 - `test_cmlm.py`: public CMLM orchestration with fixed compression, native
-  incidence-matrix REML/EMMAX statistics, and automatic group selection
+  incidence-matrix REML/EMMAX statistics, automatic group selection, and a
+  direct NumPy mmap-store-to-R comparison
 - `test_cmlm_boundaries.py`: redundant incidence levels, near-collinear fixed
   effects, and singular-design behavior in native-incidence REML
 - `test_mlmm.py`: public MLMM orchestration with PCA, covariates, supplied
@@ -45,7 +46,8 @@ The suite is divided by function so a failure identifies the affected layer dire
 - `test_prediction.py`: direct and top-level gBLUP, cBLUP, and sBLUP fixed
   effects, breeding values, prediction-error variances, phenotype predictions,
   variance components, cBLUP compression, and corrected SUPER pseudo-QTN
-  selection
+  selection. The cBLUP top-level comparison also runs through a NumPy mmap
+  store and compares that result directly with GAPIT 3.5.
 
 Each comparison sources the smallest relevant GAPIT R file instead of loading
 the full package. The complete BLINK and FarmCPU tests execute GAPIT's ordinary

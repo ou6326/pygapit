@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+from collections.abc import Generator
+from contextlib import contextmanager
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -11,6 +13,12 @@ import pandas as pd
 from numpy.typing import NDArray
 
 from pygapit.gapit import GAPITResult
+from pygapit.io.formats import GenotypeData
+from pygapit.io.storage import (
+    NumpyGenotypeStore,
+    open_genotype_store,
+    write_numpy_genotype,
+)
 from pygapit.stats.kinship import vanraden_kinship
 from tests.cross_language.r_bridge import RBridge, RObject
 
@@ -32,6 +40,23 @@ class WorkflowInputs:
     genotype_values: FloatArray
     covariate_values: FloatArray
     kinship_values: FloatArray
+
+
+@contextmanager
+def open_numpy_workflow_store(
+    directory: Path,
+    genotype: pd.DataFrame,
+    marker_map: pd.DataFrame,
+) -> Generator[NumpyGenotypeStore]:
+    """Open a dependency-free mmap store for direct R workflow comparisons."""
+    path = directory / "genotype-store"
+    write_numpy_genotype(
+        path,
+        GenotypeData.from_numeric_frame(genotype, marker_map),
+        marker_chunk_size=2,
+    )
+    with open_genotype_store(path, backend="numpy") as store:
+        yield store
 
 
 def r_scalar(r_bridge: RBridge, result: RObject, name: str):

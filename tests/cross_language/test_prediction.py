@@ -13,6 +13,7 @@ from pygapit.gapit import GAPIT
 from pygapit.gs.blup import cblup, gblup, sblup, select_super_qtns
 from pygapit.stats.kinship import vanraden_kinship
 from tests.cross_language.r_bridge import RBridge, RList
+from tests.cross_language.workflow import open_numpy_workflow_store
 
 
 def test_gblup_matches_bundled_r_gapit(
@@ -103,6 +104,7 @@ def test_cblup_matches_bundled_r_gapit(
     fixed_phenotype: NDArray[np.float64],
     fixed_covariate: NDArray[np.float64],
     fixed_gapit_inputs: tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame],
+    tmp_path: Path,
 ) -> None:
     """Compare compressed-group selection, BLUE, BLUP, PEV, and prediction."""
     design = np.column_stack([np.ones(len(fixed_phenotype)), fixed_covariate])
@@ -196,15 +198,48 @@ def test_cblup_matches_bundled_r_gapit(
         group_to=6,
         file_output=False,
     )
+    with open_numpy_workflow_store(
+        tmp_path,
+        genotype_frame,
+        marker_frame,
+    ) as store:
+        disk_workflow_result = GAPIT(
+            Y=phenotype_frame,
+            GD=store,
+            CV=pd.DataFrame({
+                "Taxa": phenotype_frame["Taxa"].astype(str),
+                "Covariate": fixed_covariate,
+            }),
+            model="cBLUP",
+            PCA_total=0,
+            maf_threshold=0.0,
+            group_to=6,
+            marker_workspace_mib=0.0002,
+            file_output=False,
+        )
 
     assert not isinstance(workflow_result, dict)
+    assert not isinstance(disk_workflow_result, dict)
     assert workflow_result.Pred is not None
-    nt.assert_array_equal(workflow_result.Pred["BLUE"], np.round(py_result.blue, 4))
-    nt.assert_array_equal(workflow_result.Pred["BLUP"], np.round(py_result.blup, 4))
-    nt.assert_array_equal(workflow_result.Pred["PEV"], np.round(py_result.pev, 6))
-    nt.assert_array_equal(
-        workflow_result.Pred["Prediction"], np.round(py_result.prediction, 4)
-    )
+    assert disk_workflow_result.Pred is not None
+    pd.testing.assert_frame_equal(disk_workflow_result.Pred, workflow_result.Pred)
+
+    for result in (workflow_result, disk_workflow_result):
+        assert not isinstance(result, dict)
+        assert result.Pred is not None
+        nt.assert_allclose(
+            result.Pred["BLUE"], np.round(r_blue, 4), rtol=0.0, atol=1e-4
+        )
+        nt.assert_allclose(
+            result.Pred["BLUP"], np.round(r_blup, 4), rtol=0.0, atol=1e-4
+        )
+        nt.assert_allclose(result.Pred["PEV"], np.round(r_pev, 6), rtol=0.0, atol=2e-6)
+        nt.assert_allclose(
+            result.Pred["Prediction"],
+            np.round(r_blue + r_blup, 4),
+            rtol=0.0,
+            atol=1e-4,
+        )
 
 
 def test_super_selection_and_sblup_match_bundled_r_gapit(
