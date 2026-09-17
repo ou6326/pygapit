@@ -124,5 +124,6 @@ Recorded by the 2.0.0 release-documentation audit.
 5. **Migration and changelog** — `MIGRATING.md` and `CHANGELOG.md` now describe
    the final 1.2.4 to 2.0 contract rather than the implementation chronology.
 
-`pyproject.toml` carries the `2.0.0` development version. The citation metadata
-keeps referencing the last published release until `2.0.0` is tagged.
+`pyproject.toml` carries the `2.0.0.dev0` development version; `2.0.0rc1` and
+`2.0.0` follow the usual PEP 440 progression. The citation metadata keeps
+referencing the last published release until `2.0.0` is tagged.

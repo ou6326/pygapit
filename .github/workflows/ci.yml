@@ -142,8 +142,8 @@ jobs:
       - name: Verify optional storage modules import
         run: python -c "import h5py, zarr"
 
-      - name: Storage tests
-        run: pytest tests/test_genotype_storage.py tests/test_storage_model_parity.py -q
+      - name: Tests with the bigdata extra
+        run: pytest tests -q --ignore=tests/cross_language
 
   styles:
     name: styles extra on Python ${{ matrix.python-version }}
@@ -169,8 +169,8 @@ jobs:
       - name: Verify optional style modules import
         run: python -c "import seaborn, scienceplots"
 
-      - name: Style tests
-        run: pytest tests/test_visualization_data.py -q
+      - name: Tests with the styles extra
+        run: pytest tests -q --ignore=tests/cross_language
 
   parity:
     name: GAPIT 3.5 parity
