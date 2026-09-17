@@ -12,7 +12,7 @@ import pandas as pd
 
 from pygapit._typing import FloatMatrix, FloatVector, StrVector
 from pygapit.gapit import GAPIT, GAPITResult
-from pygapit.gs.blup import gblup
+from pygapit.gs.blup import cblup, gblup
 from tests.cross_language.r_bridge import RBridge, RList, RMatrix
 from tests.cross_language.workflow import r_scalar
 
@@ -419,6 +419,118 @@ def test_official_maize_gblup_workflow_matches_gapit(
     assert workflow_result.kinship is not None
     nt.assert_array_equal(workflow_result.Pred["Taxa"], inputs.taxa)
     nt.assert_allclose(workflow_result.kinship, r_kinship, rtol=1e-12, atol=1e-12)
+    nt.assert_array_equal(workflow_result.Pred["BLUE"], np.round(py_direct.blue, 4))
+    nt.assert_array_equal(workflow_result.Pred["BLUP"], np.round(py_direct.blup, 4))
+    nt.assert_array_equal(workflow_result.Pred["PEV"], np.round(py_direct.pev, 6))
+    nt.assert_array_equal(
+        workflow_result.Pred["Prediction"], np.round(py_direct.prediction, 4)
+    )
+
+
+def test_official_maize_cblup_workflow_matches_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+) -> None:
+    """Compare GAPIT's official-data compression choice and cBLUP outputs."""
+    inputs = _load_official_dataset(r_root)
+    r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
+    design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        r_scores,
+    ])
+    kinship_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        _r_vanraden_kinship(r_bridge, r_root, inputs.genotype_values),
+    ])
+    for filename in (
+        "GAPIT.emma.R",
+        "GAPIT.replaceNaN.R",
+        "GAPIT.emma.REMLE.R",
+        "GAPIT.Timmer.R",
+        "GAPIT.Memory.R",
+        "GAPIT.Compress.R",
+    ):
+        r_bridge.source(r_root, filename)
+    r_bridge.source(r_root, "GAPIT.EMMAxP3D.R")
+    r_cblup = r_bridge.function(
+        "function(y, X0, CVI, KI, groups) {"
+        " fits <- lapply(groups, function(g) {"
+        "  tryCatch({"
+        "   if (g <= ncol(X0)) return(NULL);"
+        "   compressed <- GAPIT.Compress(KI, GN=g, Timmer=NULL, Memory=NULL);"
+        "   labels <- as.integer(compressed$GA[,2]);"
+        "   Z <- matrix(0, nrow=length(labels), ncol=g);"
+        "   Z[cbind(seq_along(labels), labels)] <- 1;"
+        "   null <- GAPIT.emma.REMLE(y, X0, compressed$KG, Z=Z);"
+        "   list(group=g, reml=null$REML, K=compressed$KG, Z=Z)"
+        "  }, error=function(e) NULL)"
+        " });"
+        " fits <- Filter(Negate(is.null), fits);"
+        " best <- fits[[which.max(vapply(fits, `[[`, numeric(1), 'reml'))]];"
+        " fit <- GAPIT.EMMAxP3D("
+        "   ys=matrix(y, nrow=1), xs=matrix(0, nrow=length(y), ncol=1),"
+        "   K=best$K, Z=best$Z, X0=X0, CVI=CVI,"
+        "   file.from=1, file.to=1, file.fragment=1, fullGD=TRUE,"
+        "   SNP.P3D=TRUE, Timmer=NULL, Memory=NULL, optOnly=TRUE);"
+        " list(group=best$group, BLUE=rowSums(fit$BLUE),"
+        "      BLUP=as.numeric(best$Z %*% fit$BLUP),"
+        "      PEV=as.numeric(best$Z %*% fit$PEV),"
+        "      vg=fit$vgs, ve=fit$ves)"
+        "}",
+        returns=RList,
+    )
+    candidate_groups = np.unique(
+        np.round(np.linspace(1, len(inputs.taxa), min(15, len(inputs.taxa)))).astype(
+            np.intp
+        )
+    )
+    r_result = r_cblup(
+        r_bridge.float_vector(inputs.phenotype_values),
+        r_bridge.matrix(design),
+        r_bridge.matrix(covariates_with_taxa),
+        r_bridge.matrix(kinship_with_taxa),
+        r_bridge.float_vector(candidate_groups.astype(np.float64)),
+    )
+    py_direct = cblup(
+        inputs.phenotype_values,
+        design,
+        inputs.genotype_values,
+        taxa=inputs.taxa,
+        group_to=len(inputs.taxa),
+    )
+
+    r_blue = r_bridge.float_array(r_bridge.component(r_result, "BLUE"))
+    r_blup = r_bridge.float_array(r_bridge.component(r_result, "BLUP"))
+    r_pev = r_bridge.float_array(r_bridge.component(r_result, "PEV"))
+    r_vg = r_scalar(r_bridge, r_result, "vg")
+    r_ve = r_scalar(r_bridge, r_result, "ve")
+    r_group = r_scalar(r_bridge, r_result, "group")
+    assert len(np.unique(py_direct.blup)) == int(r_group)
+    nt.assert_array_equal(py_direct.taxa, inputs.taxa)
+    nt.assert_allclose(py_direct.blue, r_blue, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.blup, r_blup, rtol=2e-5, atol=2e-4)
+    nt.assert_allclose(py_direct.pev, r_pev, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.prediction, r_blue + r_blup, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.vg, r_vg, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.ve, r_ve, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
+
+    workflow_result = GAPIT(
+        Y=inputs.phenotype,
+        GD=inputs.genotype,
+        GM=inputs.marker_map,
+        model="cBLUP",
+        trait="EarHT",
+        PCA_total=3,
+        maf_threshold=0.05,
+        group_to=len(inputs.taxa),
+        file_output=False,
+    )
+
+    assert isinstance(workflow_result, GAPITResult)
+    assert workflow_result.Pred is not None
+    nt.assert_array_equal(workflow_result.Pred["Taxa"], inputs.taxa)
     nt.assert_array_equal(workflow_result.Pred["BLUE"], np.round(py_direct.blue, 4))
     nt.assert_array_equal(workflow_result.Pred["BLUP"], np.round(py_direct.blup, 4))
     nt.assert_array_equal(workflow_result.Pred["PEV"], np.round(py_direct.pev, 6))

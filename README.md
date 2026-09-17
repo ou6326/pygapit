@@ -41,13 +41,13 @@ failure.
 | FarmCPU | `GAPIT(model="FarmCPU")` | R-validated terminal iterative results | Full MAF-filtered marker set | Static-bin selection, terminal pseudo-QTNs, final p-values, and effects |
 | BLINK | `GAPIT(model="BLINK")` | R-validated iterative workflow with the upstream missing-CV BIC call characterized | Full MAF-filtered marker set against the corrected-CV reference | PCA-aware BIC, FDR candidates, LD pruning, terminal zero/one/multiple-QTN paths, and invalid-statistic normalization |
 | gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Full EarHT prediction set | BLUE, BLUP, PEV, predictions, and variance components |
-| cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | R-validated direct and top-level workflows | Not yet | Compression selection, native-incidence BLUE/BLUP/PEV, predictions, and variance components |
+| cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | R-validated direct and top-level workflows | Full EarHT prediction set | Compression selection, native-incidence BLUE/BLUP/PEV, predictions, and variance components |
 | sBLUP | `sblup()`, `GAPIT(model="sBLUP")`, or a prediction override | R-validated corrected SUPER selection and direct/top-level prediction | Not yet | Stable genomic-bin selection, configurable QTN counts, single-QTN support, BLUE/BLUP/PEV, predictions, and variance components |
 
 The official-data column currently refers to GAPIT's bundled maize diversity
 panel and the `EarHT` trait. GLM, MLM, CMLM, MLMM, FarmCPU, and BLINK
-comparisons cover every marker retained by the shared MAF filter; gBLUP covers
-the complete set of phenotyped taxa. The CMLM
+comparisons cover every marker retained by the shared MAF filter; gBLUP and
+cBLUP cover the complete set of phenotyped taxa. The CMLM
 regression uses a fixed 40-group compression; automatic compression selection
 remains covered by the smaller cross-language workflow test. The MLMM
 regression omits added covariates so GAPIT's extended-BIC penalty is valid; its
