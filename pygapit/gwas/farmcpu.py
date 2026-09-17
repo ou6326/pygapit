@@ -1,24 +1,16 @@
 """
 FarmCPU - Fixed And Random Model Circulating Probability Unification.
-Translates FarmCPU.BIN, FarmCPU.GLM, FarmCPU.Burger from GAPIT.FarmCPU.R
+Translates GAPIT.FarmCPU.R's static-bin FarmCPU.BIN and FarmCPU.GLM path.
 
-Algorithm:
-  Two models alternate until convergence:
+Static-bin/FEM loop:
+  1. Run an initial FEM scan with no pseudo-QTN cofactors.
+  2. Select the best significant marker from each genomic bin.
+  3. Re-scan with those pseudo-QTNs as fixed FEM cofactors.
+  4. Repeat until the selected set converges or reaches ``max_iterations``.
 
-  Fixed Effect Model (FEM) — tests all markers:
-    y = X0*beta + sum(cofactors)*t + alpha*s_i + e     (pure GLM)
-    Cofactors control false positives. No kinship.
-
-  Random Effect Model (REM) — selects pseudo-QTNs:
-    y = X0*beta + u + e
-    u ~ N(0, K_pseudo * sigma2_g)
-    K_pseudo built from current pseudo-QTN set only.
-    REML selects which QTNs minimize variance components.
-
-  Bin method for QTN selection:
-    Genome divided into bins of size `bin_size` bp.
-    At most one QTN per bin (most significant within each bin).
-    Bin size optimized by REML log-likelihood.
+The exposed Python workflow implements GAPIT's ``method.bin='static'`` path.
+It selects pseudo-QTNs from FEM p-values and does not run the ``Burger`` REML
+optimization used only by GAPIT's ``method.bin='optimum'`` branch.
 """
 
 from __future__ import annotations
@@ -36,9 +28,7 @@ from .._typing import (
     NumericVector,
     readonly_copy,
 )
-from ..io.storage import GenotypeStore, GenotypeView, as_genotype_store
-from ..stats.emma import emma_remle
-from ..stats.kinship import vanraden_kinship
+from ..io.storage import GenotypeStore, as_genotype_store
 from .glm import glm_scan_with_cofactors, reward_substitute_cofactor_statistics
 
 
@@ -122,69 +112,6 @@ def _bin_select_qtns(
     return np.asarray(selected, dtype=int)
 
 
-def _build_pseudo_kinship(
-    GD: FloatMatrix | GenotypeStore,
-    qtn_indices: IntVector | None,
-    *,
-    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
-) -> FloatMatrix | None:
-    """
-    Build kinship from pseudo-QTN genotypes only.
-    Translates FarmCPU.Burger() kinship construction in GAPIT.FarmCPU.R
-
-    The pseudo-kinship K* = VanRaden(GD[:, qtn_indices]).
-    Using only QTN genotypes, this kinship captures only the
-    background variance explained by currently-identified QTNs.
-    """
-    if qtn_indices is None or len(qtn_indices) == 0:
-        return None
-
-    genotype = as_genotype_store(GD)
-    selected = GenotypeView(genotype, marker_indices=qtn_indices)
-    K = vanraden_kinship(
-        selected,
-        marker_workspace_mib=marker_workspace_mib,
-    )
-    # Add small diagonal for numerical stability
-    K += np.eye(len(K)) * 1e-6
-    return K
-
-
-def _rem_select_qtns(
-    y: FloatVector,
-    X0: FloatMatrix,
-    GD: FloatMatrix | GenotypeStore,
-    candidate_qtns: IntVector,
-    *,
-    marker_workspace_mib: float = DEFAULT_MARKER_WORKSPACE_MIB,
-) -> tuple[IntVector, float, float]:
-    """
-    Random Effect Model: select pseudo-QTNs by REML.
-    Translates FarmCPU.Burger() from GAPIT.FarmCPU.R
-
-    Builds kinship from candidate QTNs and estimates variance
-    components. The REML LL guides which QTN set to keep.
-
-    Returns (selected_qtn_indices, vg, ve)
-    """
-    if len(candidate_qtns) == 0:
-        return np.array([], dtype=int), 0.0, 0.0
-
-    K = _build_pseudo_kinship(
-        GD,
-        candidate_qtns,
-        marker_workspace_mib=marker_workspace_mib,
-    )
-    if K is None:
-        return candidate_qtns, 0.0, 0.0
-
-    try:
-        result = emma_remle(y, X0, K)
-        return candidate_qtns, result.vg, result.ve
-    except (ValueError, np.linalg.LinAlgError, FloatingPointError):
-        return candidate_qtns, 0.0, 0.0
-
-
 def farmcpu_gwas(
     y: FloatVector,
     X0: FloatMatrix,
@@ -209,7 +136,7 @@ def farmcpu_gwas(
     GD             : (n, m) genotype matrix, 0/1/2
     chromosomes    : (m,) chromosome labels for each SNP
     positions      : (m,) bp positions for each SNP
-    max_iterations : maximum FEM/REM cycles
+    max_iterations : maximum static-bin/FEM cycles
     bin_size       : genomic bin size in bp for QTN selection
     p_threshold    : p-value threshold for candidate QTNs
     converge_threshold : Jaccard convergence criterion
@@ -239,15 +166,13 @@ def farmcpu_gwas(
     p_values = glm_result.p_values.copy()
 
     current_qtns = np.array([], dtype=int)
-    current_vg = 0.0
-    current_ve = 0.0
     n_iter = 0
 
     for iteration in range(max_iterations):
         n_iter = iteration + 1
         prev_qtns = current_qtns.copy()
 
-        # ── REM: Select pseudo-QTNs via bin method ─────────────────────
+        # ── Static bin: Select pseudo-QTNs from FEM p-values ───────────
         candidate_qtns = _bin_select_qtns(
             p_values,
             chromosomes,
@@ -264,17 +189,7 @@ def farmcpu_gwas(
         if len(candidate_qtns) == 0:
             break
 
-        # ── REM: Estimate variance components with pseudo-kinship ──────
-        selected_qtns, vg, ve = _rem_select_qtns(
-            y,
-            X0,
-            genotype,
-            candidate_qtns,
-            marker_workspace_mib=marker_workspace_mib,
-        )
-        current_qtns = selected_qtns
-        current_vg = vg
-        current_ve = ve
+        current_qtns = candidate_qtns
 
         # ── FEM: Test all markers with pseudo-QTN cofactors ────────────
         glm_result = reward_substitute_cofactor_statistics(
@@ -321,10 +236,6 @@ def farmcpu_gwas(
         current_qtns,
         marker_workspace_mib=marker_workspace_mib,
     )
-    h2 = (
-        current_vg / (current_vg + current_ve) if (current_vg + current_ve) > 0 else 0.0
-    )
-
     return FarmCPUResult(
         p_values=final_result.p_values,
         effects=final_result.effects,
@@ -332,8 +243,9 @@ def farmcpu_gwas(
         t_stats=final_result.t_stats,
         selected_qtns=current_qtns,
         n_iterations=n_iter,
-        vg=current_vg,
-        ve=current_ve,
-        h2=h2,
+        # GAPIT's static-bin FarmCPU wrapper returns no variance components.
+        vg=0.0,
+        ve=0.0,
+        h2=0.0,
         method="FarmCPU",
     )

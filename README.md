@@ -38,8 +38,8 @@ failure.
 | MLM | `GAPIT(model="MLM")` | R-validated complete preprocessing workflow and EMMA/P3D statistics | Full MAF-filtered marker set | `Middle` missing-genotype imputation, phenotype subsetting, MAF filtering, PCA/kinship, P3D/REML variance components and heritability, final-table ordering and BH adjustment, monomorphic markers, covariates, supplied kinship, and data alignment |
 | CMLM | `GAPIT(model="CMLM")` | R-validated complete preprocessing and compression workflow | Full MAF-filtered marker set with fixed 40-group compression | `Middle` missing-genotype imputation, phenotype subsetting, MAF filtering, PCA/kinship, fixed and automatic compression, group membership and compressed kinship, incidence P3D/REML variance components and heritability, final-table ordering and BH adjustment, redundant levels, near-collinear covariates, and invalid designs |
 | MLMM | `GAPIT(model="MLMM")` | R-validated top-level workflow | Full MAF-filtered marker set without added covariates | Every forward/backward cofactor state, final marker statistics, corrected extended BIC, and indefinite-kinship rejection |
-| FarmCPU | `GAPIT(model="FarmCPU")` | R-validated complete iterative workflow | Full MAF-filtered marker set | Static-bin selection, pseudo-QTNs, final p-values, and effects |
-| BLINK | `GAPIT(model="BLINK")` | R-validated iterative workflow with the upstream missing-CV BIC call characterized | Full MAF-filtered marker set against the corrected-CV reference | PCA-aware BIC, FDR candidates, LD pruning, zero/one/multiple-QTN paths, and invalid-statistic normalization |
+| FarmCPU | `GAPIT(model="FarmCPU")` | R-validated terminal iterative results | Full MAF-filtered marker set | Static-bin selection, terminal pseudo-QTNs, final p-values, and effects |
+| BLINK | `GAPIT(model="BLINK")` | R-validated iterative workflow with the upstream missing-CV BIC call characterized | Full MAF-filtered marker set against the corrected-CV reference | PCA-aware BIC, FDR candidates, LD pruning, terminal zero/one/multiple-QTN paths, and invalid-statistic normalization |
 | gBLUP | `gblup()` and `GAPIT(..., prediction_model="gBLUP")` | R-validated direct and prediction workflows | Full EarHT prediction set | BLUE, BLUP, PEV, predictions, and variance components |
 | cBLUP | `cblup()` and `GAPIT(model="cBLUP")` | R-validated direct and top-level workflows | Not yet | Compression selection, native-incidence BLUE/BLUP/PEV, predictions, and variance components |
 | sBLUP | `sblup()`, `GAPIT(model="sBLUP")`, or a prediction override | R-validated corrected SUPER selection and direct/top-level prediction | Not yet | Stable genomic-bin selection, configurable QTN counts, single-QTN support, BLUE/BLUP/PEV, predictions, and variance components |
@@ -55,8 +55,13 @@ broken all-`NA` `seqQTN` output for this null-model optimum is characterized,
 while pyGAPIT returns an empty QTN array. The BLINK reference forwards
 the already supplied PCA covariates into GAPIT's two BIC calls; the unmodified
 upstream path is also executed to lock its different QTN selection as an
-intentional divergence. Other rows must not be interpreted as official-data
-parity until a corresponding regression is added.
+intentional divergence. GAPIT 3.5's FarmCPU and Blink functions return only
+their terminal `seqQTN`; `iteration.output` does not add state history to that
+return value. Their R evidence therefore freezes terminal iterative states,
+not every loop state. GAPIT's static-bin FarmCPU path also returns no variance
+components; pyGAPIT preserves its fixed result fields as `vg=ve=h2=0.0` rather
+than deriving a pseudo-kinship REML fit. Other rows must not be interpreted as
+official-data parity until a corresponding regression is added.
 
 Storage evidence is reported separately from model evidence. Every listed
 model is exercised by the backend parity matrix on ndarray, NumPy mmap, HDF5,

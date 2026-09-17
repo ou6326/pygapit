@@ -11,7 +11,7 @@ from numpy.typing import NDArray
 
 from pygapit.gapit import GAPIT
 from pygapit.gwas.farmcpu import _bin_select_qtns
-from tests.cross_language.r_bridge import RBridge
+from tests.cross_language.r_bridge import RBridge, RVector
 
 
 def test_farmcpu_bin_selection_matches_bundled_r_gapit(
@@ -130,9 +130,16 @@ def test_farmcpu_iterative_workflow_matches_bundled_r_gapit(
     r_qtns = (
         r_bridge.float_array(r_bridge.component(r_result, "seqQTN")).astype(int) - 1
     )
+    r_names = np.asarray(
+        r_bridge.function("names", returns=RVector)(r_result), dtype=np.str_
+    )
     assert not isinstance(py_result, dict)
     assert py_result.QTNs is not None
     assert py_result.GWAS is not None
+    assert {"vg", "ve", "h2"}.isdisjoint(r_names)
+    assert py_result.vg == 0.0
+    assert py_result.ve == 0.0
+    assert py_result.h2 == 0.0
     nt.assert_array_equal(np.asarray(py_result.GWAS["Chr"], dtype=float), r_gwas[:, 1])
     nt.assert_array_equal(py_result.GWAS["Pos"], r_gwas[:, 2])
     nt.assert_array_equal(np.sort(py_result.QTNs), np.sort(r_qtns))
