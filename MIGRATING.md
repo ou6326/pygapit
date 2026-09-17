@@ -1,9 +1,11 @@
 # Migrating from pyGAPIT 1.2.4
 
-The next major release replaces backend-specific plotting functions with one
-HoloViews-based visualization contract and requires Python 3.11 or newer. The
+pyGAPIT 2.0 replaces backend-specific plotting functions with one
+HoloViews-based visualization contract, requires Python 3.11 or newer, and
+corrects GAPIT 3.5 statistical parity issues in FarmCPU and sBLUP. The
 statistical model interfaces remain available; the breaking changes described
-here are concentrated in visualization and supported runtimes.
+here are concentrated in visualization, supported runtimes, and the corrected
+result values.
 
 ## Python and dependencies
 
@@ -45,7 +47,7 @@ and at runtime.
 
 ## Renamed plotting functions
 
-| 1.2.4 | Next major release | Migration |
+| 1.2.4 | 2.0 | Migration |
 |---|---|---|
 | `manhattan_plot(...)` | `manhattan(...)` | Build the plot, then call `save_plot()` |
 | `manhattan_interactive(...)` | `manhattan(...)` | Pass `effects` and `maf`, and select Bokeh or Plotly with `backend=` |
@@ -67,7 +69,7 @@ separate output call:
 # 1.2.4
 qq_plot(p_values, save_path="qq.pdf")
 
-# Next major release
+# 2.0
 plot = qq_plot(p_values)
 save_plot(plot, "qq.pdf")
 ```
@@ -92,3 +94,19 @@ The Zarr backend uses the Zarr Python 3.x API and currently writes Zarr format
 ```bash
 pip install "pygapit-ng[bigdata]"
 ```
+
+## Statistical result changes
+
+Three GAPIT 3.5 parity corrections change values that 1.2.4 reported:
+
+- Static-bin FarmCPU no longer derives a pseudo-kinship REML variance fit.
+  GAPIT's static-bin path returns no variance components, so `vg`, `ve`, and
+  `h2` are fixed at `0.0` instead of an unsupported estimate.
+- sBLUP `PEV` for intentionally low-rank pseudo-kinship now inverts the
+  kinship at GAPIT's `MASS::ginv` tolerance instead of NumPy's smaller default
+  cutoff, so PEV and prediction-error values match the R reference.
+- MLMM now follows GAPIT's complete forward and backward cofactor path, so the
+  retained model matches the R reference.
+
+The public function names, argument meanings, and result fields are unchanged;
+only these previously incorrect values are corrected.

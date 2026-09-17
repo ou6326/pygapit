@@ -104,3 +104,25 @@ Before `2.0.0rc1`:
    tests on the supported Python range; and
 5. `MIGRATING.md` and `CHANGELOG.md` must describe the final 1.2.4 to 2.0
    contract rather than the implementation chronology.
+
+## Release-hardening status
+
+Recorded by the 2.0.0 release-documentation audit.
+
+1. **Backend parity** — `tests/test_storage_model_parity.py` exercises every
+   public model over `ndarray`, NumPy mmap, HDF5, and Zarr; its 36-case matrix
+   passes on Python 3.14.
+2. **GAPIT 3.5 parity audit** — the `tests/cross_language` regressions and the
+   `README.md` evidence table classify each characterized difference as a
+   correction or an intentional documented divergence.
+3. **Large-data reporting** — `benchmarks/benchmark_large_scale.py` reports wall
+   time and process peak RSS for import, kinship, PCA, model scans, and
+   Manhattan rendering, and runs the 100k spot check for NumPy, HDF5, and Zarr;
+   1M and 10M remain opt-in comparisons.
+4. **Installation matrix** — the minimal, `bigdata`, and `styles` installations
+   each run their applicable tests across Python 3.11–3.14 in CI.
+5. **Migration and changelog** — `MIGRATING.md` and `CHANGELOG.md` now describe
+   the final 1.2.4 to 2.0 contract rather than the implementation chronology.
+
+`pyproject.toml` carries the `2.0.0` development version. The citation metadata
+keeps referencing the last published release until `2.0.0` is tagged.

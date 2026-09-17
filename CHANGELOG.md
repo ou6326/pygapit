@@ -11,12 +11,10 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Typed `Visualization` objects with independently assignable notebook
   backends, direct native `render()`, and format-aware saving. Static formats
   select Matplotlib automatically; 3D PCA excludes Bokeh.
-
-- Backend-independent Manhattan data and genomic-axis preparation shared by
-  Matplotlib, Bokeh, and Plotly renderers.
 - Backend-neutral HoloViews objects for Manhattan, QQ, kinship, PCA, genomic
   selection, and phenotype plots, with rendering and saving delegated to
-  HoloViews' Matplotlib, Bokeh, and Plotly backends.
+  HoloViews' Matplotlib, Bokeh, and Plotly backends, built on shared,
+  backend-independent Manhattan data and genomic-axis preparation.
 - A reproducible benchmark for genomic-axis and complete Manhattan data
   preparation, HoloViews object construction, and opt-in Matplotlib, Bokeh, or
   Plotly rendering at configurable marker counts.
@@ -28,6 +26,12 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   genotype-store backend without rescanning the source for every marker block.
 - Single-pass marker-block import from HapMap files into any genotype-store
   backend.
+- A reproducible large-marker benchmark over bounded numeric import, VanRaden
+  kinship, PCA, a GLM marker scan, Manhattan preparation, and rendering at
+  100k, 1M, and 10M markers with selectable NumPy, HDF5, and Zarr store
+  backends, reporting wall time and process peak RSS.
+- A staged numeric-import profiler that separates source and metadata setup,
+  TSV parsing plus imputation, and NumPy persistence.
 
 ### Changed
 
@@ -59,6 +63,32 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   truncated BIC candidate pool.
 - Support disk-backed cBLUP prediction by streaming VanRaden marker blocks;
   compression still operates on the complete in-memory kinship matrix.
+
+### Removed
+
+- Backend-native plotting functions are removed rather than deprecated, with
+  no compatibility wrappers:
+
+  - `manhattan_plot()` → `manhattan()` plus `save_plot()`
+  - `manhattan_interactive()` → `manhattan(..., backend="bokeh" | "plotly")`
+  - `pca_plot_3d_interactive()` → `pca_plot_3d()`
+
+- The plotting `save_path=` parameters, such as `qq_plot(..., save_path=)` and
+  `kinship_heatmap(..., save_path=)`. Construct a `Visualization` and call
+  `save_plot()` instead. `MIGRATING.md` records the full mapping.
+
+### Fixed
+
+- Static-bin FarmCPU no longer derives a pseudo-kinship REML variance fit.
+  GAPIT's static-bin path returns no variance components, so the result fields
+  `vg`, `ve`, and `h2` are now fixed at `0.0` instead of an unsupported
+  estimate.
+- sBLUP PEV for intentionally low-rank pseudo-kinship now inverts the kinship
+  at GAPIT's `MASS::ginv` tolerance instead of NumPy's smaller default cutoff,
+  so PEV and prediction-error values match the R reference.
+- MLMM reproduces GAPIT's complete forward and backward cofactor paths, so the
+  retained model and its marker statistics match the R reference at every
+  iteration.
 
 ## [1.2.4] - 2026-09-12
 
