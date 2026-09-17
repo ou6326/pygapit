@@ -54,6 +54,23 @@ attribute it to an individual stage. It includes parser, mmap, renderer, and
 native numerical memory; it is the appropriate field for machine-capacity
 planning, while tracemalloc remains useful for Python-allocation comparisons.
 
+To attribute numeric-import time within that scenario, run the stage profiler:
+
+```powershell
+pixi run python benchmarks/benchmark_numeric_import_profile.py --markers 100000 --output benchmarks/results/numeric-import-100k.json
+```
+
+It separates source and metadata setup, TSV parsing plus imputation, and NumPy
+matrix/metadata persistence. The profiler deliberately performs additional
+imports: one set supplies end-to-end timing and tracemalloc measurements, and a
+separate set supplies stage attribution without changing the production import
+path. Results are machine-dependent diagnostics, not release gates. On the
+development Windows machine (64 individuals, 100,000 markers, 32 MiB marker
+workspace, no warm-up, one repeat), the total import took 7.82 s with a 304 MiB
+tracemalloc peak: setup took 3.62 s, parsing and `Middle` imputation 4.35 s, and
+NumPy matrix plus metadata persistence 0.12 s. The source uses direct sample-row
+writes, so row-to-marker reordering took 0 s and allocated no reorder buffer.
+
 The preprocessing benchmark also accepts `--marker-workspace-mib` for wide
 PCA and VanRaden. On the development Windows machine (Python 3.12.14, NumPy
 2.5.2; 500 individuals, 50,000 markers; one warm-up, three repetitions), PCA

@@ -647,6 +647,49 @@ def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
         )
 
 
+def test_numeric_store_import_none_preserves_missing_values_and_marker_metadata(
+    tmp_path: Path,
+) -> None:
+    """The one-pass NumPy path must not alter ``none`` imputation semantics."""
+    genotype_path = tmp_path / "genotype.tsv"
+    marker_map = pd.DataFrame({
+        "SNP": ["s1", "s2", "s3"],
+        "Chromosome": [1, "X", 2],
+        "Position": [10, 20, 30],
+    })
+    pd.DataFrame({
+        "Taxa": ["first", "second"],
+        "s1": [0.0, np.nan],
+        "s2": [np.nan, 2.0],
+        "s3": [1.0, 0.0],
+    }).to_csv(genotype_path, sep="\t", index=False)
+    expected = read_numeric(genotype_path, marker_map, impute_method="none")
+    store_path = tmp_path / "numeric-store"
+
+    import_numeric_genotype_store(
+        store_path,
+        genotype_path,
+        marker_map,
+        impute_method="none",
+        backend="numpy",
+        marker_chunk_size=1,
+        marker_workspace_mib=0.00003,
+    )
+
+    with open_genotype_store(store_path, backend="numpy") as store:
+        np.testing.assert_equal(store.read_markers(slice(None)), expected.GD)
+        np.testing.assert_array_equal(store.taxa, expected.taxa)
+        np.testing.assert_array_equal(
+            store.marker_ids, marker_map["SNP"].to_numpy(dtype=str)
+        )
+        np.testing.assert_array_equal(
+            store.chromosomes, marker_map["Chromosome"].to_numpy(dtype=str)
+        )
+        np.testing.assert_array_equal(
+            store.positions, marker_map["Position"].to_numpy(dtype=np.float64)
+        )
+
+
 @pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 @pytest.mark.parametrize("major_allele_zero", [False, True])
 def test_hapmap_store_import_matches_in_memory_reader(
