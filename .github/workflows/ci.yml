@@ -37,7 +37,7 @@ jobs:
           python -m build
           python -m twine check dist/*
 
-      - name: Install and smoke-test wheel
+      - name: Install and smoke-test distributions
         shell: bash
         run: |
           python -m venv "$RUNNER_TEMP/pygapit-wheel-test"
@@ -45,6 +45,12 @@ jobs:
           cd "$RUNNER_TEMP"
           "$RUNNER_TEMP/pygapit-wheel-test/bin/python" -c "import pygapit; print(pygapit.__version__)"
           "$RUNNER_TEMP/pygapit-wheel-test/bin/pygapit" --help
+
+          python -m venv "$RUNNER_TEMP/pygapit-sdist-test"
+          "$RUNNER_TEMP/pygapit-sdist-test/bin/python" -m pip install "$GITHUB_WORKSPACE"/dist/*.tar.gz
+          cd "$RUNNER_TEMP"
+          "$RUNNER_TEMP/pygapit-sdist-test/bin/python" -c "import pygapit; print(pygapit.__version__)"
+          "$RUNNER_TEMP/pygapit-sdist-test/bin/pygapit" --help
 
   quality:
     name: Quality and bigdata tests
