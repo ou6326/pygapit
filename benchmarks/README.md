@@ -28,19 +28,26 @@ suites so noisy machine-dependent timings cannot fail correctness checks.
 ## Large-marker manual workload
 
 `benchmark_large_scale.py` combines the disk-backed paths that matter at
-marker scale: bounded numeric-file import into a NumPy store, VanRaden,
-PCA, a GLM marker scan, Manhattan preparation, exact and Datashader HoloViews
-objects, and a renderer pass. It uses 64 individuals and 100,000 markers by
-default, with no warm-up and one repeat so it remains practical on a developer
-machine. Its synthetic GD/GM source is written in 4,096-marker blocks, so
-selecting 1M or 10M does not first allocate a whole genotype matrix or marker
-table in RAM. It is manual-only and does not run those scales unless selected.
-The 100k workload includes exact-point HoloViews construction and rendering;
-the 1M and 10M selections deliberately skip exact points and retain genomic
-axis, complete Manhattan data, Datashader aggregation, and aggregate rendering.
+marker scale: bounded numeric-file import into a NumPy, HDF5, or Zarr store,
+VanRaden, PCA, a GLM marker scan, Manhattan preparation, exact and Datashader
+HoloViews objects, and a renderer pass. It uses 64 individuals and 100,000
+markers by default, with no warm-up and one repeat so it remains practical on a
+developer machine. Its synthetic GD/GM source is written in 4,096-marker
+blocks, so selecting 1M or 10M does not first allocate a whole genotype matrix
+or marker table in RAM. It is manual-only and does not run those scales unless
+selected. The 100k workload includes exact-point HoloViews construction and
+rendering; the 1M and 10M selections deliberately skip exact points and retain
+genomic axis, complete Manhattan data, Datashader aggregation, and aggregate
+rendering.
+
+`--store-backend` selects the store under test: `numpy` (default), `hdf5`, or
+`zarr`. The optional backends need `pygapit-ng[bigdata]`; spot-check them at the
+same marker count to compare their bounded import, scan, and rendering cost.
 
 ```powershell
 pixi run python benchmarks/benchmark_large_scale.py --markers 100000 --output benchmarks/results/large-100k.json
+pixi run python benchmarks/benchmark_large_scale.py --markers 100000 --store-backend hdf5 --output benchmarks/results/large-100k-hdf5.json
+pixi run python benchmarks/benchmark_large_scale.py --markers 100000 --store-backend zarr --output benchmarks/results/large-100k-zarr.json
 pixi run python benchmarks/benchmark_large_scale.py --markers 1000000 --output benchmarks/results/large-1m.json
 pixi run python benchmarks/benchmark_large_scale.py --markers 10000000 --output benchmarks/results/large-10m.json
 ```
@@ -53,6 +60,13 @@ high-water mark, so use a fresh `pixi run` process for comparisons and do not
 attribute it to an individual stage. It includes parser, mmap, renderer, and
 native numerical memory; it is the appropriate field for machine-capacity
 planning, while tracemalloc remains useful for Python-allocation comparisons.
+
+On the development Windows machine (64 individuals, 100,000 markers, 32 MiB
+marker workspace, one repeat, Bokeh rendering), the streaming numeric import
+took 8.53 s into a NumPy store, 10.06 s into HDF5, and 8.70 s into Zarr, each
+with a 304 MiB tracemalloc peak. Whole-scenario process peak RSS was 970 MiB,
+1014 MiB, and 1005 MiB respectively. These are machine-specific spot-check
+observations, not CI thresholds.
 
 To attribute numeric-import time within that scenario, run the stage profiler:
 

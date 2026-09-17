@@ -129,10 +129,10 @@ def _group_space_decomposition(
         positive = kinship_values > tolerance
         if np.count_nonzero(positive) < random_rank:
             return None
-        kinship_factor = kinship_vectors[:, positive] * np.sqrt(
-            kinship_values[positive]
-        )
-    observation_factor = residualized @ kinship_factor
+        factorization = kinship_vectors[:, positive] * np.sqrt(kinship_values[positive])
+    else:
+        factorization = kinship_factor
+    observation_factor = residualized @ factorization
     group_covariance = observation_factor.T @ observation_factor
     group_covariance = (group_covariance + group_covariance.T) / 2.0
     group_values, group_vectors = np.linalg.eigh(group_covariance)
@@ -194,8 +194,8 @@ def _subspace_residual(
     reference_basis: FloatMatrix,
 ) -> float:
     residual = candidate_basis - reference_basis @ (reference_basis.T @ candidate_basis)
-    return np.linalg.norm(residual, ord="fro").item() / np.sqrt(
-        candidate_basis.shape[1]
+    return float(
+        np.linalg.norm(residual, ord="fro") / np.sqrt(candidate_basis.shape[1])
     )
 
 

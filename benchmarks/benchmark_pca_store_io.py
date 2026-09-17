@@ -8,7 +8,7 @@ import tempfile
 from dataclasses import asdict, dataclass
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Literal
+from typing import Literal, final
 
 import numpy as np
 import pandas as pd
@@ -56,6 +56,7 @@ class PCAStoreIOReport:
     memory_note: str
 
 
+@final
 class _CountingStore:
     def __init__(self, parent: GenotypeStore) -> None:
         self.parent = parent

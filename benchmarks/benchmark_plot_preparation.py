@@ -5,6 +5,7 @@ from __future__ import annotations
 import argparse
 import json
 import typing as t
+from collections.abc import Callable
 
 import holoviews as hv
 import numpy as np
@@ -18,8 +19,10 @@ from pygapit.visualization.data import (
     prepare_manhattan_data,
 )
 from pygapit.visualization.plots import (
+    _as_dimensioned,
     _build_manhattan_plot,
     _register_holoviews_backends,
+    _runtime_object,
 )
 
 RendererBackend = t.Literal["matplotlib", "bokeh", "plotly"]
@@ -48,6 +51,18 @@ class PlotPreparationReport(t.TypedDict):
     memory_note: str
 
 
+class _CloneablePlot(t.Protocol):
+    """The HoloViews object surface used by the renderer benchmark."""
+
+    def clone(self, *, shared_data: bool, link: bool) -> object: ...
+
+
+class _RendererModule(t.Protocol):
+    """The HoloViews module surface used by the renderer benchmark."""
+
+    def render(self, obj: object, *, backend: RendererBackend) -> object: ...
+
+
 def _make_plot_inputs(
     n_markers: int,
     n_chromosomes: int,
@@ -70,8 +85,7 @@ def _make_plot_inputs(
 
 
 def _build_plot(data: ManhattanPlotData, *, aggregate: bool) -> Dimensioned:
-    return t.cast(
-        Dimensioned,
+    return _as_dimensioned(
         _build_manhattan_plot(
             data,
             aggregate=aggregate,
@@ -81,18 +95,29 @@ def _build_plot(data: ManhattanPlotData, *, aggregate: bool) -> Dimensioned:
             maf=None,
             figsize=(14.0, 5.0),
             point_size=1.5,
-        ),
+        )
     )
 
 
 def _render_clone(plot: Dimensioned, backend: RendererBackend) -> None:
-    clone = t.cast(Dimensioned, plot.clone(shared_data=True, link=False))
-    rendered = t.cast(object, hv.render(clone, backend=backend))
+    clone = _as_dimensioned(
+        t.cast(_CloneablePlot, plot).clone(shared_data=True, link=False)
+    )
+    rendered = t.cast(_RendererModule, _runtime_object(hv)).render(
+        clone, backend=backend
+    )
     if backend == "matplotlib":
         import matplotlib.pyplot as plt
         from matplotlib.figure import Figure
 
         plt.close(t.cast(Figure, rendered))
+
+
+def _render_operation(
+    plot: Dimensioned,
+    backend: RendererBackend,
+) -> Callable[[], None]:
+    return lambda: _render_clone(plot, backend)
 
 
 def run_plot_preparation_benchmark(
@@ -164,7 +189,7 @@ def run_plot_preparation_benchmark(
                 measurements.append(
                     _benchmark(
                         f"manhattan_points_render_{backend}",
-                        lambda backend=backend: _render_clone(point_plot, backend),
+                        _render_operation(point_plot, backend),
                         warmups=warmups,
                         repeats=repeats,
                     )
@@ -172,7 +197,7 @@ def run_plot_preparation_benchmark(
             measurements.append(
                 _benchmark(
                     f"manhattan_aggregate_render_{backend}",
-                    lambda backend=backend: _render_clone(aggregate_plot, backend),
+                    _render_operation(aggregate_plot, backend),
                     warmups=warmups,
                     repeats=repeats,
                 )
