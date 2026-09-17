@@ -72,9 +72,10 @@ At 1,000,000 markers the same machine is import-bound: the streaming import
 took 566.6 s (NumPy), 566.3 s (HDF5), and 501.2 s (Zarr), each with a 2338 MiB
 tracemalloc peak, while VanRaden kinship, PCA, and the GLM marker scan each
 finished in seconds and the whole-scenario process peak RSS stayed near
-7.9-8.0 GiB. The near-flat backend spread shows the cost is dominated by text
-parsing and imputation rather than the store write, so 10M stays a
-capacity-planning exercise rather than a routine spot check.
+7.9-8.0 GiB. The three backends stay within the same order of magnitude with
+no backend-specific blow-up, so the cost is dominated by text parsing and
+imputation rather than the store write; 10M stays a capacity-planning exercise
+rather than a routine spot check.
 
 To attribute numeric-import time within that scenario, run the stage profiler:
 
