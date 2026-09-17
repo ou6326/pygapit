@@ -120,7 +120,14 @@ def _emma_blup(
 
     c11 = vg * information_inverse
     c21 = -K @ transformed_basis @ transformed_x @ c11
-    k_inverse = np.linalg.pinv(K)
+    # GAPIT falls back to MASS::ginv(K), whose default tolerance is
+    # sqrt(.Machine$double.eps).  This matters for the intentionally low-rank
+    # pseudo-kinships used by sBLUP: NumPy's much smaller default cutoff would
+    # retain numerical-null directions and inflate the corresponding PEVs.
+    k_inverse = np.linalg.pinv(
+        K,
+        rcond=np.sqrt(np.finfo(np.float64).eps),
+    )
     try:
         random_block = np.linalg.inv(np.eye(n) / ve + k_inverse / vg)
     except np.linalg.LinAlgError:

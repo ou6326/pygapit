@@ -12,7 +12,7 @@ import pandas as pd
 
 from pygapit._typing import FloatMatrix, FloatVector, StrVector
 from pygapit.gapit import GAPIT, GAPITResult
-from pygapit.gs.blup import cblup, gblup
+from pygapit.gs.blup import cblup, gblup, sblup, select_super_qtns
 from tests.cross_language.r_bridge import RBridge, RList, RMatrix
 from tests.cross_language.workflow import r_scalar
 
@@ -530,6 +530,175 @@ def test_official_maize_cblup_workflow_matches_gapit(
 
     assert isinstance(workflow_result, GAPITResult)
     assert workflow_result.Pred is not None
+    nt.assert_array_equal(workflow_result.Pred["Taxa"], inputs.taxa)
+    nt.assert_array_equal(workflow_result.Pred["BLUE"], np.round(py_direct.blue, 4))
+    nt.assert_array_equal(workflow_result.Pred["BLUP"], np.round(py_direct.blup, 4))
+    nt.assert_array_equal(workflow_result.Pred["PEV"], np.round(py_direct.pev, 6))
+    nt.assert_array_equal(
+        workflow_result.Pred["Prediction"], np.round(py_direct.prediction, 4)
+    )
+
+
+def test_official_maize_sblup_workflow_matches_corrected_gapit(
+    r_bridge: RBridge,
+    r_root: Path,
+) -> None:
+    """Compare EarHT scan, corrected SUPER selection, and sBLUP outputs."""
+    inputs = _load_official_dataset(r_root)
+    r_scores = _r_pca_scores(r_bridge, r_root, inputs, component_count=3)
+    design = np.column_stack([np.ones(len(inputs.taxa)), r_scores])
+    covariates_with_taxa = np.column_stack([
+        np.arange(len(inputs.taxa), dtype=np.float64),
+        r_scores,
+    ])
+    marker_index = pd.Index(inputs.marker_names, dtype="str")
+    marker_map = inputs.marker_map.set_index("SNP").loc[marker_index]
+    chromosome_values: FloatVector = marker_map["Chromosome"].to_numpy(dtype=np.float64)
+    chromosomes: StrVector = chromosome_values.astype(np.str_)
+    positions = marker_map["Position"].to_numpy(dtype=np.float64)
+    candidate_counts = (10, 20, 40, 60, 80, 100)
+    bin_size = 10_000
+    for filename in (
+        "GAPIT.Specify.R",
+        "GAPIT.kinship.VanRaden.R",
+        "GAPIT.get.LL.R",
+        "GAPIT.emma.R",
+        "GAPIT.replaceNaN.R",
+        "GAPIT.emma.REMLE.R",
+        "GAPIT.Timmer.R",
+        "GAPIT.Memory.R",
+    ):
+        r_bridge.source(r_root, filename)
+    r_scan = r_bridge.source_function(
+        r_root,
+        "GAPIT.EMMAxP3D.R",
+        "GAPIT.EMMAxP3D",
+        returns=RList,
+    )
+    r_null = r_bridge.evaluate("NULL")
+    r_scan_result = r_scan(
+        ys=r_bridge.matrix(inputs.phenotype_values[np.newaxis, :]),
+        xs=r_bridge.matrix(inputs.genotype_values),
+        K=r_bridge.matrix(
+            _r_vanraden_kinship(r_bridge, r_root, inputs.genotype_values)
+        ),
+        X0=r_bridge.matrix(design),
+        CVI=r_bridge.matrix(covariates_with_taxa),
+        file_from=1,
+        file_to=1,
+        file_fragment=inputs.genotype_values.shape[1],
+        fullGD=True,
+        SNP_P3D=True,
+        Timmer=r_null,
+        Memory=r_null,
+        optOnly=False,
+    )
+    r_p_values = r_bridge.float_array(r_bridge.component(r_scan_result, "ps")).reshape(
+        -1
+    )
+    r_super = r_bridge.function(
+        "function(y, X0, CVI, GD, chr, pos, p, bin_size, counts) {"
+        " GI <- cbind(seq_along(p), chr, pos);"
+        " GP <- cbind(seq_along(p), chr, pos, p);"
+        " fits <- lapply(counts, function(count) {"
+        "   specified <- GAPIT.Specify("
+        "     GI=GI, GP=GP, bin.size=bin_size, inclosure.size=count);"
+        "   index <- which(specified$index);"
+        "   K <- GAPIT.kinship.VanRaden(GD[, index, drop=FALSE]);"
+        "   remle <- GAPIT.emma.REMLE(y, X0, K);"
+        "   legacy <- GAPIT.get.LL("
+        "     pheno=matrix(y, ncol=1), snp.pool=GD[, index, drop=FALSE], X0=X0);"
+        "   list(index=index, reml=remle$REML, legacy=legacy$LL, K=K)"
+        " });"
+        " best <- which.max(vapply(fits, `[[`, numeric(1), 'reml'));"
+        " fit <- GAPIT.EMMAxP3D("
+        "   ys=matrix(y, nrow=1), xs=GD[, 1, drop=FALSE], K=fits[[best]]$K,"
+        "   X0=X0, CVI=CVI, file.from=1, file.to=1, file.fragment=1,"
+        "   fullGD=TRUE, SNP.P3D=TRUE, Timmer=NULL, Memory=NULL, optOnly=TRUE);"
+        " list(index=fits[[best]]$index, counts=counts,"
+        "      reml=vapply(fits, `[[`, numeric(1), 'reml'),"
+        "      legacy=vapply(fits, function(fit) fit$legacy, numeric(1)),"
+        "      BLUE=rowSums(fit$BLUE), BLUP=as.numeric(fit$BLUP),"
+        "      PEV=as.numeric(fit$PEV), vg=fit$vgs, ve=fit$ves)"
+        "}",
+        returns=RList,
+    )
+    r_result = r_super(
+        r_bridge.float_vector(inputs.phenotype_values),
+        r_bridge.matrix(design),
+        r_bridge.matrix(covariates_with_taxa),
+        r_bridge.matrix(inputs.genotype_values),
+        r_bridge.float_vector(chromosome_values),
+        r_bridge.float_vector(positions),
+        r_bridge.float_vector(r_p_values),
+        bin_size,
+        r_bridge.float_vector(np.asarray(candidate_counts, dtype=np.float64)),
+    )
+    py_selection = select_super_qtns(
+        inputs.phenotype_values,
+        design,
+        inputs.genotype_values,
+        chromosomes,
+        positions,
+        r_p_values,
+        bin_size=bin_size,
+        candidate_counts=candidate_counts,
+    )
+    r_indices = (
+        r_bridge.float_array(r_bridge.component(r_result, "index")).astype(np.intp) - 1
+    )
+    r_reml = r_bridge.float_array(r_bridge.component(r_result, "reml"))
+    r_legacy = r_bridge.float_array(r_bridge.component(r_result, "legacy"))
+    nt.assert_array_equal(py_selection.qtn_indices, r_indices)
+    nt.assert_array_equal(py_selection.candidate_counts, candidate_counts)
+    nt.assert_allclose(py_selection.reml, r_reml, rtol=2e-5, atol=1e-8)
+    assert not np.allclose(r_legacy, r_reml)
+
+    py_direct = sblup(
+        inputs.phenotype_values,
+        design,
+        inputs.genotype_values,
+        qtn_indices=py_selection.qtn_indices,
+        taxa=inputs.taxa,
+    )
+    r_blue = r_bridge.float_array(r_bridge.component(r_result, "BLUE"))
+    r_blup = r_bridge.float_array(r_bridge.component(r_result, "BLUP"))
+    r_pev = r_bridge.float_array(r_bridge.component(r_result, "PEV"))
+    r_vg = r_scalar(r_bridge, r_result, "vg")
+    r_ve = r_scalar(r_bridge, r_result, "ve")
+    nt.assert_array_equal(py_direct.taxa, inputs.taxa)
+    nt.assert_allclose(py_direct.blue, r_blue, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.blup, r_blup, rtol=2e-5, atol=2e-4)
+    nt.assert_allclose(py_direct.pev, r_pev, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.prediction, r_blue + r_blup, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.vg, r_vg, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.ve, r_ve, rtol=2e-5, atol=1e-8)
+    nt.assert_allclose(py_direct.h2, r_vg / (r_vg + r_ve), rtol=2e-5, atol=1e-8)
+
+    workflow_result = GAPIT(
+        Y=inputs.phenotype,
+        GD=inputs.genotype,
+        GM=inputs.marker_map,
+        model="sBLUP",
+        trait="EarHT",
+        PCA_total=3,
+        maf_threshold=0.05,
+        super_bin_size=bin_size,
+        super_qtn_counts=candidate_counts,
+        file_output=False,
+    )
+
+    assert isinstance(workflow_result, GAPITResult)
+    assert workflow_result.GWAS is not None
+    assert workflow_result.QTNs is not None
+    assert workflow_result.Pred is not None
+    nt.assert_allclose(
+        np.asarray(workflow_result.GWAS["P.value"], dtype=np.float64),
+        r_p_values[inputs.output_order],
+        rtol=5e-5,
+        atol=2e-8,
+    )
+    nt.assert_array_equal(workflow_result.QTNs, py_selection.qtn_indices)
     nt.assert_array_equal(workflow_result.Pred["Taxa"], inputs.taxa)
     nt.assert_array_equal(workflow_result.Pred["BLUE"], np.round(py_direct.blue, 4))
     nt.assert_array_equal(workflow_result.Pred["BLUP"], np.round(py_direct.blup, 4))
