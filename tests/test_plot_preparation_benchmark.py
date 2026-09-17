@@ -17,6 +17,7 @@ def test_plot_preparation_benchmark_reports_separate_stages() -> None:
         "warmups": 0,
         "repeats": 1,
         "render_backends": [],
+        "include_points": True,
     }
     measurements = report["measurements"]
     assert [measurement["name"] for measurement in measurements] == [
@@ -39,5 +40,24 @@ def test_plot_preparation_benchmark_can_measure_renderer_stage() -> None:
     assert report["workload"]["render_backends"] == ["matplotlib"]
     assert [measurement["name"] for measurement in report["measurements"]][-2:] == [
         "manhattan_points_render_matplotlib",
+        "manhattan_aggregate_render_matplotlib",
+    ]
+
+
+def test_plot_preparation_benchmark_can_skip_exact_points() -> None:
+    report = run_plot_preparation_benchmark(
+        n_markers=20,
+        n_chromosomes=2,
+        warmups=0,
+        repeats=1,
+        render_backends=("matplotlib",),
+        include_points=False,
+    )
+
+    assert report["workload"]["include_points"] is False
+    assert [measurement["name"] for measurement in report["measurements"]] == [
+        "genomic_axis",
+        "manhattan_data",
+        "manhattan_aggregate_object",
         "manhattan_aggregate_render_matplotlib",
     ]

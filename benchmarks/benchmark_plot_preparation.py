@@ -31,6 +31,7 @@ class PlotPreparationWorkload(t.TypedDict):
     warmups: int
     repeats: int
     render_backends: list[RendererBackend]
+    include_points: bool
 
 
 class PlotPreparationMeasurement(t.TypedDict):
@@ -101,6 +102,7 @@ def run_plot_preparation_benchmark(
     warmups: int,
     repeats: int,
     render_backends: tuple[RendererBackend, ...] = (),
+    include_points: bool = True,
 ) -> PlotPreparationReport:
     """Measure preparation and construction, plus requested renderer stages."""
     if warmups < 0:
@@ -138,36 +140,43 @@ def run_plot_preparation_benchmark(
             repeats=repeats,
         ),
         _benchmark(
-            "manhattan_points_object",
-            lambda: _build_plot(prepared, aggregate=False),
-            warmups=warmups,
-            repeats=repeats,
-        ),
-        _benchmark(
             "manhattan_aggregate_object",
             lambda: _build_plot(prepared, aggregate=True),
             warmups=warmups,
             repeats=repeats,
         ),
     ]
+    if include_points:
+        measurements.insert(
+            2,
+            _benchmark(
+                "manhattan_points_object",
+                lambda: _build_plot(prepared, aggregate=False),
+                warmups=warmups,
+                repeats=repeats,
+            ),
+        )
     if render_backends:
-        point_plot = _build_plot(prepared, aggregate=False)
         aggregate_plot = _build_plot(prepared, aggregate=True)
+        point_plot = _build_plot(prepared, aggregate=False) if include_points else None
         for backend in render_backends:
-            measurements.extend([
-                _benchmark(
-                    f"manhattan_points_render_{backend}",
-                    lambda backend=backend: _render_clone(point_plot, backend),
-                    warmups=warmups,
-                    repeats=repeats,
-                ),
+            if point_plot is not None:
+                measurements.append(
+                    _benchmark(
+                        f"manhattan_points_render_{backend}",
+                        lambda backend=backend: _render_clone(point_plot, backend),
+                        warmups=warmups,
+                        repeats=repeats,
+                    )
+                )
+            measurements.append(
                 _benchmark(
                     f"manhattan_aggregate_render_{backend}",
                     lambda backend=backend: _render_clone(aggregate_plot, backend),
                     warmups=warmups,
                     repeats=repeats,
-                ),
-            ])
+                )
+            )
     return {
         "workload": {
             "markers": n_markers,
@@ -175,6 +184,7 @@ def run_plot_preparation_benchmark(
             "warmups": warmups,
             "repeats": repeats,
             "render_backends": list(render_backends),
+            "include_points": include_points,
         },
         "measurements": [
             {
@@ -187,10 +197,10 @@ def run_plot_preparation_benchmark(
             for measurement in measurements
         ],
         "memory_note": (
-            "traced_peak_mib measures Python and NumPy allocations during each "
-            "operation; input arrays and renderer templates are allocated before "
-            "tracing, and renderer measurements clone their template to avoid "
-            "reusing a populated DynamicMap cache"
+            "traced_peak_mib measures Python and NumPy allocations; input arrays "
+            "and renderer templates are allocated before tracing, and renderer "
+            "measurements clone their template to avoid reusing a populated "
+            "DynamicMap cache"
         ),
     }
 
@@ -211,6 +221,11 @@ def main() -> None:
             "multiple backends. Rendering is skipped by default."
         ),
     )
+    parser.add_argument(
+        "--skip-points",
+        action="store_true",
+        help="Skip exact-point object construction and rendering.",
+    )
     args = parser.parse_args()
 
     report = run_plot_preparation_benchmark(
@@ -219,6 +234,7 @@ def main() -> None:
         warmups=args.warmups,
         repeats=args.repeats,
         render_backends=tuple(args.render_backend),
+        include_points=not args.skip_points,
     )
     print(json.dumps(report, indent=2))
 

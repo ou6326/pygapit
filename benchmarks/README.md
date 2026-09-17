@@ -25,6 +25,35 @@ internally by native BLAS libraries and should not be presented as whole-process
 peak RSS. The script deliberately remains outside the regular pytest and CI
 suites so noisy machine-dependent timings cannot fail correctness checks.
 
+## Large-marker manual workload
+
+`benchmark_large_scale.py` combines the disk-backed paths that matter at
+marker scale: bounded numeric-file import into a NumPy store, VanRaden,
+PCA, a GLM marker scan, Manhattan preparation, exact and Datashader HoloViews
+objects, and a renderer pass. It uses 64 individuals and 100,000 markers by
+default, with no warm-up and one repeat so it remains practical on a developer
+machine. Its synthetic GD/GM source is written in 4,096-marker blocks, so
+selecting 1M or 10M does not first allocate a whole genotype matrix or marker
+table in RAM. It is manual-only and does not run those scales unless selected.
+The 100k workload includes exact-point HoloViews construction and rendering;
+the 1M and 10M selections deliberately skip exact points and retain genomic
+axis, complete Manhattan data, Datashader aggregation, and aggregate rendering.
+
+```powershell
+pixi run python benchmarks/benchmark_large_scale.py --markers 100000 --output benchmarks/results/large-100k.json
+pixi run python benchmarks/benchmark_large_scale.py --markers 1000000 --output benchmarks/results/large-1m.json
+pixi run python benchmarks/benchmark_large_scale.py --markers 10000000 --output benchmarks/results/large-10m.json
+```
+
+All stages report wall time plus `traced_peak_mib`; one separate
+`scenario_process_peak_rss_mib` covers the entire import, numerical, and
+rendering run. On Windows it samples the process working set through the native
+process API; on POSIX it uses `resource.ru_maxrss`. The POSIX value is a process
+high-water mark, so use a fresh `pixi run` process for comparisons and do not
+attribute it to an individual stage. It includes parser, mmap, renderer, and
+native numerical memory; it is the appropriate field for machine-capacity
+planning, while tracemalloc remains useful for Python-allocation comparisons.
+
 The preprocessing benchmark also accepts `--marker-workspace-mib` for wide
 PCA and VanRaden. On the development Windows machine (Python 3.12.14, NumPy
 2.5.2; 500 individuals, 50,000 markers; one warm-up, three repetitions), PCA

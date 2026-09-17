@@ -4,12 +4,14 @@ from __future__ import annotations
 
 import argparse
 import contextlib
+import ctypes
 import gc
 import io
 import json
 import os
 import platform
 import sys
+import threading
 import time
 import tracemalloc
 from collections.abc import Callable, Sequence
@@ -19,6 +21,35 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 import scipy
+
+if sys.platform == "win32":
+
+    class _ProcessMemoryCounters(ctypes.Structure):
+        _fields_ = [
+            ("cb", ctypes.c_ulong),
+            ("PageFaultCount", ctypes.c_ulong),
+            ("PeakWorkingSetSize", ctypes.c_size_t),
+            ("WorkingSetSize", ctypes.c_size_t),
+            ("QuotaPeakPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaPeakNonPagedPoolUsage", ctypes.c_size_t),
+            ("QuotaNonPagedPoolUsage", ctypes.c_size_t),
+            ("PagefileUsage", ctypes.c_size_t),
+            ("PeakPagefileUsage", ctypes.c_size_t),
+        ]
+
+    _KERNEL32 = ctypes.WinDLL("kernel32")
+    _KERNEL32.GetCurrentProcess.restype = ctypes.c_void_p
+    _CURRENT_PROCESS = _KERNEL32.GetCurrentProcess()
+    _GET_PROCESS_MEMORY_INFO = ctypes.WinDLL("psapi").GetProcessMemoryInfo
+    _GET_PROCESS_MEMORY_INFO.argtypes = (
+        ctypes.c_void_p,
+        ctypes.POINTER(_ProcessMemoryCounters),
+        ctypes.c_ulong,
+    )
+    _GET_PROCESS_MEMORY_INFO.restype = ctypes.c_int
+else:
+    import resource
 
 from pygapit._typing import FloatMatrix, FloatVector, IntVector
 from pygapit.gapit import GAPIT
@@ -101,20 +132,33 @@ def _measure_time(
     *,
     warmups: int,
     repeats: int,
+    cleanup: Callable[[], None] | None = None,
 ) -> list[float]:
     for _ in range(warmups):
-        operation()
+        try:
+            operation()
+        finally:
+            if cleanup is not None:
+                cleanup()
 
     timings: list[float] = []
     for _ in range(repeats):
         gc.collect()
         started = time.perf_counter()
-        operation()
-        timings.append(time.perf_counter() - started)
+        try:
+            operation()
+            timings.append(time.perf_counter() - started)
+        finally:
+            if cleanup is not None:
+                cleanup()
     return timings
 
 
-def _measure_peak_memory(operation: Callable[[], object]) -> float:
+def _measure_peak_memory(
+    operation: Callable[[], object],
+    *,
+    cleanup: Callable[[], None] | None = None,
+) -> float:
     gc.collect()
     tracemalloc.start()
     try:
@@ -122,7 +166,61 @@ def _measure_peak_memory(operation: Callable[[], object]) -> float:
         _current, peak = tracemalloc.get_traced_memory()
     finally:
         tracemalloc.stop()
+        if cleanup is not None:
+            cleanup()
     return peak / (1024.0**2)
+
+
+def _process_rss_bytes() -> tuple[int, str]:
+    """Return process RSS, without adding a benchmark-only dependency.
+
+    ``resource.ru_maxrss`` is the OS high-water mark on POSIX.  Windows has no
+    ``resource`` module, so query the current working set through the native
+    process API; the caller samples it while an operation is active.
+    """
+    if sys.platform == "win32":
+        counters = _ProcessMemoryCounters()
+        counters.cb = ctypes.sizeof(counters)
+        if not _GET_PROCESS_MEMORY_INFO(
+            _CURRENT_PROCESS,
+            ctypes.byref(counters),
+            counters.cb,
+        ):
+            raise OSError("GetProcessMemoryInfo failed")
+        return int(counters.WorkingSetSize), "windows_working_set_sample"
+
+    usage = resource.getrusage(resource.RUSAGE_SELF)
+    # Linux reports KiB, while macOS reports bytes.
+    rss = int(usage.ru_maxrss)
+    if sys.platform != "darwin":
+        rss *= 1024
+    return rss, "resource_ru_maxrss"
+
+
+def _measure_scenario_peak_rss(
+    operation: Callable[[], object],
+) -> tuple[object, float, str]:
+    """Measure a whole-scenario process RSS peak separately from Python allocations."""
+    gc.collect()
+    initial_rss, source = _process_rss_bytes()
+    peak_rss = initial_rss
+    stop = threading.Event()
+
+    def sample() -> None:
+        nonlocal peak_rss
+        while not stop.wait(0.005):
+            current_rss, _ = _process_rss_bytes()
+            peak_rss = max(peak_rss, current_rss)
+
+    sampler = threading.Thread(target=sample, name="pygapit-rss-sampler", daemon=True)
+    sampler.start()
+    try:
+        result = operation()
+    finally:
+        stop.set()
+        sampler.join()
+    final_rss, _ = _process_rss_bytes()
+    return result, max(peak_rss, final_rss) / (1024.0**2), source
 
 
 def _benchmark(
@@ -131,9 +229,15 @@ def _benchmark(
     *,
     warmups: int,
     repeats: int,
+    cleanup: Callable[[], None] | None = None,
 ) -> BenchmarkResult:
     timings = np.asarray(
-        _measure_time(operation, warmups=warmups, repeats=repeats),
+        _measure_time(
+            operation,
+            warmups=warmups,
+            repeats=repeats,
+            cleanup=cleanup,
+        ),
         dtype=np.float64,
     )
     return BenchmarkResult(
@@ -141,7 +245,7 @@ def _benchmark(
         median_seconds=np.median(timings).item(),
         minimum_seconds=np.min(timings).item(),
         maximum_seconds=np.max(timings).item(),
-        traced_peak_mib=_measure_peak_memory(operation),
+        traced_peak_mib=_measure_peak_memory(operation, cleanup=cleanup),
     )
 
 
