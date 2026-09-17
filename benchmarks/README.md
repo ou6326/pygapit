@@ -68,6 +68,14 @@ with a 304 MiB tracemalloc peak. Whole-scenario process peak RSS was 970 MiB,
 1014 MiB, and 1005 MiB respectively. These are machine-specific spot-check
 observations, not CI thresholds.
 
+At 1,000,000 markers the same machine is import-bound: the streaming import
+took 566.6 s (NumPy), 566.3 s (HDF5), and 501.2 s (Zarr), each with a 2338 MiB
+tracemalloc peak, while VanRaden kinship, PCA, and the GLM marker scan each
+finished in seconds and the whole-scenario process peak RSS stayed near
+7.9-8.0 GiB. The near-flat backend spread shows the cost is dominated by text
+parsing and imputation rather than the store write, so 10M stays a
+capacity-planning exercise rather than a routine spot check.
+
 To attribute numeric-import time within that scenario, run the stage profiler:
 
 ```powershell
