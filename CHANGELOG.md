@@ -6,7 +6,7 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
-## [2.0.0rc1] - 2026-09-22
+## [2.0.0rc1] - 2026-09-23
 
 ### Added
 
@@ -81,6 +81,10 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Fixed
 
+- Failed NumPy, HDF5, and Zarr writes remove the incomplete genotype store so
+  the same destination can be retried safely.
+- Failed plot generation no longer reports stale files from an earlier run as
+  outputs produced by the current analysis.
 - Static-bin FarmCPU no longer derives a pseudo-kinship REML variance fit.
   GAPIT's static-bin path returns no variance components, so the result fields
   `vg`, `ve`, and `h2` are now fixed at `0.0` instead of an unsupported
