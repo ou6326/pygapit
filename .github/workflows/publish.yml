@@ -6,7 +6,78 @@ on:
       - "v*"
   workflow_dispatch:
 
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
+  prepare-release:
+    if: github.event_name == 'push' && github.ref_type == 'tag'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    outputs:
+      prerelease: ${{ steps.release-notes.outputs.prerelease }}
+      release_body: ${{ steps.release-notes.outputs.release_body }}
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - id: release-notes
+        name: Generate release notes
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ github.token }}
+          script: |
+            const fs = require('fs');
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const currentTag = context.ref.replace('refs/tags/', '');
+            const version = currentTag.replace(/^v/, '');
+            const tags = await github.paginate(github.rest.repos.listTags, {
+              owner,
+              repo,
+              per_page: 100,
+            });
+            const currentIndex = tags.findIndex(({ name }) => name === currentTag);
+            const previousTag = currentIndex >= 0
+              ? tags[currentIndex + 1]?.name
+              : undefined;
+            const parameters = {
+              owner,
+              repo,
+              tag_name: currentTag,
+            };
+            if (previousTag) {
+              parameters.previous_tag_name = previousTag;
+            }
+            const generated = await github.rest.repos.generateReleaseNotes(parameters);
+            const prerelease = /(?:a|b|rc)\d+|\.dev\d+/.test(version);
+            const changelog = fs.readFileSync('CHANGELOG.md', 'utf8').split(/\r?\n/);
+            const heading = `## [${version}]`;
+            const start = changelog.findIndex(
+              (line) => line === heading || line.startsWith(`${heading} - `),
+            );
+            let releaseBody = generated.data.body || '';
+            if (start >= 0) {
+              const following = changelog.slice(start + 1);
+              const nextHeading = following.findIndex((line) => line.startsWith('## ['));
+              const end = nextHeading >= 0 ? start + 1 + nextHeading : changelog.length;
+              const narrative = changelog.slice(start + 1, end).join('\n').trim();
+              if (narrative) {
+                releaseBody = releaseBody
+                  ? `${narrative}\n\n---\n\n${releaseBody}`
+                  : narrative;
+              }
+            }
+
+            core.setOutput('prerelease', prerelease);
+            core.setOutput('release_body', releaseBody);
+            core.info(
+              `Prepared release notes for ${currentTag}`
+              + (previousTag ? ` after ${previousTag}.` : '.'),
+            );
+
   build:
     runs-on: ubuntu-latest
 
@@ -77,7 +148,7 @@ jobs:
 
   release-github:
     if: github.event_name == 'push' && github.ref_type == 'tag'
-    needs: [build, publish-pypi]
+    needs: [prepare-release, build, publish-pypi]
     runs-on: ubuntu-latest
 
     permissions:
@@ -94,13 +165,20 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
+          RELEASE_BODY: ${{ needs.prepare-release.outputs.release_body }}
+          RELEASE_PRERELEASE: ${{ needs.prepare-release.outputs.prerelease }}
         run: |
           release_title="pyGAPIT ${GITHUB_REF_NAME#v}"
           if gh release view "$GITHUB_REF_NAME" >/dev/null 2>&1; then
             gh release upload "$GITHUB_REF_NAME" dist/* --clobber
           else
+            prerelease_args=()
+            if [[ "$RELEASE_PRERELEASE" == "true" ]]; then
+              prerelease_args+=(--prerelease)
+            fi
             gh release create "$GITHUB_REF_NAME" dist/* \
               --verify-tag \
-              --generate-notes \
+              --notes "$RELEASE_BODY" \
+              "${prerelease_args[@]}" \
               --title "$release_title"
           fi

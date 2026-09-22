@@ -6,6 +6,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [2.0.0rc1] - 2026-09-22
+
 ### Added
 
 - Typed `Visualization` objects with independently assignable notebook
@@ -233,7 +235,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v1.2.4...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v2.0.0rc1...main
+[2.0.0rc1]: https://github.com/ou6326/pygapit/compare/v1.2.4...v2.0.0rc1
 [1.2.4]: https://github.com/ou6326/pygapit/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/ou6326/pygapit/compare/v1.2.2...v1.2.3
 [1.2.2]: https://github.com/ou6326/pygapit/compare/v1.2.1...v1.2.2
