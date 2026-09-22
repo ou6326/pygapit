@@ -73,8 +73,9 @@ class ArrayGenotypeStore:
         sample_indices: IntVector | slice | None = None,
     ) -> FloatMatrix:
         block = self._genotype[:, marker_slice]
-        if sample_indices is not None:
-            block = block[sample_indices]
+        selection = normalize_sample_selection(sample_indices, self.shape[0])
+        if selection is not None:
+            block = block[selection]
         result = np.asarray(block, dtype=np.float64).view()
         result.setflags(write=False)
         return result
@@ -102,12 +103,13 @@ def _normalize_view_indices(
     ):
         raise TypeError(f"{name} must contain integer indices, not {indices.dtype}")
     normalized = np.array(indices, dtype=np.int_, copy=True)
+    normalized[normalized < 0] += size
     if np.any(normalized < 0) or np.any(normalized >= size):
         raise IndexError(f"{name} contains an index outside [0, {size})")
     return normalized
 
 
-def _read_sample_selection(
+def normalize_sample_selection(
     sample_indices: IntVector | slice | None,
     size: int,
 ) -> IntVector | slice | None:
@@ -176,7 +178,7 @@ class GenotypeView:
         sample_indices: IntVector | slice | None = None,
     ) -> FloatMatrix:
         sample_count, marker_count = self.shape
-        direct_samples = _read_sample_selection(sample_indices, sample_count)
+        direct_samples = normalize_sample_selection(sample_indices, sample_count)
         if self._sample_indices is None:
             parent_samples = direct_samples
         else:

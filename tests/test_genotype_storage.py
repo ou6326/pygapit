@@ -847,7 +847,7 @@ def test_auto_backend_silently_falls_back_to_numpy_without_optional_backends(
             )
 
 
-def test_explicit_hdf5_backend_warns_when_dependency_is_missing(
+def test_explicit_hdf5_backend_reports_when_dependency_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -866,10 +866,7 @@ def test_explicit_hdf5_backend_warns_when_dependency_is_missing(
 
     monkeypatch.setattr(builtins, "__import__", import_without_h5py)
 
-    with (
-        pytest.warns(RuntimeWarning, match="backend='numpy'"),
-        pytest.raises(ImportError, match=r"pygapit-ng\[bigdata\]"),
-    ):
+    with pytest.raises(ImportError, match=r"pygapit-ng\[bigdata\]"):
         write_genotype_store(
             tmp_path / "genotype",
             _genotype_data(),
@@ -877,7 +874,7 @@ def test_explicit_hdf5_backend_warns_when_dependency_is_missing(
         )
 
 
-def test_explicit_zarr_backend_warns_when_dependency_is_missing(
+def test_explicit_zarr_backend_reports_when_dependency_is_missing(
     monkeypatch: pytest.MonkeyPatch,
     tmp_path: Path,
 ) -> None:
@@ -896,15 +893,76 @@ def test_explicit_zarr_backend_warns_when_dependency_is_missing(
 
     monkeypatch.setattr(builtins, "__import__", import_without_zarr)
 
-    with (
-        pytest.warns(RuntimeWarning, match="backend='numpy'"),
-        pytest.raises(ImportError, match=r"pygapit-ng\[bigdata\]"),
-    ):
+    with pytest.raises(ImportError, match=r"pygapit-ng\[bigdata\]"):
         write_genotype_store(
             tmp_path / "genotype.zarr",
             _genotype_data(),
             backend="zarr",
         )
+
+
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
+def test_store_sample_indices_follow_numpy_semantics(
+    tmp_path: Path,
+    backend: StorageBackend,
+) -> None:
+    genotype = _genotype_data()
+    path = tmp_path / f"genotype-{backend}"
+    write_genotype_store(path, genotype, backend=backend)
+
+    with open_genotype_store(path, backend=backend) as store:
+        sample_indices = np.asarray([-1, 0, -1], dtype=np.int_)
+        actual = store.read_markers(slice(1, 4), sample_indices)
+        np.testing.assert_array_equal(
+            actual,
+            genotype.GD[sample_indices, 1:4],
+        )
+
+
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
+@pytest.mark.parametrize("sample_index", [-5, 4])
+def test_store_rejects_out_of_bounds_sample_indices(
+    tmp_path: Path,
+    backend: StorageBackend,
+    sample_index: int,
+) -> None:
+    path = tmp_path / f"genotype-{backend}"
+    write_genotype_store(path, _genotype_data(), backend=backend)
+
+    with (
+        open_genotype_store(path, backend=backend) as store,
+        pytest.raises(IndexError, match="outside"),
+    ):
+        store.read_markers(
+            slice(None),
+            np.asarray([sample_index], dtype=np.int_),
+        )
+
+
+@pytest.mark.parametrize("backend", ["numpy", "hdf5", "zarr"])
+@pytest.mark.parametrize(("shape", "message"), [((0, 2), "sample"), ((2, 0), "marker")])
+def test_store_writers_reject_empty_dimensions_before_creating_output(
+    tmp_path: Path,
+    backend: StorageBackend,
+    shape: tuple[int, int],
+    message: str,
+) -> None:
+    rows, columns = shape
+    genotype = GenotypeData(
+        np.empty(shape, dtype=np.float64),
+        pd.DataFrame({
+            "SNP": [f"s{index}" for index in range(columns)],
+            "Chromosome": [1] * columns,
+            "Position": np.arange(columns, dtype=np.float64),
+        }),
+        np.asarray([f"taxon-{index}" for index in range(rows)], dtype=str),
+    )
+    path = tmp_path / f"empty-{backend}"
+
+    with pytest.raises(ValueError, match=message):
+        write_genotype_store(path, genotype, backend=backend)
+
+    assert not path.exists()
 
 
 @pytest.mark.parametrize("chunk_size", [0, -1])

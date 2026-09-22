@@ -135,8 +135,15 @@ def as_genotype_write_source(
         genotype,
         (LabeledGenotypeStore, MarkerBlockWriteSource, SampleBlockWriteSource),
     ):
-        return genotype
-    return _GenotypeDataSource(genotype)
+        source = genotype
+    else:
+        source = _GenotypeDataSource(genotype)
+    rows, columns = source.shape
+    if rows <= 0:
+        raise ValueError("genotype source must contain at least one sample")
+    if columns <= 0:
+        raise ValueError("genotype source must contain at least one marker")
+    return source
 
 
 def iter_genotype_write_blocks(

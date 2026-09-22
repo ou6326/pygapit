@@ -580,7 +580,7 @@ sample-by-marker layout; VanRaden kinship and PCA read them in contiguous marker
 blocks. PCA's exact tall-matrix branch switches to sample batches under memory
 pressure as described above. A `.h5`/`.hdf5` filename or explicit
 `backend="hdf5"` requests HDF5. If an explicitly selected optional backend is
-unavailable, the warning includes the `pygapit-ng[bigdata]` installation
+unavailable, the error includes the `pygapit-ng[bigdata]` installation
 command. Explicit `backend="numpy"` is always available.
 
 Disk stores read the layout produced by the corresponding writer and check the

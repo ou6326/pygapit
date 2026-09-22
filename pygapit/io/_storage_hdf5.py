@@ -3,7 +3,6 @@
 from __future__ import annotations
 
 import typing as t
-import warnings
 from pathlib import Path
 from types import TracebackType
 from typing import Self
@@ -12,6 +11,7 @@ import numpy as np
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
+from ._genotype_store import normalize_sample_selection
 from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
 
 if t.TYPE_CHECKING:
@@ -112,10 +112,11 @@ class HDF5GenotypeStore:
     ) -> FloatMatrix:
         if self.closed:
             raise ValueError("HDF5 genotype store is closed")
-        if sample_indices is None:
+        selection = normalize_sample_selection(sample_indices, self.shape[0])
+        if selection is None:
             selected = t.cast(FloatMatrix, self._dataset[:, marker_slice])
-        elif isinstance(sample_indices, slice):
-            start, stop, step = sample_indices.indices(self.shape[0])
+        elif isinstance(selection, slice):
+            start, stop, step = selection.indices(self.shape[0])
             if step > 0:
                 selected = t.cast(
                     FloatMatrix,
@@ -132,7 +133,7 @@ class HDF5GenotypeStore:
                 )
                 selected = unique_block[inverse]
         else:
-            unique_indices, inverse = np.unique(sample_indices, return_inverse=True)
+            unique_indices, inverse = np.unique(selection, return_inverse=True)
             unique_block = t.cast(
                 FloatMatrix,
                 self._dataset[unique_indices, marker_slice],
@@ -219,12 +220,10 @@ def write_hdf5_genotype(
 
 
 def _raise_missing_h5py(exc: ModuleNotFoundError) -> t.NoReturn:
-    message = (
-        "HDF5 genotype storage requires the optional 'bigdata' dependencies; "
+    raise ImportError(
+        "HDF5 genotype storage requires the optional 'bigdata' feature; "
         "install pygapit-ng[bigdata], or use backend='numpy'."
-    )
-    warnings.warn(message, RuntimeWarning, stacklevel=3)
-    raise ImportError(message) from exc
+    ) from exc
 
 
 class _DatasetWriter(t.Protocol):

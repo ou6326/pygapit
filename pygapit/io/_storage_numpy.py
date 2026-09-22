@@ -12,6 +12,7 @@ import numpy as np
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
+from ._genotype_store import normalize_sample_selection
 from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
 
 if t.TYPE_CHECKING:
@@ -101,8 +102,9 @@ class NumpyGenotypeStore:
         if self._genotype is None:
             raise ValueError("NumPy genotype store is closed")
         block = self._genotype[:, marker_slice]
-        if sample_indices is not None:
-            block = block[sample_indices]
+        selection = normalize_sample_selection(sample_indices, self.shape[0])
+        if selection is not None:
+            block = block[selection]
         result = np.array(block, dtype=np.float64, copy=True)
         result.setflags(write=False)
         return result

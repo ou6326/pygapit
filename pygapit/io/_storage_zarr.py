@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import warnings
 from pathlib import Path
 from types import TracebackType
 from typing import TYPE_CHECKING, NoReturn, Self
@@ -12,6 +11,7 @@ import numpy.typing as npt
 import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
+from ._genotype_store import normalize_sample_selection
 from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
 from ._zarr_typing import ZarrArray, ZarrGroup, ZarrModule, as_zarr_module
 
@@ -102,10 +102,11 @@ class ZarrGenotypeStore:
         genotype = self._genotype
         if genotype is None:
             raise ValueError("Zarr genotype store is closed")
-        if sample_indices is None:
+        selection = normalize_sample_selection(sample_indices, self.shape[0])
+        if selection is None:
             selected = genotype[:, marker_slice]
-        elif isinstance(sample_indices, slice):
-            start, stop, step = sample_indices.indices(self.shape[0])
+        elif isinstance(selection, slice):
+            start, stop, step = selection.indices(self.shape[0])
             if step > 0:
                 selected = genotype[slice(start, stop, step), marker_slice]
             else:
@@ -113,7 +114,7 @@ class ZarrGenotypeStore:
                 unique, inverse = np.unique(requested, return_inverse=True)
                 selected = genotype.oindex[unique, marker_slice][inverse]
         else:
-            unique, inverse = np.unique(sample_indices, return_inverse=True)
+            unique, inverse = np.unique(selection, return_inverse=True)
             selected = genotype.oindex[unique, marker_slice][inverse]
         result = np.array(selected, dtype=np.float64, copy=True)
         result.setflags(write=False)
@@ -216,9 +217,7 @@ def _read_strings(zarr: ZarrModule, group: ZarrGroup, name: str) -> StrVector:
 
 
 def _raise_missing_zarr(exc: ModuleNotFoundError) -> NoReturn:
-    message = (
-        "Zarr genotype storage requires the optional 'bigdata' dependencies; "
+    raise ImportError(
+        "Zarr genotype storage requires the optional 'bigdata' feature; "
         "install pygapit-ng[bigdata], or use backend='numpy'."
-    )
-    warnings.warn(message, RuntimeWarning, stacklevel=3)
-    raise ImportError(message) from exc
+    ) from exc
