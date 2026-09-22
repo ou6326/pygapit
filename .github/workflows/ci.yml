@@ -61,9 +61,9 @@ jobs:
     steps:
       - uses: actions/checkout@v7
 
-      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
 
-      - uses: prefix-dev/setup-pixi@v0.10.2
+      - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
         with:
           pixi-version: v0.78.0
           environments: default full312
@@ -218,7 +218,7 @@ jobs:
         with:
           submodules: recursive
 
-      - uses: r-lib/actions/setup-r@v2
+      - uses: r-lib/actions/setup-r@f9a764fea8d5c63df6ef9a5c7795bf7deb5d7e05 # v2.14.0
 
       - name: Configure R shared library
         shell: bash
@@ -227,7 +227,7 @@ jobs:
           echo "R_HOME=$r_home" >> "$GITHUB_ENV"
           echo "LD_LIBRARY_PATH=$r_home/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}" >> "$GITHUB_ENV"
 
-      - uses: prefix-dev/setup-pixi@v0.10.2
+      - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
         with:
           pixi-version: v0.78.0
           environments: default

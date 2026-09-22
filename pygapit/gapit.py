@@ -387,8 +387,7 @@ def GAPIT(
             "CBLUP",
             "SBLUP",
         }
-        unsupported = [name for name in models if name not in supported]
-        if unsupported:
+        if unsupported := [name for name in models if name not in supported]:
             raise ValueError(
                 "Disk-backed GAPIT currently supports GLM, MLM, CMLM, MLMM, "
                 "FarmCPU, BLINK, gBLUP, cBLUP, and sBLUP; "
@@ -413,12 +412,12 @@ def GAPIT(
     traits_to_run = _select_traits(pheno.trait_names, trait)
 
     # Taxa alignment is independent of the selected trait and model.
-    if Z is not None:
-        if KI is None:  # narrowed by the pre-load contract above
-            raise ValueError("Z requires a corresponding KI random-effect matrix")
-        ki_df = _incidence_kinship_to_df(Z, KI, pheno.taxa)
-    else:
+    if Z is None:
         ki_df = _ki_to_df(KI, pheno.taxa) if KI is not None else None
+    elif KI is None:  # narrowed by the pre-load contract above
+        raise ValueError("Z requires a corresponding KI random-effect matrix")
+    else:
+        ki_df = _incidence_kinship_to_df(Z, KI, pheno.taxa)
     cv_df = _cv_to_df(CV, pheno.taxa) if CV is not None else None
     aligned = align_inputs(pheno, geno, cv_df=cv_df, ki_df=ki_df)
 
@@ -580,8 +579,7 @@ def _normalize_models(model: str | Sequence[object]) -> tuple[str, ...]:
     normalized = tuple(normalized_names)
     if len(set(normalized)) != len(normalized):
         raise ValueError("model must not contain duplicate analysis models")
-    unknown = [name for name in normalized if name not in _SUPPORTED_MODELS]
-    if unknown:
+    if unknown := [name for name in normalized if name not in _SUPPORTED_MODELS]:
         raise ValueError(
             f"Unknown model(s): {', '.join(unknown)}. Choose from: "
             f"{', '.join(sorted(_SUPPORTED_MODELS))}."
@@ -752,11 +750,7 @@ def _simulate_phenotype(
     g = GD_std @ effects
     g_var = np.var(g)
 
-    if g_var > 0:
-        e_var = g_var * (1 - h2) / h2
-    else:
-        e_var = 1.0
-
+    e_var = g_var * (1 - h2) / h2 if g_var > 0 else 1.0
     e = rng.normal(0, np.sqrt(e_var), size=n)
     y_sim = g + e
 
@@ -1046,12 +1040,7 @@ def _assemble_result(
     if (
         buspred
         or prediction_model is not None
-        or model_name
-        in (
-            "GBLUP",
-            "CBLUP",
-            "SBLUP",
-        )
+        or model_name in {"GBLUP", "CBLUP", "SBLUP"}
     ):
         prediction = _run_gs_and_build_pred(
             y=prepared.y,
@@ -1086,7 +1075,7 @@ def _assemble_result(
 
     return GAPITResult(
         GWAS=gwas,
-        significant=significant if not significant.empty else None,
+        significant=None if significant.empty else significant,
         lambda_gc=lambda_gc,
         Pred=prediction,
         h2=model_result.h2,
@@ -1413,8 +1402,7 @@ def _align_multiple_gwas(
         gwas = result.GWAS
         if gwas is None:  # narrowed by ``available``
             continue
-        missing = {*keys, "P.value"} - set(gwas.columns)
-        if missing:
+        if missing := {*keys, "P.value"} - set(gwas.columns):
             raise ValueError(
                 f"{result.model} GWAS table is missing columns: {sorted(missing)}"
             )
