@@ -35,7 +35,7 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ### Changed
 
-- Document the Python 3.11 and HoloViews visualization migration from 1.2.4.
+- Document the Python 3.12 and HoloViews visualization migration from 1.2.4.
 - Reuse precomputed genomic ordering when building GWAS tables and bypass
   DataFrame sorting and merging when multi-model results already share marker
   order.
@@ -49,8 +49,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 - Reuse zero-copy chromosome slices while constructing exact Manhattan points
   and combine alternating chromosome colors in one categorical Datashader
   raster.
-- Require Python 3.11 or newer and test the complete optional-storage stack on
-  Python 3.11 and 3.14.
+- Require Python 3.12 or newer and test the complete optional-storage stack on
+  Python 3.12 and 3.14.
 - Extend disk-backed top-level workflows through SUPER selection and sBLUP
   prediction while materializing and reusing only the bounded pseudo-QTN
   candidate pool.

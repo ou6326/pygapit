@@ -6,27 +6,26 @@ import typing as t
 
 import numpy as np
 
-Array: t.TypeAlias = np.ndarray[tuple[int, ...], np.dtype[np.generic]]
-Vector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.generic]]
-Matrix: t.TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.generic]]
+type Array = np.ndarray[tuple[int, ...], np.dtype[np.generic]]
+type Vector = np.ndarray[tuple[int], np.dtype[np.generic]]
+type Matrix = np.ndarray[tuple[int, int], np.dtype[np.generic]]
 
-NumericVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.number]]
+type NumericVector = np.ndarray[tuple[int], np.dtype[np.number]]
 
-FloatVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.float64]]
-FloatMatrix: t.TypeAlias = np.ndarray[tuple[int, int], np.dtype[np.float64]]
+type FloatVector = np.ndarray[tuple[int], np.dtype[np.float64]]
+type FloatMatrix = np.ndarray[tuple[int, int], np.dtype[np.float64]]
 
-IntVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.int_]]
-BoolVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.bool_]]
-StrVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.str_]]
+type IntVector = np.ndarray[tuple[int], np.dtype[np.int_]]
+type BoolVector = np.ndarray[tuple[int], np.dtype[np.bool_]]
+type StrVector = np.ndarray[tuple[int], np.dtype[np.str_]]
 
-LabelVector: t.TypeAlias = StrVector | NumericVector
-ArrayT = t.TypeVar("ArrayT", bound=Array)
+type LabelVector = StrVector | NumericVector
 
 if t.TYPE_CHECKING:
-    Slice: t.TypeAlias = slice[int, int, None]
+    type Slice = slice[int, int, None]
 
 
-def readonly_copy(values: ArrayT) -> ArrayT:
+def readonly_copy[ArrayT: Array](values: ArrayT) -> ArrayT:
     """Return an independent NumPy array whose contents cannot be mutated."""
     result = values.copy()
     result.setflags(write=False)

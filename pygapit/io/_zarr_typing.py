@@ -11,7 +11,7 @@ import numpy.typing as npt
 
 from .._typing import IntVector
 
-ZarrIndex: t.TypeAlias = slice | tuple[slice, slice] | tuple[IntVector, slice]
+type ZarrIndex = slice | tuple[slice, slice] | tuple[IntVector, slice]
 
 
 class ZarrIndexer(t.Protocol):

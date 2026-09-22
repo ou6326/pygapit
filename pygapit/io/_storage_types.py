@@ -1,5 +1,5 @@
 """Shared storage API types without backend imports."""
 
-from typing import Literal, TypeAlias
+from typing import Literal
 
-StorageBackend: TypeAlias = Literal["auto", "numpy", "hdf5", "zarr"]
+type StorageBackend = Literal["auto", "numpy", "hdf5", "zarr"]

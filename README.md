@@ -95,7 +95,7 @@ otherwise drops to vectors.
 
 ### Regular use
 
-pyGAPIT requires Python 3.11 or newer. Install the `pygapit-ng` distribution
+pyGAPIT requires Python 3.12 or newer. Install the `pygapit-ng` distribution
 from PyPI; the Python import package and command-line entry point remain
 `pygapit`. R and the GAPIT reference repository are not required.
 

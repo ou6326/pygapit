@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Iterator
-from typing import TYPE_CHECKING, Protocol, TypeAlias, cast, final, runtime_checkable
+from typing import TYPE_CHECKING, Protocol, cast, final, runtime_checkable
 
 import numpy as np
 import pandas as pd
@@ -69,10 +69,10 @@ class SampleBlockWriteSource(Protocol):
     ) -> Iterator[tuple[Slice, FloatMatrix]]: ...
 
 
-PreparedGenotypeWriteSource: TypeAlias = (
+type PreparedGenotypeWriteSource = (
     LabeledGenotypeStore | MarkerBlockWriteSource | SampleBlockWriteSource
 )
-GenotypeWriteSource: TypeAlias = _InMemoryGenotypeData | PreparedGenotypeWriteSource
+type GenotypeWriteSource = _InMemoryGenotypeData | PreparedGenotypeWriteSource
 
 
 @final

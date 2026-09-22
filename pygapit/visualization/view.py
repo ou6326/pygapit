@@ -3,16 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Callable, Collection
-from typing import (
-    TYPE_CHECKING,
-    Generic,
-    Literal,
-    Protocol,
-    TypeVar,
-    cast,
-    final,
-    overload,
-)
+from typing import TYPE_CHECKING, Literal, Protocol, cast, final, overload
 
 import holoviews as hv
 from holoviews.core import Dimensioned
@@ -24,7 +15,6 @@ if TYPE_CHECKING:
 
 OutputBackend = Literal["matplotlib", "bokeh", "plotly"]
 ThreeDBackend = Literal["matplotlib", "plotly"]
-BackendT = TypeVar("BackendT", bound=OutputBackend)
 
 ALL_BACKENDS: tuple[OutputBackend, ...] = ("matplotlib", "bokeh", "plotly")
 THREE_D_BACKENDS: tuple[ThreeDBackend, ...] = ("matplotlib", "plotly")
@@ -37,7 +27,7 @@ class _NotebookRenderer(Protocol):
 
 
 @final
-class Visualization(Generic[BackendT]):
+class Visualization[BackendT: OutputBackend]:
     """Display one HoloViews specification with a per-object backend.
 
     Assigning ``backend`` changes only this object's notebook representation.

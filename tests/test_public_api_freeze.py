@@ -4,7 +4,6 @@ from __future__ import annotations
 
 import inspect
 from collections.abc import Callable, Iterable
-from typing import TypeAlias
 
 import pygapit
 import pygapit.gs
@@ -195,7 +194,7 @@ _POSITIONAL = inspect.Parameter.POSITIONAL_OR_KEYWORD.name
 _KEYWORD_ONLY = inspect.Parameter.KEYWORD_ONLY.name
 _REQUIRED = inspect.Parameter.empty
 
-SignatureContract: TypeAlias = tuple[tuple[str, str, object], ...]
+type SignatureContract = tuple[tuple[str, str, object], ...]
 
 
 def _signature_contract(function: Callable[..., object]) -> SignatureContract:

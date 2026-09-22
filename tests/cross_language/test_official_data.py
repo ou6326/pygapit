@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import typing as t
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -16,7 +15,7 @@ from pygapit.gs.blup import cblup, gblup, sblup, select_super_qtns
 from tests.cross_language.r_bridge import RBridge, RList, RMatrix
 from tests.cross_language.workflow import r_scalar
 
-IndexVector: t.TypeAlias = np.ndarray[tuple[int], np.dtype[np.intp]]
+type IndexVector = np.ndarray[tuple[int], np.dtype[np.intp]]
 
 
 @dataclass(frozen=True, slots=True)

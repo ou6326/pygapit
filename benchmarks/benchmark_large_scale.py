@@ -19,7 +19,7 @@ import threading
 from collections.abc import Callable
 from dataclasses import asdict
 from pathlib import Path
-from typing import Literal, Protocol, TypeAlias, TypeVar, cast, final
+from typing import Literal, Protocol, cast, final
 
 import numpy as np
 
@@ -38,15 +38,13 @@ from pygapit.stats.pca import compute_pca
 
 _MARKER_SCALES = (100_000, 1_000_000, 10_000_000)
 
-_StoreBackend: TypeAlias = Literal["numpy", "hdf5", "zarr"]
+type _StoreBackend = Literal["numpy", "hdf5", "zarr"]
 _STORE_BACKENDS: tuple[_StoreBackend, ...] = ("numpy", "hdf5", "zarr")
 _STORE_SUFFIXES: dict[_StoreBackend, str] = {
     "numpy": "",
     "hdf5": ".h5",
     "zarr": ".zarr",
 }
-
-_ResultT = TypeVar("_ResultT")
 
 if sys.platform == "win32":
 
@@ -121,9 +119,9 @@ def _process_rss_bytes() -> tuple[int, str]:
     return rss, "resource_ru_maxrss"
 
 
-def _measure_scenario_peak_rss(
-    operation: Callable[[], _ResultT],
-) -> tuple[_ResultT, float, str]:
+def _measure_scenario_peak_rss[ResultT](
+    operation: Callable[[], ResultT],
+) -> tuple[ResultT, float, str]:
     """Measure a whole-scenario process RSS peak separately from Python allocations."""
     gc.collect()
     initial_rss, source = _process_rss_bytes()

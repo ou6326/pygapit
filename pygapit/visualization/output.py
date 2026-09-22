@@ -13,7 +13,7 @@ from typing import Literal, cast, overload
 import holoviews as hv
 import matplotlib.pyplot as plt
 
-from .view import BackendT, OutputBackend, Visualization
+from .view import OutputBackend, Visualization
 
 if t.TYPE_CHECKING:
     from collections.abc import Callable, Generator
@@ -66,7 +66,7 @@ def matplotlib_style(style: StaticStyle) -> Generator[None]:
 
 
 @overload
-def save_plot(
+def save_plot[BackendT: OutputBackend](
     plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,
@@ -76,7 +76,7 @@ def save_plot(
 
 
 @overload
-def save_plot(
+def save_plot[BackendT: OutputBackend](
     plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,
@@ -86,7 +86,7 @@ def save_plot(
 
 
 @overload
-def save_plot(
+def save_plot[BackendT: OutputBackend](
     plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,
@@ -95,7 +95,7 @@ def save_plot(
 ) -> None: ...
 
 
-def save_plot(
+def save_plot[BackendT: OutputBackend](
     plot: Visualization[BackendT],
     path: str | PathLike[str],
     *,

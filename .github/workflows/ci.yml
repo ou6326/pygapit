@@ -66,7 +66,7 @@ jobs:
       - uses: prefix-dev/setup-pixi@v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: default full311
+          environments: default full312
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
@@ -89,7 +89,7 @@ jobs:
         run: pixi run pytest tests -q --ignore=tests/cross_language
 
       - name: Storage tests on minimum Python
-        run: pixi run -e full311 pytest tests/test_genotype_storage.py -q
+        run: pixi run -e full312 pytest tests/test_genotype_storage.py -q
 
   windows:
     name: Windows Python ${{ matrix.python-version }} (base dependencies)
@@ -97,7 +97,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -124,7 +124,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -151,7 +151,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.11", "3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13", "3.14"]
 
     steps:
       - uses: actions/checkout@v7
@@ -173,7 +173,7 @@ jobs:
         run: pytest tests -q --ignore=tests/cross_language
 
   lowest-dependencies:
-    name: Lowest direct dependencies on Python 3.11
+    name: Lowest direct dependencies on Python 3.12
     runs-on: ubuntu-latest
 
     steps:
@@ -181,7 +181,7 @@ jobs:
 
       - uses: actions/setup-python@v7
         with:
-          python-version: "3.11"
+          python-version: "3.12"
           cache: pip
 
       - name: Install the declared dependency floors

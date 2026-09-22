@@ -7,7 +7,7 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 from importlib.util import find_spec
 from pathlib import Path
-from typing import Literal, TypeAlias, cast
+from typing import Literal, cast
 
 import numpy as np
 import pandas as pd
@@ -37,8 +37,8 @@ from pygapit.stats.kinship import vanraden_kinship
 
 _MARKER_WORKSPACE_MIB = 0.0005
 
-_Backend: TypeAlias = Literal["ndarray", "numpy", "hdf5", "zarr"]
-_GenotypeInput: TypeAlias = FloatMatrix | GenotypeStore
+type _Backend = Literal["ndarray", "numpy", "hdf5", "zarr"]
+type _GenotypeInput = FloatMatrix | GenotypeStore
 
 
 @dataclass(frozen=True, slots=True)
@@ -57,7 +57,7 @@ class _ParityResult:
     discrete: dict[str, IntVector]
 
 
-_ModelRunner: TypeAlias = Callable[[_ParityData, _GenotypeInput], _ParityResult]
+type _ModelRunner = Callable[[_ParityData, _GenotypeInput], _ParityResult]
 
 
 def _float_vector(*values: float) -> FloatVector:

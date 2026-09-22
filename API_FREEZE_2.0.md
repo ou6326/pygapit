@@ -17,7 +17,7 @@ will change only when a 2.0 release candidate is prepared.
 | Existing `GenotypeStore` protocols and NumPy/HDF5 backends | Preserve and freeze | The thin `shape` plus `read_markers()` contract already exists in 1.2.4 and now supports the complete disk-backed model workflow. |
 | Zarr storage and streaming imports | Add and freeze | These are the new 2.0 storage capabilities and need stable construction, metadata, and fallback semantics. |
 | Visualization | Breaking replacement and freeze | Backend-native plotting functions are replaced by typed `Visualization` objects that retain a HoloViews specification and a per-object display backend. |
-| Python support | Breaking change | 2.0 requires Python 3.11 or newer; the 1.2.x line remains the Python 3.10-compatible line. |
+| Python support | Breaking change | 2.0 requires Python 3.12 or newer; the 1.2.x line remains the Python 3.10-compatible line. |
 
 ## Frozen top-level surface
 
@@ -120,8 +120,8 @@ Recorded by the 2.0.0 release-documentation audit.
    Manhattan rendering, and runs the 100k spot check for NumPy, HDF5, and Zarr;
    1M and 10M remain opt-in comparisons.
 4. **Installation matrix** — the minimal, `bigdata`, and `styles` installations
-   each run their applicable tests across Python 3.11–3.14 in CI, while a
-   separate Python 3.11 job verifies every declared direct dependency floor.
+   each run their applicable tests across Python 3.12–3.14 in CI, while a
+   separate Python 3.12 job verifies every declared direct dependency floor.
 5. **Migration and changelog** — `MIGRATING.md` and `CHANGELOG.md` now describe
    the final 1.2.4 to 2.0 contract rather than the implementation chronology.
 

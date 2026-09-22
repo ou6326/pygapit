@@ -1,7 +1,7 @@
 # Migrating from pyGAPIT 1.2.4
 
 pyGAPIT 2.0 replaces backend-specific plotting functions with one
-HoloViews-based visualization contract, requires Python 3.11 or newer, and
+HoloViews-based visualization contract, requires Python 3.12 or newer, and
 corrects GAPIT 3.5 statistical parity issues in FarmCPU and sBLUP. The
 statistical model interfaces remain available; the breaking changes described
 here are concentrated in visualization, supported runtimes, and the corrected
@@ -9,7 +9,7 @@ result values.
 
 ## Python and dependencies
 
-- Upgrade to Python 3.11 or newer. CI covers Python 3.11 through 3.14.
+- Upgrade to Python 3.12 or newer. CI covers Python 3.12 through 3.14.
 - HoloViews, Matplotlib, Bokeh, Plotly, and Datashader are runtime dependencies.
 - HDF5 and Zarr remain optional under `pygapit-ng[bigdata]`.
 - Seaborn and SciencePlots remain optional under `pygapit-ng[styles]`.
