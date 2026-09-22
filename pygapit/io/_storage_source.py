@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import shutil
 from collections.abc import Iterator
+from pathlib import Path
 from typing import TYPE_CHECKING, Protocol, cast, final, runtime_checkable
 
 import numpy as np
@@ -73,6 +75,15 @@ type PreparedGenotypeWriteSource = (
     LabeledGenotypeStore | MarkerBlockWriteSource | SampleBlockWriteSource
 )
 type GenotypeWriteSource = _InMemoryGenotypeData | PreparedGenotypeWriteSource
+
+
+def remove_incomplete_genotype_store(path: str | Path) -> None:
+    """Remove a store created by a writer that failed before completion."""
+    target = Path(path)
+    if target.is_dir():
+        shutil.rmtree(target)
+    else:
+        target.unlink(missing_ok=True)
 
 
 @final

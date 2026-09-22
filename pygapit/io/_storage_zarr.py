@@ -12,7 +12,11 @@ import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from ._genotype_store import normalize_sample_selection
-from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
+from ._storage_source import (
+    as_genotype_write_source,
+    iter_genotype_write_blocks,
+    remove_incomplete_genotype_store,
+)
 from ._zarr_typing import ZarrArray, ZarrGroup, ZarrModule, as_zarr_module
 
 if TYPE_CHECKING:
@@ -150,33 +154,41 @@ def write_zarr_genotype(
     rows, columns = source.shape
     marker_chunk_size = min(marker_chunk_size, columns)
     sample_chunk_size = min(rows, max(1, (8 * 1024**2) // (8 * marker_chunk_size)))
-    group = zarr.open_group(str(Path(path)), mode="w-", zarr_format=2)
-    group.attrs["schema_version"] = 1
-    group.attrs["complete"] = False
-    matrix = _create_array(
-        group,
-        _ZARR_DATASET,
-        shape=(rows, columns),
-        dtype=np.dtype(np.float64),
-        chunks=(sample_chunk_size, marker_chunk_size),
-    )
-    for sample_slice, marker_slice, block in iter_genotype_write_blocks(
-        source, marker_chunk_size
-    ):
-        matrix[sample_slice, marker_slice] = block
-    _write_strings(group, "taxa", source.taxa)
-    _write_strings(group, "markers/id", source.marker_ids)
-    _write_strings(group, "markers/chromosome", source.chromosomes)
-    positions = source.positions
-    position_array = _create_array(
-        group,
-        "markers/position",
-        shape=positions.shape,
-        dtype=np.dtype(np.float64),
-        chunks=(max(1, min(marker_chunk_size, columns)),),
-    )
-    position_array[:] = positions
-    group.attrs["complete"] = True
+    target = Path(path)
+    created = False
+    try:
+        group = zarr.open_group(str(target), mode="w-", zarr_format=2)
+        created = True
+        group.attrs["schema_version"] = 1
+        group.attrs["complete"] = False
+        matrix = _create_array(
+            group,
+            _ZARR_DATASET,
+            shape=(rows, columns),
+            dtype=np.dtype(np.float64),
+            chunks=(sample_chunk_size, marker_chunk_size),
+        )
+        for sample_slice, marker_slice, block in iter_genotype_write_blocks(
+            source, marker_chunk_size
+        ):
+            matrix[sample_slice, marker_slice] = block
+        _write_strings(group, "taxa", source.taxa)
+        _write_strings(group, "markers/id", source.marker_ids)
+        _write_strings(group, "markers/chromosome", source.chromosomes)
+        positions = source.positions
+        position_array = _create_array(
+            group,
+            "markers/position",
+            shape=positions.shape,
+            dtype=np.dtype(np.float64),
+            chunks=(max(1, min(marker_chunk_size, columns)),),
+        )
+        position_array[:] = positions
+        group.attrs["complete"] = True
+    except BaseException:
+        if created:
+            remove_incomplete_genotype_store(target)
+        raise
 
 
 def _create_array(

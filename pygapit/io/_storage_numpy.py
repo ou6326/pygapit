@@ -13,7 +13,11 @@ import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from ._genotype_store import normalize_sample_selection
-from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
+from ._storage_source import (
+    as_genotype_write_source,
+    iter_genotype_write_blocks,
+    remove_incomplete_genotype_store,
+)
 
 if t.TYPE_CHECKING:
     from ._storage_source import GenotypeWriteSource
@@ -137,40 +141,45 @@ def write_numpy_genotype(
         raise ValueError("marker_chunk_size must be positive")
     source = as_genotype_write_source(genotype)
     target = Path(path)
-    target.mkdir(parents=False, exist_ok=False)
-    metadata_path = target / _NUMPY_METADATA
-    metadata = _NumpyStoreMetadata(
-        schema_version=1,
-        complete=False,
-    )
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    created = False
+    matrix: np.memmap[tuple[int, int], np.dtype[np.float64]] | None = None
+    try:
+        target.mkdir(parents=False, exist_ok=False)
+        created = True
+        metadata_path = target / _NUMPY_METADATA
+        metadata = _NumpyStoreMetadata(
+            schema_version=1,
+            complete=False,
+        )
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
 
-    rows, columns = source.shape
-    matrix = t.cast(
-        np.memmap[tuple[int, int], np.dtype[np.float64]],
-        np.lib.format.open_memmap(
-            target / _NUMPY_GENOTYPE, mode="w+", dtype=np.float64, shape=(rows, columns)
-        ),
-    )
-    for sample_slice, marker_slice, block in iter_genotype_write_blocks(
-        source, marker_chunk_size
-    ):
-        matrix[sample_slice, marker_slice] = block
-    matrix.flush()
-    del matrix
+        rows, columns = source.shape
+        matrix = t.cast(
+            np.memmap[tuple[int, int], np.dtype[np.float64]],
+            np.lib.format.open_memmap(
+                target / _NUMPY_GENOTYPE,
+                mode="w+",
+                dtype=np.float64,
+                shape=(rows, columns),
+            ),
+        )
+        for sample_slice, marker_slice, block in iter_genotype_write_blocks(
+            source, marker_chunk_size
+        ):
+            matrix[sample_slice, marker_slice] = block
+        matrix.flush()
+        del matrix
+        matrix = None
 
-    np.save(target / "taxa.npy", np.asarray(source.taxa, dtype=str))
-    np.save(
-        target / "marker_id.npy",
-        source.marker_ids,
-    )
-    np.save(
-        target / "marker_chromosome.npy",
-        source.chromosomes,
-    )
-    np.save(
-        target / "marker_position.npy",
-        source.positions,
-    )
-    metadata["complete"] = True
-    metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+        np.save(target / "taxa.npy", np.asarray(source.taxa, dtype=str))
+        np.save(target / "marker_id.npy", source.marker_ids)
+        np.save(target / "marker_chromosome.npy", source.chromosomes)
+        np.save(target / "marker_position.npy", source.positions)
+        metadata["complete"] = True
+        metadata_path.write_text(json.dumps(metadata), encoding="utf-8")
+    except BaseException:
+        if matrix is not None:
+            del matrix
+        if created:
+            remove_incomplete_genotype_store(target)
+        raise

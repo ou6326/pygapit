@@ -114,6 +114,17 @@ class _LabeledNoMaterializationStore(_NoMaterializationStore):
         )
 
 
+class _FailingMarkerSource(_LabeledNoMaterializationStore):
+    """Writer source that fails after yielding its first marker block."""
+
+    def iter_marker_blocks(
+        self, marker_chunk_size: int
+    ) -> Iterator[tuple[slice, FloatMatrix]]:
+        del marker_chunk_size
+        yield slice(0, 1), self._values[:, :1]
+        raise RuntimeError("injected marker source failure")
+
+
 class _RecordingParentStore:
     """Read-only parent double that records bounded reads from GenotypeView."""
 
@@ -961,6 +972,25 @@ def test_store_writers_reject_empty_dimensions_before_creating_output(
 
     with pytest.raises(ValueError, match=message):
         write_genotype_store(path, genotype, backend=backend)
+
+    assert not path.exists()
+
+
+@pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
+def test_store_writers_remove_output_after_source_failure(
+    tmp_path: Path,
+    backend: StorageBackend,
+) -> None:
+    path = tmp_path / f"incomplete-{backend}"
+    source = _FailingMarkerSource(_genotype_data())
+
+    with pytest.raises(RuntimeError, match="injected marker source failure"):
+        write_genotype_store(
+            path,
+            source,
+            backend=backend,
+            marker_chunk_size=1,
+        )
 
     assert not path.exists()
 

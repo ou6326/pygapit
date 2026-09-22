@@ -6,8 +6,10 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import pytest
 
 from pygapit.gapit import GAPIT, GAPITResult, _output_prefix
+from pygapit.visualization import output as visualization_output
 
 
 def _small_inputs() -> tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame]:
@@ -68,6 +70,55 @@ def test_result_lists_successfully_written_output_files(tmp_path: Path) -> None:
     assert all(path.is_file() for path in written)
     assert all(path.parent == output_dir for path in written)
     assert result.output_files.gwas.name == "GAPIT.GLM.height.GWAS.Results.csv"
+
+
+def test_result_does_not_report_stale_plots_after_generation_failure(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    phenotype, genotype, marker_map = _small_inputs()
+    first = GAPIT(
+        Y=phenotype,
+        GD=genotype,
+        GM=marker_map,
+        model="GLM",
+        PCA_total=2,
+        file_output=True,
+        output_dir=tmp_path,
+    )
+    assert isinstance(first, GAPITResult)
+    assert first.output_files is not None
+    stale_plots = (
+        first.output_files.manhattan,
+        first.output_files.qq,
+        first.output_files.kinship_plot,
+        first.output_files.pca_plot,
+    )
+    assert all(path is not None and path.exists() for path in stale_plots)
+
+    def fail_save(*args: object, **kwargs: object) -> None:
+        del args, kwargs
+        raise OSError("injected plot failure")
+
+    monkeypatch.setattr(visualization_output, "save_plot", fail_save)
+    with pytest.warns(UserWarning, match="Plot generation failed"):
+        second = GAPIT(
+            Y=phenotype,
+            GD=genotype,
+            GM=marker_map,
+            model="GLM",
+            PCA_total=2,
+            file_output=True,
+            output_dir=tmp_path,
+        )
+
+    assert isinstance(second, GAPITResult)
+    assert second.output_files is not None
+    assert second.output_files.manhattan is None
+    assert second.output_files.qq is None
+    assert second.output_files.kinship_plot is None
+    assert second.output_files.pca_plot is None
+    assert all(path is not None and path.exists() for path in stale_plots)
 
 
 def test_output_prefix_sanitizes_user_controlled_path_characters() -> None:

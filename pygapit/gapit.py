@@ -1592,6 +1592,7 @@ def _save_outputs(
     qq_path = out / f"{prefix}.QQ.pdf"
     kinship_plot_path = out / f"GAPIT.{trait_component}.Kinship.pdf"
     pca_plot_path = out / f"GAPIT.{trait_component}.PCA.pdf"
+    written_plot_paths: set[Path] = set()
     try:
         # Manhattan
         sig_mask = gwas_df["P.value"] <= bonferroni_threshold(len(gwas_df))
@@ -1610,6 +1611,7 @@ def _save_outputs(
             highlight_snps=sig_indices if len(sig_indices) > 0 else None,
         )
         save_plot(manhattan_plot, manhattan_path)
+        written_plot_paths.add(manhattan_path)
 
         # QQ
         qq = qq_plot(
@@ -1617,6 +1619,7 @@ def _save_outputs(
             title=f"QQ: {trait_name} ({model_name})",
         )
         save_plot(qq, qq_path)
+        written_plot_paths.add(qq_path)
 
         # Kinship heatmap
         kinship_plot = kinship_heatmap(
@@ -1624,6 +1627,7 @@ def _save_outputs(
             taxa=taxa,
         )
         save_plot(kinship_plot, kinship_plot_path)
+        written_plot_paths.add(kinship_plot_path)
 
         # PCA 2D
         if pca_result.scores.shape[1] >= 2:
@@ -1633,6 +1637,7 @@ def _save_outputs(
                 title=f"PCA: {trait_name}",
             )
             save_plot(pca_plot, pca_plot_path)
+            written_plot_paths.add(pca_plot_path)
 
     except (ValueError, TypeError, OSError, np.linalg.LinAlgError) as e:
         warnings.warn(f"Plot generation failed: {e}")
@@ -1642,10 +1647,12 @@ def _save_outputs(
         prediction=prediction_path,
         kinship=kinship_path,
         pca=pca_path,
-        manhattan=manhattan_path if manhattan_path.exists() else None,
-        qq=qq_path if qq_path.exists() else None,
-        kinship_plot=kinship_plot_path if kinship_plot_path.exists() else None,
-        pca_plot=pca_plot_path if pca_plot_path.exists() else None,
+        manhattan=manhattan_path if manhattan_path in written_plot_paths else None,
+        qq=qq_path if qq_path in written_plot_paths else None,
+        kinship_plot=(
+            kinship_plot_path if kinship_plot_path in written_plot_paths else None
+        ),
+        pca_plot=pca_plot_path if pca_plot_path in written_plot_paths else None,
     )
 
 

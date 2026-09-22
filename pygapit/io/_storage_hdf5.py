@@ -12,7 +12,11 @@ import pandas as pd
 
 from .._typing import FloatMatrix, FloatVector, IntVector, StrVector
 from ._genotype_store import normalize_sample_selection
-from ._storage_source import as_genotype_write_source, iter_genotype_write_blocks
+from ._storage_source import (
+    as_genotype_write_source,
+    iter_genotype_write_blocks,
+    remove_incomplete_genotype_store,
+)
 
 if t.TYPE_CHECKING:
     from collections.abc import Mapping
@@ -182,41 +186,49 @@ def write_hdf5_genotype(
         "utf-8"
     )
 
-    with h5py.File(Path(path), "x") as handle:
-        create_dataset = t.cast(_DatasetWriter, handle.create_dataset)
-        handle.attrs["schema_version"] = 1
-        handle.attrs["complete"] = False
-        matrix = create_dataset(
-            _HDF5_DATASET,
-            shape=(rows, columns),
-            dtype=np.float64,
-            chunks=(sample_chunk_size, marker_chunk_size),
-        )
-        for sample_slice, marker_slice, block in iter_genotype_write_blocks(
-            source, marker_chunk_size
-        ):
-            matrix[sample_slice, marker_slice] = block
-        create_dataset(
-            "taxa",
-            data=source.taxa.astype(object),
-            dtype=string_dtype,
-        )
-        create_dataset(
-            "markers/id",
-            data=source.marker_ids.astype(object),
-            dtype=string_dtype,
-        )
-        create_dataset(
-            "markers/chromosome",
-            data=source.chromosomes.astype(object),
-            dtype=string_dtype,
-        )
-        create_dataset(
-            "markers/position",
-            data=source.positions,
-            dtype=np.float64,
-        )
-        handle.attrs["complete"] = True
+    target = Path(path)
+    created = False
+    try:
+        with h5py.File(target, "x") as handle:
+            created = True
+            create_dataset = t.cast(_DatasetWriter, handle.create_dataset)
+            handle.attrs["schema_version"] = 1
+            handle.attrs["complete"] = False
+            matrix = create_dataset(
+                _HDF5_DATASET,
+                shape=(rows, columns),
+                dtype=np.float64,
+                chunks=(sample_chunk_size, marker_chunk_size),
+            )
+            for sample_slice, marker_slice, block in iter_genotype_write_blocks(
+                source, marker_chunk_size
+            ):
+                matrix[sample_slice, marker_slice] = block
+            create_dataset(
+                "taxa",
+                data=source.taxa.astype(object),
+                dtype=string_dtype,
+            )
+            create_dataset(
+                "markers/id",
+                data=source.marker_ids.astype(object),
+                dtype=string_dtype,
+            )
+            create_dataset(
+                "markers/chromosome",
+                data=source.chromosomes.astype(object),
+                dtype=string_dtype,
+            )
+            create_dataset(
+                "markers/position",
+                data=source.positions,
+                dtype=np.float64,
+            )
+            handle.attrs["complete"] = True
+    except BaseException:
+        if created:
+            remove_incomplete_genotype_store(target)
+        raise
 
 
 def _raise_missing_h5py(exc: ModuleNotFoundError) -> t.NoReturn:
