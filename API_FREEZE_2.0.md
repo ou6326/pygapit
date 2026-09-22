@@ -120,10 +120,12 @@ Recorded by the 2.0.0 release-documentation audit.
    Manhattan rendering, and runs the 100k spot check for NumPy, HDF5, and Zarr;
    1M and 10M remain opt-in comparisons.
 4. **Installation matrix** — the minimal, `bigdata`, and `styles` installations
-   each run their applicable tests across Python 3.11–3.14 in CI.
+   each run their applicable tests across Python 3.11–3.14 in CI, while a
+   separate Python 3.11 job verifies every declared direct dependency floor.
 5. **Migration and changelog** — `MIGRATING.md` and `CHANGELOG.md` now describe
    the final 1.2.4 to 2.0 contract rather than the implementation chronology.
 
-`pyproject.toml` now carries the `2.0.0rc1` release candidate. The final
-`2.0.0` remains the only tagged release, and the citation metadata keeps
-referencing the last published release until then.
+`pyproject.toml` now carries the `2.0.0rc1` release candidate. A corresponding
+`v2.0.0rc1` tag will identify the published candidate, followed by `v2.0.0`
+for the final release. The citation metadata keeps referencing the last
+published stable release until `2.0.0` is tagged.

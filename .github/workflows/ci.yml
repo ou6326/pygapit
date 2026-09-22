@@ -172,6 +172,40 @@ jobs:
       - name: Tests with the styles extra
         run: pytest tests -q --ignore=tests/cross_language
 
+  lowest-dependencies:
+    name: Lowest direct dependencies on Python 3.11
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install the declared dependency floors
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install \
+            -c .github/constraints/lowest.txt \
+            -e ".[bigdata,styles]" \
+            "pytest>=9.1.1"
+
+      - name: Verify direct dependency versions
+        run: |
+          python - <<'PY'
+          from importlib.metadata import version
+          from pathlib import Path
+
+          for requirement in Path(".github/constraints/lowest.txt").read_text().splitlines():
+              package, expected = requirement.split("==", 1)
+              assert version(package) == expected, (package, version(package), expected)
+          PY
+
+      - name: Tests at the declared dependency floors
+        run: pytest tests -q --ignore=tests/cross_language
+
   parity:
     name: GAPIT 3.5 parity
     runs-on: ubuntu-latest
