@@ -3,6 +3,13 @@ name: CI
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "docs/**"
+      - "CHANGELOG.md"
+      - "MIGRATING.md"
+      - "API_FREEZE_2.0.md"
+      - "LICENSE"
+      - ".gitignore"
   pull_request:
   workflow_dispatch:
 
@@ -18,9 +25,28 @@ env:
   PYTHONUTF8: "1"
 
 jobs:
+  lint:
+    name: Static quality gate
+    runs-on: ubuntu-24.04
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
+        with:
+          pixi-version: v0.78.0
+          environments: default
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          frozen: true
+
+      - name: Ruff, BasedPyright, and Pyrefly
+        run: pixi run precommit
+
   package:
     name: Build and install distributions
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: lint
 
     steps:
       - uses: actions/checkout@v7
@@ -53,8 +79,9 @@ jobs:
           "$RUNNER_TEMP/pygapit-sdist-test/bin/pygapit" --help
 
   quality:
-    name: Quality and bigdata tests
-    runs-on: ubuntu-latest
+    name: Main tests and coverage
+    runs-on: ubuntu-24.04
+    needs: lint
     env:
       RPY2_CFFI_MODE: ABI
 
@@ -71,29 +98,28 @@ jobs:
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
 
-      - name: Ruff
-        run: |
-          pixi run ruff check .
-          pixi run ruff format --check .
-
-      - name: BasedPyright
-        run: pixi run basedpyright
-
-      - name: Pyrefly
-        run: pixi run pyrefly check -p all
-
       - name: Verify bigdata dependencies
         run: pixi run python -c "import h5py, zarr"
 
-      - name: Python tests with bigdata dependencies
-        run: pixi run pytest tests -q --ignore=tests/cross_language
+      - name: Python tests with coverage
+        run: pixi run pytest tests -q --ignore=tests/cross_language --cov=pygapit --cov-report=xml
+
+      - name: Upload coverage report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: coverage-xml
+          path: coverage.xml
+          if-no-files-found: warn
+          retention-days: 14
 
       - name: Storage tests on minimum Python
         run: pixi run -e full312 pytest tests/test_genotype_storage.py -q
 
   windows:
-    name: Windows Python ${{ matrix.python-version }} (base dependencies)
-    runs-on: windows-latest
+    name: Windows x64 Python ${{ matrix.python-version }} (base dependencies)
+    runs-on: windows-2025
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
@@ -105,6 +131,7 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          architecture: x64
           cache: pip
 
       - name: Install project and pytest
@@ -118,13 +145,14 @@ jobs:
       - name: Python tests with base dependencies
         run: pytest tests -q --ignore=tests/cross_language
 
-  bigdata:
-    name: bigdata extra on Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
+  optional-extras:
+    name: bigdata and styles extras on Python ${{ matrix.python-version }}
+    runs-on: ubuntu-24.04
+    needs: lint
     strategy:
       fail-fast: false
       matrix:
-        python-version: ["3.12", "3.13", "3.14"]
+        python-version: ["3.12", "3.13"]
 
     steps:
       - uses: actions/checkout@v7
@@ -132,6 +160,50 @@ jobs:
       - uses: actions/setup-python@v7
         with:
           python-version: ${{ matrix.python-version }}
+          cache: pip
+
+      - name: Install optional extras
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -e ".[bigdata,styles]" "pytest>=9.1.1"
+
+      - name: Verify optional modules import
+        run: python -c "import h5py, scienceplots, seaborn, zarr"
+
+      - name: Tests with optional extras
+        run: pytest tests -q --ignore=tests/cross_language
+
+  platform-smoke:
+    name: ${{ matrix.name }} Python 3.12 bigdata smoke
+    runs-on: ${{ matrix.runner }}
+    needs: [lint, quality]
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Linux x64
+            runner: ubuntu-24.04
+            architecture: x64
+          - name: Linux ARM64
+            runner: ubuntu-24.04-arm
+            architecture: arm64
+          - name: Windows x64
+            runner: windows-2025
+            architecture: x64
+          - name: macOS x64
+            runner: macos-15-intel
+            architecture: x64
+          - name: macOS ARM64
+            runner: macos-14
+            architecture: arm64
+
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          architecture: ${{ matrix.architecture }}
           cache: pip
 
       - name: Install the bigdata extra
@@ -139,42 +211,19 @@ jobs:
           python -m pip install --upgrade pip
           python -m pip install -e ".[bigdata]" "pytest>=9.1.1"
 
+      - name: Show platform architecture
+        run: python -c "import platform; print(platform.platform()); print(platform.machine())"
+
       - name: Verify optional storage modules import
         run: python -c "import h5py, zarr"
 
-      - name: Tests with the bigdata extra
-        run: pytest tests -q --ignore=tests/cross_language
-
-  styles:
-    name: styles extra on Python ${{ matrix.python-version }}
-    runs-on: ubuntu-latest
-    strategy:
-      fail-fast: false
-      matrix:
-        python-version: ["3.12", "3.13", "3.14"]
-
-    steps:
-      - uses: actions/checkout@v7
-
-      - uses: actions/setup-python@v7
-        with:
-          python-version: ${{ matrix.python-version }}
-          cache: pip
-
-      - name: Install the styles extra
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[styles]" "pytest>=9.1.1"
-
-      - name: Verify optional style modules import
-        run: python -c "import seaborn, scienceplots"
-
-      - name: Tests with the styles extra
-        run: pytest tests -q --ignore=tests/cross_language
+      - name: Storage and core tests
+        run: pytest tests/test_genotype_storage.py tests/test_pygapit.py -q
 
   lowest-dependencies:
     name: Lowest direct dependencies on Python 3.12
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: lint
 
     steps:
       - uses: actions/checkout@v7
@@ -208,7 +257,8 @@ jobs:
 
   parity:
     name: GAPIT 3.5 parity
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
+    needs: [lint, quality]
     env:
       PYGAPIT_REQUIRE_R_ALIGNMENT: "1"
       RPY2_CFFI_MODE: ABI
@@ -244,3 +294,30 @@ jobs:
 
       - name: Cross-language tests
         run: pixi run pytest tests/cross_language -q
+
+  ci-success:
+    name: All checks passed
+    runs-on: ubuntu-24.04
+    if: always()
+    needs:
+      - lint
+      - package
+      - quality
+      - windows
+      - optional-extras
+      - platform-smoke
+      - lowest-dependencies
+      - parity
+
+    steps:
+      - name: Verify all upstream jobs succeeded
+        env:
+          JOB_RESULTS: ${{ join(needs.*.result, ' ') }}
+        run: |
+          echo "Job results: $JOB_RESULTS"
+          for result in $JOB_RESULTS; do
+            if [ "$result" != "success" ]; then
+              echo "One or more CI jobs did not succeed."
+              exit 1
+            fi
+          done

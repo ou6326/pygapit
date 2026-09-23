@@ -16,6 +16,7 @@ build/
 # Tests
 .pytest_cache/
 .coverage
+coverage.xml
 htmlcov/
 
 # Output files (generated, not source)
