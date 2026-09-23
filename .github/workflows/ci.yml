@@ -190,9 +190,6 @@ jobs:
           - name: Windows x64
             runner: windows-2025
             architecture: x64
-          - name: macOS x64
-            runner: macos-15-intel
-            architecture: x64
           - name: macOS ARM64
             runner: macos-14
             architecture: arm64

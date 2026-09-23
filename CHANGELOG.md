@@ -6,6 +6,12 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+### Changed
+
+- Support macOS on Apple Silicon only; remove the Intel macOS platform because
+  the required Numba/llvmlite stack is unavailable for the supported Python
+  versions.
+
 ## [2.0.0rc1] - 2026-09-23
 
 ### Added
