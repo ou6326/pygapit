@@ -6,11 +6,26 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [2.0.0rc2] - 2026-09-24
+
 ### Changed
 
 - Support macOS on Apple Silicon only; remove the Intel macOS platform because
   the required Numba/llvmlite stack is unavailable for the supported Python
   versions.
+- Run supported-platform smoke tests through the locked Pixi environments and
+  keep R-free installation checks isolated from the GAPIT parity environment.
+
+### Security
+
+- Pin GitHub Actions to immutable commit SHAs, let Dependabot maintain those
+  pins, minimize publication permissions, and gate the CI matrix behind a
+  single required status check.
+
+### Maintenance
+
+- Add structured issue forms, a pull-request template, and a security policy
+  for external reports and contributions.
 
 ## [2.0.0rc1] - 2026-09-23
 
@@ -245,7 +260,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v2.0.0rc1...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v2.0.0rc2...main
+[2.0.0rc2]: https://github.com/ou6326/pygapit/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/ou6326/pygapit/compare/v1.2.4...v2.0.0rc1
 [1.2.4]: https://github.com/ou6326/pygapit/compare/v1.2.3...v1.2.4
 [1.2.3]: https://github.com/ou6326/pygapit/compare/v1.2.2...v1.2.3
