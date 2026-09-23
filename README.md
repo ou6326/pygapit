@@ -125,10 +125,10 @@ stubs. The GAPIT reference repository is still not needed for ordinary Python
 development.
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[lint,dev]"
 
 pip install -e ".[bigdata]"      # editable install with big-data support
-pip install -e ".[dev,bigdata]"  # development tools plus big-data support
+pip install -e ".[lint,dev,bigdata]"  # development tools plus big-data support
 ```
 
 The default Pixi environment uses the highest supported Python version and
@@ -169,7 +169,7 @@ installation and its `MASS` package before installing the Python development
 dependencies:
 
 ```bash
-pip install -e ".[dev]"
+pip install -e ".[lint,dev]"
 pytest tests/cross_language -q
 ```
 
