@@ -35,13 +35,13 @@ jobs:
       - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: default
+          environments: lint
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
 
       - name: Ruff, BasedPyright, and Pyrefly
-        run: pixi run precommit
+        run: pixi run -e lint precommit
 
   package:
     name: Build and install distributions
@@ -196,19 +196,19 @@ jobs:
       - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
         with:
           pixi-version: v0.78.0
-          environments: full312
+          environments: smoke312
           cache: true
           cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
           frozen: true
 
       - name: Show platform architecture
-        run: pixi run -e full312 python -c "import platform; print(platform.platform()); print(platform.machine())"
+        run: pixi run -e smoke312 python -c "import platform; print(platform.platform()); print(platform.machine())"
 
       - name: Verify optional storage modules import
-        run: pixi run -e full312 python -c "import h5py, zarr"
+        run: pixi run -e smoke312 python -c "import h5py, zarr"
 
       - name: Storage and core tests
-        run: pixi run -e full312 pytest tests/test_genotype_storage.py tests/test_pygapit.py -q
+        run: pixi run -e smoke312 pytest tests/test_genotype_storage.py tests/test_pygapit.py -q
 
   lowest-dependencies:
     name: Lowest direct dependencies on Python 3.12
