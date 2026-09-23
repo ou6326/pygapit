@@ -1,0 +1,62 @@
+name: Bug report
+description: Report a reproducible pyGAPIT defect or unexpected result.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for helping improve pyGAPIT. Please remove sensitive data from examples and logs.
+  - type: textarea
+    id: summary
+    attributes:
+      label: What happened?
+      description: Describe the observed behavior and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduce
+    attributes:
+      label: Minimal reproduction
+      description: Include the smallest code and synthetic or shareable data needed to reproduce the problem.
+      render: python
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: pyGAPIT version
+      placeholder: 2.0.0rc1
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Python, operating system, and architecture
+      placeholder: Python 3.12, Windows 11, x86-64
+    validations:
+      required: true
+  - type: input
+    id: workflow
+    attributes:
+      label: Model and storage backend
+      description: Include the GWAS or prediction model and ndarray, NumPy mmap, HDF5, or Zarr backend when relevant.
+      placeholder: CMLM with an HDF5 GenotypeStore
+  - type: input
+    id: install
+    attributes:
+      label: Installation
+      description: State how pyGAPIT was installed and which optional features were enabled.
+      placeholder: pip install "pygapit-ng[bigdata]"
+  - type: textarea
+    id: logs
+    attributes:
+      label: Traceback or diagnostic output
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I searched existing issues for the same problem.
+          required: true
+        - label: I removed private, identifying, or unpublished research data.
+          required: true

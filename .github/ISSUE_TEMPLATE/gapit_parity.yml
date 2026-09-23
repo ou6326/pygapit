@@ -1,0 +1,51 @@
+name: GAPIT 3.5 parity report
+description: Report a reproducible scientific difference between pyGAPIT and R GAPIT 3.5.
+title: "[Parity]: "
+body:
+  - type: markdown
+    attributes:
+      value: Scientific parity reports need enough detail to reproduce both workflows. Please use synthetic or shareable data.
+  - type: input
+    id: versions
+    attributes:
+      label: pyGAPIT and R GAPIT versions
+      placeholder: pyGAPIT 2.0.0rc1; GAPIT 3.5 commit or release
+    validations:
+      required: true
+  - type: input
+    id: model
+    attributes:
+      label: Model and storage backend
+      placeholder: FarmCPU; Zarr GenotypeStore
+    validations:
+      required: true
+  - type: textarea
+    id: preprocessing
+    attributes:
+      label: Input and preprocessing
+      description: Describe input format, missing-value handling, MAF/QC filters, PCA or kinship construction, and all relevant seeds.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Reproduction for both implementations
+      description: Provide minimal Python and R commands plus synthetic or shareable input data.
+    validations:
+      required: true
+  - type: textarea
+    id: difference
+    attributes:
+      label: Observed difference
+      description: Include marker order, P values, effects, selected markers, tolerances, or other differing outputs.
+    validations:
+      required: true
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Checks
+      options:
+        - label: I reviewed the documented intentional differences from GAPIT 3.5.
+          required: true
+        - label: I confirmed the difference using the same aligned samples, markers, and parameters.
+          required: true
