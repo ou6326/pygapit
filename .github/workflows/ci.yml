@@ -183,39 +183,32 @@ jobs:
         include:
           - name: Linux x64
             runner: ubuntu-24.04
-            architecture: x64
           - name: Linux ARM64
             runner: ubuntu-24.04-arm
-            architecture: arm64
           - name: Windows x64
             runner: windows-2025
-            architecture: x64
           - name: macOS ARM64
             runner: macos-14
-            architecture: arm64
 
     steps:
       - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v7
+      - uses: prefix-dev/setup-pixi@d3f436a425481402e6a95a1d1fc10331c708cd9e # v0.10.2
         with:
-          python-version: "3.12"
-          architecture: ${{ matrix.architecture }}
-          cache: pip
-
-      - name: Install the bigdata extra
-        run: |
-          python -m pip install --upgrade pip
-          python -m pip install -e ".[bigdata]" "pytest>=9.1.1"
+          pixi-version: v0.78.0
+          environments: full312
+          cache: true
+          cache-write: ${{ github.event_name == 'push' && github.ref_name == 'main' }}
+          frozen: true
 
       - name: Show platform architecture
-        run: python -c "import platform; print(platform.platform()); print(platform.machine())"
+        run: pixi run -e full312 python -c "import platform; print(platform.platform()); print(platform.machine())"
 
       - name: Verify optional storage modules import
-        run: python -c "import h5py, zarr"
+        run: pixi run -e full312 python -c "import h5py, zarr"
 
       - name: Storage and core tests
-        run: pytest tests/test_genotype_storage.py tests/test_pygapit.py -q
+        run: pixi run -e full312 pytest tests/test_genotype_storage.py tests/test_pygapit.py -q
 
   lowest-dependencies:
     name: Lowest direct dependencies on Python 3.12
