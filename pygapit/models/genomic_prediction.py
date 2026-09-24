@@ -115,29 +115,9 @@ def BayesB(
         residual = y - Z @ beta
 
         for j in rng.permutation(m):
-            zj = Z[:, j]
-            zz = np.dot(zj, zj)
-            residual += zj * beta[j]  # un-residualise this SNP
-
-            mean_j = np.dot(zj, residual) / (zz + Ve / max(Vb, 1e-15))
-            var_j = Ve / (zz + Ve / max(Vb, 1e-15))
-
-            # Inclusion log-odds
-            log_p1 = (
-                0.5 * mean_j**2 / max(var_j, 1e-15)
-                - 0.5 * np.log(max(Ve / max(Vb, 1e-15) + zz, 1e-15))
-                + np.log((1 - pi) / max(pi, 1e-15))
+            beta[j], delta[j] = _sample_bayesb_marker(
+                Z[:, j], residual, np.float64(beta[j]), Ve, Vb, pi, rng
             )
-            p_incl = 1.0 / (1.0 + np.exp(-np.clip(log_p1, -30, 30)))
-
-            if rng.random() < p_incl:
-                delta[j] = True
-                beta[j] = rng.normal(mean_j, np.sqrt(max(var_j, 0)))
-            else:
-                delta[j] = False
-                beta[j] = 0.0
-
-            residual -= zj * beta[j]
 
         Ve = _sample_var(residual, n, rng, a=4, b=np.var(y) * 0.5)
         Vb = _sample_var(
@@ -158,6 +138,33 @@ def BayesB(
     gebv = Z @ beta_hat + mu
     print(f"[PyGAPIT]  BayesB done. Non-zero loci: {(np.abs(beta_hat) > 1e-6).sum()}")
     return beta_hat, gebv
+
+
+def _sample_bayesb_marker(
+    genotype: FloatVector,
+    residual: FloatVector,
+    current_effect: float,
+    residual_variance: float,
+    effect_variance: float,
+    sparsity: float,
+    rng: np.random.Generator,
+) -> tuple[float, bool]:
+    """Update one marker effect and its inclusion indicator in place."""
+    genotype_ss = np.dot(genotype, genotype)
+    residual += genotype * current_effect
+    precision = genotype_ss + residual_variance / max(effect_variance, 1e-15)
+    mean = np.dot(genotype, residual) / precision
+    variance = residual_variance / precision
+    log_odds = (
+        0.5 * mean**2 / max(variance, 1e-15)
+        - 0.5 * np.log(max(precision, 1e-15))
+        + np.log((1 - sparsity) / max(sparsity, 1e-15))
+    )
+    inclusion_probability = 1.0 / (1.0 + np.exp(-np.clip(log_odds, -30, 30)))
+    included = rng.random() < inclusion_probability
+    effect = rng.normal(mean, np.sqrt(max(variance, 0.0))) if included else 0.0
+    residual -= genotype * effect
+    return effect, included
 
 
 # ─────────────────────────────────────────────────────────────────────────────

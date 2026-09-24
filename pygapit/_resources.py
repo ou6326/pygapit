@@ -33,10 +33,17 @@ def _float64_batch_size(
 
 def validate_marker_workspace_mib(value: float) -> float:
     """Return a finite positive marker-workspace budget in MiB."""
+    normalized = _as_finite_real(value)
+    if normalized <= 0.0:
+        raise ValueError("marker_workspace_mib must be finite and positive")
+    return normalized
+
+
+def _as_finite_real(value: object) -> float:
     if isinstance(value, bool) or not isinstance(value, Real):
         raise TypeError("marker_workspace_mib must be a real number, not bool")
     normalized = float(value)
-    if not np.isfinite(normalized) or normalized <= 0.0:
+    if not np.isfinite(normalized):
         raise ValueError("marker_workspace_mib must be finite and positive")
     return normalized
 

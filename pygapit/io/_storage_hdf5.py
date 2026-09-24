@@ -128,24 +128,24 @@ class HDF5GenotypeStore:
                 )
             else:
                 requested: IntVector = np.arange(start, stop, step, dtype=np.int_)
-                unique_indices: IntVector
-                inverse: IntVector
-                unique_indices, inverse = np.unique(requested, return_inverse=True)
-                unique_block = t.cast(
-                    FloatMatrix,
-                    self._dataset[unique_indices, marker_slice],
-                )
-                selected = unique_block[inverse]
+                selected = self._read_arbitrary_samples(requested, marker_slice)
         else:
-            unique_indices, inverse = np.unique(selection, return_inverse=True)
-            unique_block = t.cast(
-                FloatMatrix,
-                self._dataset[unique_indices, marker_slice],
-            )
-            selected = unique_block[inverse]
+            selected = self._read_arbitrary_samples(selection, marker_slice)
         result = np.asarray(selected, dtype=np.float64)
         result.setflags(write=False)
         return result
+
+    def _read_arbitrary_samples(
+        self,
+        sample_indices: IntVector,
+        marker_slice: slice,
+    ) -> FloatMatrix:
+        unique_indices, inverse = np.unique(sample_indices, return_inverse=True)
+        unique_block = t.cast(
+            FloatMatrix,
+            self._dataset[unique_indices, marker_slice],
+        )
+        return unique_block[inverse]
 
     def close(self) -> None:
         self._file.close()
