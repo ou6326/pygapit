@@ -7,6 +7,7 @@ import json
 import warnings
 from collections.abc import Iterator
 from importlib.util import find_spec
+from io import BytesIO
 from pathlib import Path
 from types import ModuleType
 from typing import TYPE_CHECKING, Protocol, cast
@@ -65,7 +66,7 @@ _STORAGE_BACKENDS = [
 class _ReadNumericCsv(Protocol):
     def __call__(
         self,
-        path: Path,
+        path: Path | BytesIO,
         *,
         sep: str,
         nrows: int | None = None,
@@ -583,7 +584,7 @@ def test_store_to_store_conversion_reads_bounded_marker_blocks(
 
 @pytest.mark.parametrize("backend", _STORAGE_BACKENDS)
 @pytest.mark.parametrize("impute_method", ["middle", "mean"])
-def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
+def test_numeric_store_import_streams_sample_rows_without_wide_dataframe_reads(
     tmp_path: Path,
     monkeypatch: pytest.MonkeyPatch,
     backend: StorageBackend,
@@ -608,7 +609,7 @@ def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
     requests: list[tuple[int | None, list[str] | None, int | None]] = []
 
     def bounded_read_csv(
-        path: Path,
+        path: Path | BytesIO,
         *,
         sep: str,
         nrows: int | None = None,
@@ -616,7 +617,12 @@ def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
         chunksize: int | None = None,
         low_memory: bool = False,
     ) -> pd.DataFrame | Iterator[pd.DataFrame]:
-        if nrows is None and usecols is None and chunksize is None:
+        if (
+            isinstance(path, Path)
+            and nrows is None
+            and usecols is None
+            and chunksize is None
+        ):
             raise AssertionError("numeric import must not read the complete GD table")
         requests.append((nrows, usecols, chunksize))
         return original_read_csv(
@@ -644,9 +650,8 @@ def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
 
     expected_requests: list[tuple[int | None, list[str] | None, int | None]] = [
         (0, None, None),
-        (None, ["Taxa"], None),
+        (None, None, None),
     ]
-    expected_requests.extend([(None, None, 2)] * (2 if impute_method == "mean" else 1))
     assert requests == expected_requests
     with open_genotype_store(store_path, backend=backend) as store:
         np.testing.assert_allclose(
@@ -656,6 +661,68 @@ def test_numeric_store_import_streams_sample_rows_once_per_required_pass(
         np.testing.assert_array_equal(
             store.marker_ids, expected.GM["SNP"].to_numpy(dtype=str)
         )
+
+
+@pytest.mark.parametrize("impute_method", ["middle", "mean"])
+def test_numeric_store_import_matches_csv_quoting_and_default_na_values(
+    tmp_path: Path,
+    impute_method: str,
+) -> None:
+    genotype_path = tmp_path / "quoted-genotype.tsv"
+    genotype_path.write_text(
+        "Taxa\ts1\ts2\ts3\ts4\ts5\n"
+        '"line one\nline two"\t0\t1\t#N/A\t2\t\n'
+        '"quoted ""taxon"""\t1\tNULL\t2\t-NaN\t0\n'
+        "sample-c\tN/A\t0\t1\t2\t1\n"
+        "sample-d\t-1.#IND\t2\t0\t1\t2\n",
+        encoding="utf-8",
+    )
+    marker_map = pd.DataFrame({
+        "SNP": ["s1", "s2", "s3", "s4", "s5"],
+        "Chromosome": [1, 1, 2, 2, 3],
+        "Position": [10, 20, 30, 40, 50],
+    })
+    expected = read_numeric(genotype_path, marker_map, impute_method=impute_method)
+    store_path = tmp_path / "quoted-genotype-store"
+
+    import_numeric_genotype_store(
+        store_path,
+        genotype_path,
+        marker_map,
+        impute_method=impute_method,
+        backend="numpy",
+        marker_chunk_size=2,
+        marker_workspace_mib=0.0002,
+    )
+
+    with open_genotype_store(store_path, backend="numpy") as store:
+        np.testing.assert_allclose(
+            store.read_markers(slice(None)), expected.GD, rtol=0.0, atol=0.0
+        )
+        np.testing.assert_array_equal(store.taxa, expected.taxa)
+
+
+def test_numeric_store_import_rejects_infinity_and_malformed_values(
+    tmp_path: Path,
+) -> None:
+    marker_map = pd.DataFrame({
+        "SNP": ["s1", "s2"],
+        "Chromosome": [1, 1],
+        "Position": [10, 20],
+    })
+    for row, message in [
+        ("sample\tinf\t1\n", "infinity"),
+        ("sample\t1x\t1\n", "numeric"),
+    ]:
+        genotype_path = tmp_path / "invalid-genotype.tsv"
+        genotype_path.write_text(f"Taxa\ts1\ts2\n{row}", encoding="utf-8")
+        with pytest.raises(ValueError, match=message):
+            import_numeric_genotype_store(
+                tmp_path / "invalid-store",
+                genotype_path,
+                marker_map,
+                backend="numpy",
+            )
 
 
 def test_numeric_store_import_none_preserves_missing_values_and_marker_metadata(
@@ -1102,8 +1169,11 @@ def test_store_rejects_invalid_header_types(
     path = tmp_path / "store"
     write_genotype_store(path, _genotype_data(), backend=backend)
     if backend == "numpy":
-        metadata: dict[str, object] = {"complete": True, "schema_version": 1}
-        metadata[field] = value
+        metadata: dict[str, object] = {
+            "complete": True,
+            "schema_version": 1,
+            field: value,
+        }
         (path / "metadata.json").write_text(json.dumps(metadata), encoding="utf-8")
     elif backend == "hdf5":
         import h5py

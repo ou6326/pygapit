@@ -13,8 +13,9 @@ from __future__ import annotations
 import warnings
 from collections.abc import Iterator
 from dataclasses import dataclass
+from io import BytesIO
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, NotRequired, TypedDict, final, overload
+from typing import TYPE_CHECKING, Any, BinaryIO, NotRequired, TypedDict, final, overload
 
 import numpy as np
 import pandas as pd
@@ -63,6 +64,63 @@ HETEROZYGOUS_2BIT = frozenset({
 MISSING_1BIT = frozenset({"N", "X", "-", "+", "/", "NA", "NAN"})
 MISSING_2BIT = frozenset({"NN", "XX", "--", "++", "//", "00", "N", "NA", "NAN"})
 _IMPUTE_METHODS = frozenset({"middle", "major", "minor", "mean", "none"})
+_NUMERIC_NA_TOKENS = (
+    b"#N/A N/A",
+    b"-1.#IND",
+    b"-1.#QNAN",
+    b"1.#IND",
+    b"1.#QNAN",
+    b"<NA>",
+    b"#N/A",
+    b"#NA",
+    b"N/A",
+    b"NULL",
+    b"NaT",
+    b"None",
+    b"NA",
+    b"NaN",
+    b"nan",
+    b"null",
+    b"n/a",
+    b"-NaN",
+    b"-nan",
+)
+
+
+def _iter_csv_records(stream: BinaryIO) -> Iterator[bytes]:
+    """Yield complete CSV records, including records with quoted newlines."""
+    pending = b""
+    quote_count = 0
+    for physical_line in stream:
+        if not pending and b'"' not in physical_line:
+            yield physical_line
+            continue
+        record = pending + physical_line
+        unescaped = physical_line.replace(b'""', b"")
+        quote_count += unescaped.count(b'"')
+        if quote_count % 2 == 0:
+            yield record
+            pending = b""
+            quote_count = 0
+        else:
+            pending = record
+    if pending:
+        yield pending
+
+
+def _first_tsv_field(record: bytes) -> bytes:
+    """Return the first field while respecting quotes in that field."""
+    if not record.startswith(b'"'):
+        return record.rstrip(b"\r\n").partition(b"\t")[0]
+    position = 1
+    while True:
+        quote = record.find(b'"', position)
+        if quote < 0:
+            return record.rstrip(b"\r\n")
+        if record[quote + 1 : quote + 2] == b'"':
+            position = quote + 2
+        else:
+            return record[: quote + 1]
 
 
 @dataclass
@@ -646,6 +704,8 @@ class _NumericFileWriteSource:
                 "Numeric genotype must contain a taxa column and at least one SNP"
             )
         self._taxa_column = header.columns[0]
+        with self._path.open("rb") as stream:
+            self._header_line = stream.readline()
         self._marker_columns: StrVector = np.asarray(header.columns[1:], dtype=str)
         normalized_map = _marker_map_from_frame(marker_map, "Marker map")
         if self._marker_columns.tolist() != normalized_map["SNP"].tolist():
@@ -653,15 +713,25 @@ class _NumericFileWriteSource:
                 "Numeric genotype SNP columns must match marker-map rows in order"
             )
 
+        taxa_projection = bytearray(_first_tsv_field(self._header_line) + b"\n")
+        with self._path.open("rb") as stream:
+            stream.readline()
+            for record in _iter_csv_records(stream):
+                if record in (b"\n", b"\r\n"):
+                    continue
+                taxa_projection.extend(_first_tsv_field(record))
+                taxa_projection.extend(b"\n")
         taxa_frame = pd.read_csv(
-            self._path,
+            BytesIO(taxa_projection),
             sep="\t",
-            usecols=[self._taxa_column],
             low_memory=False,
         )
         if taxa_frame.empty:
             raise ValueError("Numeric genotype must contain at least one genotype row")
         self.taxa: StrVector = _taxa_array(taxa_frame.iloc[:, 0], "genotype")
+        taxa_dtype = taxa_frame.dtypes.iloc[0]
+        self._taxa_are_integer = pd.api.types.is_integer_dtype(taxa_dtype)
+        self._taxa_are_float = pd.api.types.is_float_dtype(taxa_dtype)
         self.marker_ids: StrVector = self._marker_columns.copy()
         self.chromosomes: StrVector = np.asarray(
             normalized_map["Chromosome"].to_numpy(dtype=str), dtype=str
@@ -682,38 +752,119 @@ class _NumericFileWriteSource:
     def _iter_unimputed_blocks(
         self,
     ) -> Iterator[tuple[Slice, FloatMatrix]]:
-        chunks = pd.read_csv(
-            self._path,
-            sep="\t",
-            chunksize=self._sample_chunk_size,
-            low_memory=False,
+        block = np.empty(
+            (self._sample_chunk_size, self.shape[1]),
+            dtype=np.float64,
         )
-        expected_columns = [self._taxa_column, *self._marker_columns.tolist()]
+        rows_in_block = 0
         start = 0
-        for frame in chunks:
-            if frame.columns.tolist() != expected_columns:
+        with self._path.open("rb") as stream:
+            if stream.readline() != self._header_line:
                 raise ValueError("Numeric genotype columns changed while importing")
-            stop = start + len(frame)
-            taxa = _taxa_array(frame.iloc[:, 0], "genotype")
-            if not np.array_equal(taxa, self.taxa[start:stop]):
-                raise ValueError("Numeric genotype taxa changed while importing")
-            try:
-                values: FloatMatrix = frame.iloc[:, 1:].to_numpy(
-                    dtype=np.float64, copy=True
-                )
-            except (TypeError, ValueError) as exc:
-                raise ValueError("Numeric genotype SNP values must be numeric") from exc
-            if np.isinf(values).any():
-                raise ValueError(
-                    "Numeric genotype SNP values must not contain infinity"
-                )
-            yield slice(start, stop), values
-            start = stop
+            for line in _iter_csv_records(stream):
+                if line in (b"\n", b"\r\n"):
+                    continue
+                if start >= self.shape[0]:
+                    raise ValueError(
+                        "Numeric genotype rows changed while importing; "
+                        f"expected {self.shape[0]}, got more"
+                    )
+                taxa, values = self._parse_numeric_line(line)
+                if taxa != self.taxa[start]:
+                    raise ValueError("Numeric genotype taxa changed while importing")
+                block[rows_in_block] = values
+                rows_in_block += 1
+                start += 1
+                if rows_in_block == self._sample_chunk_size:
+                    yield slice(start - rows_in_block, start), block
+                    block = np.empty(
+                        (self._sample_chunk_size, self.shape[1]),
+                        dtype=np.float64,
+                    )
+                    rows_in_block = 0
+        if rows_in_block:
+            yield slice(start - rows_in_block, start), block[:rows_in_block]
         if start != self.shape[0]:
             raise ValueError(
                 "Numeric genotype rows changed while importing; "
                 f"expected {self.shape[0]}, got {start}"
             )
+
+    def _parse_numeric_line(self, line: bytes) -> tuple[str, FloatVector]:
+        """Parse one ordinary GD sample row without building a wide DataFrame."""
+        if b'"' in line:
+            return self._parse_quoted_numeric_line(line)
+
+        raw_taxa, separator, raw_values = line.rstrip(b"\r\n").partition(b"\t")
+        if not separator:
+            raise ValueError("Numeric genotype columns changed while importing")
+        taxa = raw_taxa.decode("utf-8")
+        if self._taxa_are_integer:
+            try:
+                taxa = str(int(taxa))
+            except ValueError as exc:
+                raise ValueError(
+                    "Numeric genotype taxa changed while importing"
+                ) from exc
+        elif self._taxa_are_float:
+            try:
+                taxa = str(float(taxa))
+            except ValueError as exc:
+                raise ValueError(
+                    "Numeric genotype taxa changed while importing"
+                ) from exc
+
+        values_text = raw_values
+        if (
+            values_text.startswith(b"\t")
+            or values_text.endswith(b"\t")
+            or b"\t\t" in values_text
+        ):
+            values_text = values_text.rstrip(b"\r\n")
+            if values_text.startswith(b"\t"):
+                values_text = b"nan" + values_text
+            while b"\t\t" in values_text:
+                values_text = values_text.replace(b"\t\t", b"\tnan\t")
+            if values_text.endswith(b"\t"):
+                values_text += b"nan"
+        for token in _NUMERIC_NA_TOKENS:
+            if token in values_text:
+                padded = b"\t" + values_text + b"\t"
+                values_text = padded.replace(b"\t" + token + b"\t", b"\tnan\t")[1:-1]
+
+        try:
+            values = np.fromstring(values_text, sep="\t", dtype=np.float64)
+        except ValueError as exc:
+            raise ValueError("Numeric genotype SNP values must be numeric") from exc
+        if values.size != self.shape[1]:
+            raise ValueError("Numeric genotype SNP values must be numeric")
+        if np.isinf(values).any():
+            raise ValueError("Numeric genotype SNP values must not contain infinity")
+        return taxa, values
+
+    def _parse_quoted_numeric_line(self, line: bytes) -> tuple[str, FloatVector]:
+        """Parse quoted rows with pandas to preserve its CSV compatibility."""
+        # Keep pandas' CSV quoting rules for unusual but valid quoted rows.
+        frame = pd.read_csv(
+            BytesIO(self._header_line + line),
+            sep="\t",
+            nrows=1,
+            low_memory=False,
+        )
+        expected_columns = [self._taxa_column, *self._marker_columns.tolist()]
+        if frame.columns.tolist() != expected_columns:
+            raise ValueError("Numeric genotype columns changed while importing")
+        taxa = _taxa_array(frame.iloc[:, 0], "genotype")[0]
+        try:
+            values: FloatVector = frame.iloc[:, 1:].to_numpy(
+                dtype=np.float64,
+                copy=True,
+            )[0]
+        except (TypeError, ValueError) as exc:
+            raise ValueError("Numeric genotype SNP values must be numeric") from exc
+        if np.isinf(values).any():
+            raise ValueError("Numeric genotype SNP values must not contain infinity")
+        return taxa, values
 
     def _mean_imputation_values(self) -> FloatVector:
         column_sums = np.zeros(self.shape[1], dtype=np.float64)
@@ -876,9 +1027,9 @@ def align_inputs(
     """
     if len(pheno.Y) != len(pheno.taxa):
         raise ValueError("Phenotype rows and phenotype taxa must have equal length")
+    genotype_taxa = geno.taxa
     if isinstance(geno, LabeledGenotypeStore):
         genotype: FloatMatrix | GenotypeStore = geno
-        genotype_taxa = geno.taxa
         row_count, marker_count = geno.shape
         if genotype_taxa.ndim != 1 or len(genotype_taxa) != row_count:
             raise ValueError(f"genotype taxa must contain {row_count} values")
@@ -896,7 +1047,6 @@ def align_inputs(
         })
     else:
         genotype = geno.GD
-        genotype_taxa = geno.taxa
         marker_map = geno.GM
     if isinstance(genotype, np.ndarray) and genotype.ndim != 2:
         raise ValueError("Genotype matrix must be two-dimensional")
