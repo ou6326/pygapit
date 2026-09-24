@@ -77,12 +77,14 @@ def _profile_one_import(
     marker_workspace_mib: float,
 ) -> dict[str, float | int]:
     """Run the actual NumPy writer and separate source work from writer work."""
-    setup_started = time.perf_counter()
+    marker_map_started = time.perf_counter()
     marker_map = pd.read_csv(marker_path, sep="\t", header=0)
+    marker_map_read_seconds = time.perf_counter() - marker_map_started
+    source_started = time.perf_counter()
     source = _NumericFileWriteSource(
         genotype_path, marker_map, "middle", marker_workspace_mib
     )
-    source_setup_seconds = time.perf_counter() - setup_started
+    source_init_seconds = time.perf_counter() - source_started
     parser_seconds: list[float] = []
     timed_source = _TimedSampleSource(source, parser_seconds)
     write_started = time.perf_counter()
@@ -90,11 +92,14 @@ def _profile_one_import(
     write_total_seconds = time.perf_counter() - write_started
     text_parse_impute_seconds = sum(parser_seconds)
     return {
-        "source_setup_seconds": source_setup_seconds,
+        "marker_map_read_seconds": marker_map_read_seconds,
+        "source_init_seconds": source_init_seconds,
         "text_parse_impute_seconds": text_parse_impute_seconds,
         "store_matrix_metadata_seconds": write_total_seconds
         - text_parse_impute_seconds,
-        "total_seconds": source_setup_seconds + write_total_seconds,
+        "total_seconds": (
+            marker_map_read_seconds + source_init_seconds + write_total_seconds
+        ),
         "sample_block_count": len(parser_seconds),
         # SampleBlockWriteSource maps source row slices directly to destination rows.
         "sample_row_to_marker_block_reorder_seconds": 0.0,
@@ -171,7 +176,8 @@ def run_numeric_import_profile(
         },
         "total": asdict(total),
         "stages": {
-            "source_metadata_setup_seconds": median("source_setup_seconds"),
+            "marker_map_read_seconds": median("marker_map_read_seconds"),
+            "numeric_source_init_seconds": median("source_init_seconds"),
             "text_parse_and_imputation_seconds": median("text_parse_impute_seconds"),
             "store_matrix_and_metadata_seconds": median(
                 "store_matrix_metadata_seconds"
