@@ -82,9 +82,8 @@ def get_significant_snps(
     -------
     dict with 'threshold', 'significant_mask', 'adj_pvalues'
     """
-    m = len(p_values)
-
     if method == "bonferroni":
+        m = len(p_values)
         threshold = bonferroni_threshold(m, alpha)
         sig_mask = p_values <= threshold
         adj_pvalues = np.minimum(p_values * m, 1.0)

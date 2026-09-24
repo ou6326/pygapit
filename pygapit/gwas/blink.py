@@ -229,6 +229,93 @@ def _calibrate_no_qtn_p_values(p_values: FloatVector) -> FloatVector:
     return calibrated
 
 
+def _select_blink_cofactors(
+    y: FloatVector,
+    X0: FloatMatrix,
+    genotype: GenotypeStore,
+    p_values: FloatVector,
+    p_threshold: float,
+    fdr_alpha: float | None,
+    current_qtns: IntVector,
+    iteration: int,
+    ld_threshold: float,
+    marker_workspace_mib: float,
+) -> IntVector | None:
+    """Select one iteration's BLINK cofactors; ``None`` means no candidates."""
+    candidates = np.flatnonzero(_candidate_mask(p_values, p_threshold, fdr_alpha))
+    if candidates.size == 0:
+        return None
+
+    candidates_sorted = candidates[np.argsort(p_values[candidates])]
+    candidates_pruned = _ld_prune(
+        candidates_sorted,
+        genotype,
+        ld_threshold,
+        marker_workspace_mib=marker_workspace_mib,
+    )
+    if candidates_pruned.size == 0:
+        return np.empty(0, dtype=np.int_)
+
+    new_qtns = _bic_select_cofactors(
+        y,
+        X0,
+        genotype,
+        candidates_pruned,
+        marker_workspace_mib=marker_workspace_mib,
+    )
+    if iteration == 0 or current_qtns.size == 0:
+        return new_qtns
+
+    new_qtns = np.asarray(
+        list(dict.fromkeys([*new_qtns, *current_qtns])), dtype=np.int_
+    )
+    if candidates_sorted.size > 1 and new_qtns.size > 1:
+        new_qtns = _bic_select_cofactors(
+            y,
+            X0,
+            genotype,
+            new_qtns,
+            marker_workspace_mib=marker_workspace_mib,
+        )
+    return new_qtns
+
+
+def _jaccard_similarity(first: IntVector, second: IntVector) -> float:
+    """Measure overlap between successive BLINK cofactor selections."""
+    if first.size == 0 and second.size == 0:
+        return 1.0
+    if first.size == 0 or second.size == 0:
+        return 0.0
+    intersection = np.intersect1d(first, second).size
+    union = np.union1d(first, second).size
+    return float(intersection / union)
+
+
+def _scan_blink_cofactors(
+    y: FloatVector,
+    X0: FloatMatrix,
+    genotype: GenotypeStore,
+    qtns: IntVector,
+    marker_workspace_mib: float,
+) -> GLMResult:
+    """Run the BLINK marker scan and GAPIT cofactor substitution step."""
+    scan = glm_scan_with_cofactors(
+        y,
+        X0,
+        genotype,
+        qtns,
+        marker_workspace_mib=marker_workspace_mib,
+    )
+    return reward_substitute_cofactor_statistics(
+        scan,
+        y,
+        X0,
+        genotype,
+        qtns,
+        marker_workspace_mib=marker_workspace_mib,
+    )
+
+
 def blink_gwas(
     y: FloatVector,
     X0: FloatMatrix,
@@ -287,104 +374,45 @@ def blink_gwas(
 
     for iteration in range(max_iterations):
         n_iter = iteration + 1
-
-        # ── GLM-1: Select cofactors ───────────────────────────────────────
-        # Step 1: get significant candidates from current p-values
-        sig_mask = _candidate_mask(
-            p_values,
-            p_threshold,
-            fdr_alpha if use_fdr else None,
-        )
-        candidate_idx = np.where(sig_mask)[0]
-
-        if len(candidate_idx) == 0:
-            if len(current_qtns) == 0:
-                no_qtn_p_values = _calibrate_no_qtn_p_values(p_values)
-            break
-
-        # Sort candidates by p-value (best first)
-        candidate_order = np.argsort(p_values[candidate_idx])
-        candidates_sorted = candidate_idx[candidate_order]
-
-        # Step 2: LD pruning
-        candidates_pruned = _ld_prune(
-            candidates_sorted,
-            genotype,
-            ld_threshold,
-            marker_workspace_mib=marker_workspace_mib,
-        )
-
-        if len(candidates_pruned) == 0:
-            break
-
-        # Step 3: BIC selection
-        new_qtns = _bic_select_cofactors(
+        new_qtns = _select_blink_cofactors(
             y,
             X0,
             genotype,
-            candidates_pruned,
-            marker_workspace_mib=marker_workspace_mib,
+            p_values,
+            p_threshold,
+            fdr_alpha if use_fdr else None,
+            current_qtns,
+            iteration,
+            ld_threshold,
+            marker_workspace_mib,
         )
-        if iteration > 0 and len(current_qtns) > 0:
-            new_qtns = np.asarray(
-                list(dict.fromkeys([*new_qtns, *current_qtns])), dtype=int
-            )
-            if len(candidates_sorted) > 1 and len(new_qtns) > 1:
-                new_qtns = _bic_select_cofactors(
-                    y,
-                    X0,
-                    genotype,
-                    new_qtns,
-                    marker_workspace_mib=marker_workspace_mib,
-                )
+        if new_qtns is None:
+            if len(current_qtns) == 0:
+                no_qtn_p_values = _calibrate_no_qtn_p_values(p_values)
+            break
+        if new_qtns.size == 0:
+            break
 
-        # ── Convergence check ─────────────────────────────────────────────
-        # Jaccard similarity between current and previous QTN sets
-        if len(new_qtns) > 0 and len(current_qtns) > 0:
-            intersection = len(np.intersect1d(new_qtns, current_qtns))
-            union = len(np.union1d(new_qtns, current_qtns))
-            jaccard = intersection / union if union > 0 else 0.0
-        elif len(new_qtns) == 0 and len(current_qtns) == 0:
-            jaccard = 1.0
-        else:
-            jaccard = 0.0
-
+        jaccard = _jaccard_similarity(new_qtns, current_qtns)
         current_qtns = new_qtns
-
-        # ── GLM-2: Test all markers with updated cofactors ───────────────
-        glm_result = reward_substitute_cofactor_statistics(
-            glm_scan_with_cofactors(
-                y,
-                X0,
-                genotype,
-                current_qtns,
-                marker_workspace_mib=marker_workspace_mib,
-            ),
+        glm_result = _scan_blink_cofactors(
             y,
             X0,
             genotype,
             current_qtns,
-            marker_workspace_mib=marker_workspace_mib,
+            marker_workspace_mib,
         )
         p_values = glm_result.p_values.copy()
-
         if jaccard >= converge_threshold:
             break
 
     # Final scan with last cofactor set
-    final_result = reward_substitute_cofactor_statistics(
-        glm_scan_with_cofactors(
-            y,
-            X0,
-            genotype,
-            current_qtns,
-            marker_workspace_mib=marker_workspace_mib,
-        ),
+    final_result = _scan_blink_cofactors(
         y,
         X0,
         genotype,
         current_qtns,
-        marker_workspace_mib=marker_workspace_mib,
+        marker_workspace_mib,
     )
     if no_qtn_p_values is not None:
         final_result = GLMResult(

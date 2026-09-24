@@ -76,9 +76,8 @@ def _bin_select_qtns(
 
     Returns selected QTN indices (0-based).
     """
-    m = len(p_values)
-
     if p_threshold is None:
+        m = len(p_values)
         p_threshold = 1.0 / m  # Bonferroni
 
     # Pre-filter: only consider significant SNPs
@@ -93,7 +92,7 @@ def _bin_select_qtns(
     for raw_i in sig_idx:
         i = int(raw_i)
         chrom = str(chromosomes[i])
-        pos = positions[i] if not np.isnan(positions[i]) else 0.0
+        pos = 0.0 if np.isnan(positions[i]) else positions[i]
         bin_num = int(pos // bin_size)
         key = (chrom, bin_num)
         if key not in bin_ids or p_values[i] < bin_ids[key][0]:

@@ -647,7 +647,7 @@ class TestBLINK:
         pruned = _ld_prune(candidates, GD, ld_threshold=0.9)
         # All 5 correlated SNPs should collapse to 1; independent SNP 5 kept
         assert 5 in pruned, "Independent SNP should survive LD pruning"
-        n_from_corr = sum(1 for i in pruned if i < 5)
+        n_from_corr = (pruned < 5).sum()
         assert n_from_corr == 1, (
             f"Should keep only 1 of 5 correlated SNPs, kept {n_from_corr}"
         )
@@ -1243,9 +1243,9 @@ class TestGAPITPipeline:
         )
 
         output_files = list(tmp_path.iterdir())
-        assert len(output_files) > 0, "No output files created"
+        assert output_files, "No output files created"
         csv_files = [f for f in output_files if f.suffix == ".csv"]
-        assert len(csv_files) >= 1, "No CSV output files created"
+        assert csv_files, "No CSV output files created"
 
     def test_gapit_simulation_mode(self, tmp_path: Path) -> None:
         """Simulation mode should override phenotype with simulated values."""

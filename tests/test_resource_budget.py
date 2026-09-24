@@ -50,7 +50,7 @@ def test_marker_slices_cover_each_marker_with_shared_batch_sizing() -> None:
     slices = list(iter_marker_slices(100, 3_000, 1.0))
 
     assert slices == [slice(0, 1_310), slice(1_310, 2_620), slice(2_620, 3_000)]
-    assert list(iter_marker_slices(100, 0, 1.0)) == []
+    assert not list(iter_marker_slices(100, 0, 1.0))
 
 
 @pytest.mark.parametrize("value", [0.0, -1.0, np.inf, np.nan, True])

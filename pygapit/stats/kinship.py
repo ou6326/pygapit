@@ -170,6 +170,4 @@ def scale_kinship(K: FloatMatrix) -> FloatMatrix:
     K = as_float_matrix(K, name="kinship matrix")
     require_square(K, name="kinship matrix")
     d = np.mean(np.diag(K))
-    if d > 1e-12:
-        return K / d
-    return K
+    return K / d if d > 1e-12 else K
