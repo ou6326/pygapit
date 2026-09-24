@@ -6,6 +6,21 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-09-24
+
+### Added
+
+- Finalize the 2.0 storage, streaming-ingestion, HoloViews visualization, and
+  scientific-parity features described in the two release candidates below.
+
+### Changed
+
+- Promote `2.0.0rc2` to the stable 2.0 release without further runtime changes
+  after the complete CI, package, supported-platform, optional-feature, and
+  GAPIT 3.5 parity gates passed.
+- Require Python 3.12 or newer and support Windows x86-64, Linux x86-64 and
+  ARM64, and macOS on Apple Silicon.
+
 ## [2.0.0rc2] - 2026-09-24
 
 ### Changed
@@ -260,7 +275,8 @@ uses [Semantic Versioning](https://semver.org/) and the structure follows
   selection, MLMM extended BIC, and SUPER pseudo-QTN selection now follow their
   documented statistical objectives.
 
-[Unreleased]: https://github.com/ou6326/pygapit/compare/v2.0.0rc2...main
+[Unreleased]: https://github.com/ou6326/pygapit/compare/v2.0.0...main
+[2.0.0]: https://github.com/ou6326/pygapit/compare/v2.0.0rc2...v2.0.0
 [2.0.0rc2]: https://github.com/ou6326/pygapit/compare/v2.0.0rc1...v2.0.0rc2
 [2.0.0rc1]: https://github.com/ou6326/pygapit/compare/v1.2.4...v2.0.0rc1
 [1.2.4]: https://github.com/ou6326/pygapit/compare/v1.2.3...v1.2.4

@@ -125,7 +125,7 @@ Recorded by the 2.0.0 release-documentation audit.
 5. **Migration and changelog** — `MIGRATING.md` and `CHANGELOG.md` now describe
    the final 1.2.4 to 2.0 contract rather than the implementation chronology.
 
-`pyproject.toml` now carries the `2.0.0rc1` release candidate. A corresponding
-`v2.0.0rc1` tag will identify the published candidate, followed by `v2.0.0`
-for the final release. The citation metadata keeps referencing the last
-published stable release until `2.0.0` is tagged.
+`pyproject.toml` and the citation metadata now carry the stable `2.0.0`
+release. The public API described above is frozen for the 2.0 line; subsequent
+compatible additions belong in 2.x, while breaking changes require the next
+major release.
